@@ -11,6 +11,7 @@ const BEAM_THICKNESS = 0.5;   // 单根横梁厚度
 const BEAM_GAP = 0.8;         // 双横梁间距（两根梁的中心距）
 const STEM_MIN_BEAM = 3;      // 连梁时符干最短长度，避免梁贴着符头
 const BEAM_OVERHANG = 2.5;    // 横梁允许超出五线谱顶/底线的距离（staff space）
+const MAX_BEAM_SLOPE = 1.5;   // 倾斜梁首尾最大垂直差（≈ 一个三度），超过削平
 
 export interface RenderInput {
   piece: Piece;
@@ -306,11 +307,14 @@ function midiStep(midi: number, piece: Piece): number {
 }
 
 /** 计算并渲染连梁：返回「音符索引 → BeamCtx」映射，供 renderNote 对齐符干。
- *  几何规则：
+ *  几何规则（倾斜梁）：
  *    - 组内统一方向 = 组平均 step ≤ 6（中线 B4）→ up，否则 down
- *    - beamY = 组内各符头按标准长度 ss*7 算出的端点中「最远」的那个（up→最小 y，down→最大 y）
- *    - 约束 beamY 与最近符头距离 ≥ STEM_MIN_BEAM*ss，不足则外推
- *    - level=double 画两根平行梁，间距 BEAM_GAP*ss */
+ *    - 首尾两端各自的梁 y：由首/末符头按标准长度 ss*7 算端点，首端取「最远」端点，
+ *      斜率 dy = 末端端点 − 首端端点，封顶在 ±MAX_BEAM_SLOPE*ss（一个三度）
+ *    - 最短符干约束：首尾任一端符干 < STEM_MIN_BEAM*ss 时整体平移补偿
+ *    - 边界 clamp：首尾 y 各自 clamp 到谱表上下界内（可能改变 dy，边界优先）
+ *    - 中间符干顶端沿首尾连线线性插值
+ *    - level=double 画两根平行斜梁，第二根朝外平移 BEAM_GAP*ss，符干贯穿两根 */
 function renderBeams(groups: BeamGroup[], piece: Piece, layout: Layout): { svg: string; ctxByIdx: Map<number, BeamCtx> } {
   const ss = layout.staffSpace;
   const ctxByIdx = new Map<number, BeamCtx>();
@@ -338,66 +342,92 @@ function renderBeams(groups: BeamGroup[], piece: Piece, layout: Layout): { svg: 
     const avgStep = steps.reduce((a, b) => a + b, 0) / steps.length;
     const stemDir: 'up' | 'down' = avgStep <= 6 ? 'up' : 'down';
 
-    // 每个符头按标准长度 ss*7 算端点；up 端点 = headY-7ss，down 端点 = headY+7ss
+    // ── 倾斜梁几何：首尾两端各自的 y，中间符干对齐首尾连线 ──
     const stdLen = ss * 7;
-    const ends = headYs.map(hy => stemDir === 'up' ? hy - stdLen : hy + stdLen);
-    // beamY = 端点中「最远」的（up→最小，down→最大）
-    let beamY = stemDir === 'up' ? Math.min(...ends) : Math.max(...ends);
-    // 最短符干约束：beamY 离最近的符头不能 < STEM_MIN_BEAM*ss
-    if (stemDir === 'up') {
-      const nearestHead = Math.min(...headYs);
-      if (nearestHead - beamY < STEM_MIN_BEAM * ss) beamY = nearestHead - STEM_MIN_BEAM * ss;
-    } else {
-      const nearestHead = Math.max(...headYs);
-      if (beamY - nearestHead < STEM_MIN_BEAM * ss) beamY = nearestHead + STEM_MIN_BEAM * ss;
-    }
-    // 边界 clamp：横梁不能冲出 SVG 可见区。双横梁时副梁比主梁更靠外，
-    // 朝上副梁在主梁上方 gap 处、朝下副梁在主梁下方 gap 处，故 clamp 阈值要把 gap 算进去。
     const isDouble = g.level === 'double';
-    const overhang = (BEAM_OVERHANG - (isDouble ? BEAM_GAP : 0)) * ss;
-    const beamMaxY = layout.staffBottom + overhang;
-    const beamMinY = layout.staffTop - overhang;
-    if (stemDir === 'up' && beamY < beamMinY) {
-      beamY = beamMinY;
-    } else if (stemDir === 'down' && beamY > beamMaxY) {
-      beamY = beamMaxY;
+    // 标准端点：每个符头按 ss*7 算（up 端点在符头上方，down 在下方）
+    const endAt = (hy: number) => stemDir === 'up' ? hy - stdLen : hy + stdLen;
+    const end0 = endAt(headYs[0]);
+    const endN = endAt(headYs[headYs.length - 1]);
+    // 斜率：首尾端点差，封顶在 ±MAX_BEAM_SLOPE*ss（一个三度），超过削平
+    const maxSlope = MAX_BEAM_SLOPE * ss;
+    let dy = Math.max(-maxSlope, Math.min(maxSlope, endN - end0));
+    // 首端取「最远」端点（保留水平梁时的逻辑：保证最短符干的一端也够长）。
+    // 倾斜下改为：首端 beamY1 = 首尾标准端点中「最远」的那个，末端 = 首端 + dy。
+    let beamY1 = stemDir === 'up' ? Math.min(end0, endN) : Math.max(end0, endN);
+    let beamY2 = beamY1 + dy;
+
+    // 最短符干约束：首尾两端任一符干 < STEM_MIN_BEAM*ss → 整体平移补偿
+    const minLen = STEM_MIN_BEAM * ss;
+    if (stemDir === 'up') {
+      // 首尾符头到梁的距离 = headY - beamY，取两端最小者
+      const shortBy = Math.min(headYs[0] - beamY1, headYs[headYs.length - 1] - beamY2);
+      if (shortBy < minLen) {
+        const shift = minLen - shortBy; // 梁需往上移 shift
+        beamY1 -= shift; beamY2 -= shift;
+      }
+    } else {
+      const shortBy = Math.min(beamY1 - headYs[0], beamY2 - headYs[headYs.length - 1]);
+      if (shortBy < minLen) {
+        const shift = minLen - shortBy;
+        beamY1 += shift; beamY2 += shift;
+      }
     }
 
-    // 双横梁的第二根位置（朝远离符头方向）。单梁时与主梁重合。
-    const beamY2 = isDouble
-      ? (stemDir === 'up' ? beamY - BEAM_GAP * ss : beamY + BEAM_GAP * ss)
-      : beamY;
+    // 边界 clamp：首尾两端各自 clamp 到谱表上下界内（双梁阈值减 gap）。
+    // clamp 可能改变 dy，接受（边界优先于斜率）。
+    const overhang = (BEAM_OVERHANG - (isDouble ? BEAM_GAP : 0)) * ss;
+    const beamMinY = layout.staffTop - overhang;
+    const beamMaxY = layout.staffBottom + overhang;
+    if (stemDir === 'up') {
+      // 朝上时梁在符头上方，两端都不能高于 beamMinY
+      if (beamY1 < beamMinY) beamY1 = beamMinY;
+      if (beamY2 < beamMinY) beamY2 = beamMinY;
+    } else {
+      if (beamY1 > beamMaxY) beamY1 = beamMaxY;
+      if (beamY2 > beamMaxY) beamY2 = beamMaxY;
+    }
+    // 重新算实际 dy（clamp 后）
+    dy = beamY2 - beamY1;
 
-    // 记录每个音符的 BeamCtx。stemEndY 取「最外侧梁」位置，
-    // 双梁时符干贯穿两根梁，单梁时就是梁本身。
-    const stemEndY = stemDir === 'up' ? Math.min(beamY, beamY2) : Math.max(beamY, beamY2);
-    for (let k = 0; k < steps.length; k++) {
+    // 每个音符的符干端点：沿首尾连线线性插值。t = 该音符在组内的位置比例。
+    // 双梁时符干延伸到外侧梁（朝上取减 gap，朝下取加 gap），保证贯穿两根。
+    const n = steps.length;
+    for (let k = 0; k < n; k++) {
       const i = g.startIdx + k;
       const x = layout.noteX[i];
-      ctxByIdx.set(i, { stemDir, stemEndY });
-      // 修正 stemXs 为真实方向下的 x
+      const t = n === 1 ? 0 : k / (n - 1);
+      const mainBeamYatK = beamY1 + dy * t;       // 第一根梁在该音符处的 y
+      const outerBeamYatK = isDouble
+        ? (stemDir === 'up' ? mainBeamYatK - BEAM_GAP * ss : mainBeamYatK + BEAM_GAP * ss)
+        : mainBeamYatK;
+      ctxByIdx.set(i, { stemDir, stemEndY: outerBeamYatK });
       stemXs[k] = stemDir === 'up' ? x + headHalfW - stemW / 2 : x - headHalfW + stemW / 2;
     }
 
-    // 画横梁：首尾 stemX 之间
+    // 画横梁：首尾 stemX + 首尾 y。双梁画两根，第二根两端 y 朝外平移 BEAM_GAP*ss。
     const x1 = stemXs[0] + stemW / 2;
-    const x2 = stemXs[stemXs.length - 1] + stemW / 2;
+    const x2 = stemXs[n - 1] + stemW / 2;
     const thick = BEAM_THICKNESS * ss;
-    svg += drawBeam(x1, x2, beamY, thick, stemDir);
-    if (isDouble) svg += drawBeam(x1, x2, beamY2, thick, stemDir);
+    svg += drawBeam(x1, beamY1, x2, beamY2, thick);
+    if (isDouble) {
+      const off = BEAM_GAP * ss;
+      svg += drawBeam(x1, beamY1 - (stemDir === 'up' ? off : -off),
+                      x2, beamY2 - (stemDir === 'up' ? off : -off), thick);
+    }
   }
 
   return { svg, ctxByIdx };
 }
 
-/** 画一根横梁：用平行四边形让两端切口平直。beamY 为梁中心线。 */
-function drawBeam(x1: number, x2: number, beamY: number, thick: number, stemDir: 'up' | 'down'): string {
+/** 画一根横梁：倾斜平行四边形。(x1,y1) 是首端梁中心、(x2,y2) 是末端梁中心，
+ *  thick 是梁厚度。两端以各自 y 为中心上下各 thick/2，形成平行四边形（两端切口竖直）。 */
+function drawBeam(x1: number, y1: number, x2: number, y2: number, thick: number): string {
   const half = thick / 2;
-  // 简化：首版两端 y 相同（组内符干端点已统一到 beamY），画矩形即可；
-  // 用 polygon 保留平行四边形能力，便于将来支持倾斜梁。
-  const pts: [number, number][] = stemDir === 'up'
-    ? [[x1, beamY - half], [x2, beamY - half], [x2, beamY + half], [x1, beamY + half]]
-    : [[x1, beamY - half], [x2, beamY - half], [x2, beamY + half], [x1, beamY + half]];
+  const pts: [number, number][] = [
+    [x1, y1 - half], [x2, y2 - half], // 上边：首→末
+    [x2, y2 + half], [x1, y1 + half], // 下边：末→首
+  ];
   return polygon(pts, { fill: '#1f2430' });
 }
 

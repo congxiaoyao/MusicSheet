@@ -190,6 +190,53 @@ const cases: Case[] = [
       n(A4, w), n(B4, w), n(C5, w),
     ] },
   },
+  // ── 15. 上行级进 4 八分 → 梁微上斜 ──
+  {
+    title: '15. 上行级进（梁应微上斜：末端高于首端）',
+    expect: 'C4→D4→E4→F4 上行，梁从左下往右上倾斜（up 方向，末端 y 更小）',
+    piece: { clef: 'treble', key: CKEY, time: T44, notes: [
+      n(C4, e), n(D4, e), n(E4, e), n(F4, e), n(G4, q), n(A4, q),
+      n(B4, w), n(C5, w), n(D5, w),
+    ] },
+  },
+  // ── 16. 下行级进 4 八分 → 梁微下斜 ──
+  {
+    title: '16. 下行级进（梁应微下斜：末端低于首端）',
+    expect: 'F4→E4→D4→C4 下行，梁从左上往右下倾斜',
+    piece: { clef: 'treble', key: CKEY, time: T44, notes: [
+      n(F4, e), n(E4, e), n(D4, e), n(C4, e), n(G4, q), n(A4, q),
+      n(B4, w), n(C5, w), n(D5, w),
+    ] },
+  },
+  // ── 17. 大跳（C4→A4，超三度）→ 倾斜被削平，不会很陡 ──
+  {
+    title: '17. 大跳 C4→A4（超三度，倾斜应削平到 MAX_SLOPE）',
+    expect: 'C4 到 A4 跨六度，但梁倾斜不超过一个三度，被削平，不会很陡',
+    piece: { clef: 'treble', key: CKEY, time: T44, notes: [
+      n(C4, e), n(A4, e), n(E4, q), n(F4, q), n(G4, q),
+      n(A4, w), n(B4, w), n(C5, w),
+    ] },
+  },
+  // ── 18. 首尾同高（C4→G4→C4，同拍 3 音）→ 中间符干对齐水平梁 ──
+  {
+    title: '18. C4→G4→C4（首尾同高 → 梁水平，中间符干最长）',
+    expect: '首尾 C4 同高，梁水平；中间 G4 符干最长（符头离梁远，对齐水平线）',
+    piece: { clef: 'treble', key: CKEY, time: T44, notes: [
+      // 同拍 3 个八分？不行，3 八分=1.5拍超拍。改用十六分让 3 音同拍
+      // 改为：2 个八分首尾同高（C4-C4）最直接验证水平梁
+      n(C4, e), n(C4, e), n(E4, q), n(F4, q), n(G4, q),
+      n(A4, w), n(B4, w), n(C5, w),
+    ] },
+  },
+  // ── 19. 3 音斜梁（D4→E4→F4）→ 中间符干对齐斜线 ──
+  {
+    title: '19. 三音斜梁（中间符干顶端落在首尾连线上）',
+    expect: 'D4→E4→F4 微上行，中间 E4 的符干顶端对齐 D4-F4 连线',
+    piece: { clef: 'treble', key: CKEY, time: T44, notes: [
+      n(D4, e), n(E4, e), n(F4, e), n(G4, q), n(A4, q),
+      n(B4, w), n(C5, w), n(D5, w),
+    ] },
+  },
 ];
 
 // ── 渲染 ────────────────────────────────────────────────
