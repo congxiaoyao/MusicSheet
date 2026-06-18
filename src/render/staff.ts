@@ -159,11 +159,12 @@ function renderBarLines(layout: Layout): string {
   return s;
 }
 
-/** 连梁上下文：组内每个音符渲染时传入，决定符干方向、对齐端点、是否画 flag。 */
+/** 连梁上下文：组内每个音符渲染时传入，决定符干方向、对齐端点、是否画 flag。
+ *  stemEndY 是符干应延伸到的最远端点 y —— 双梁时是外侧那根梁的位置，
+ *  保证符干贯穿两根梁；单梁时就是梁本身的位置。 */
 interface BeamCtx {
   stemDir: 'up' | 'down';
-  /** 连梁线所在的 y 坐标（符干应延伸到此处） */
-  beamY: number;
+  stemEndY: number;
 }
 
 /** 计算单个音符的符干几何。无 beam 时按自身音高定方向与长度；有 beam 时对齐到组统一端点。 */
@@ -177,9 +178,9 @@ function computeStem(step: number, x: number, headHalfW: number, layout: Layout,
     const stemUp = beam.stemDir === 'up';
     const stemX = stemUp ? x + headHalfW - stemW / 2 : x - headHalfW + stemW / 2;
     if (stemUp) {
-      return { stemUp, stemW, stemX, stemTop: beam.beamY, stemBot: headY };
+      return { stemUp, stemW, stemX, stemTop: beam.stemEndY, stemBot: headY };
     } else {
-      return { stemUp, stemW, stemX, stemTop: headY, stemBot: beam.beamY };
+      return { stemUp, stemW, stemX, stemTop: headY, stemBot: beam.stemEndY };
     }
   }
   // 无连梁：原有逻辑
@@ -362,11 +363,18 @@ function renderBeams(groups: BeamGroup[], piece: Piece, layout: Layout): { svg: 
       beamY = beamMaxY;
     }
 
-    // 记录每个音符的 BeamCtx（用各自真实 stemX，方向由组定）
+    // 双横梁的第二根位置（朝远离符头方向）。单梁时与主梁重合。
+    const beamY2 = isDouble
+      ? (stemDir === 'up' ? beamY - BEAM_GAP * ss : beamY + BEAM_GAP * ss)
+      : beamY;
+
+    // 记录每个音符的 BeamCtx。stemEndY 取「最外侧梁」位置，
+    // 双梁时符干贯穿两根梁，单梁时就是梁本身。
+    const stemEndY = stemDir === 'up' ? Math.min(beamY, beamY2) : Math.max(beamY, beamY2);
     for (let k = 0; k < steps.length; k++) {
       const i = g.startIdx + k;
       const x = layout.noteX[i];
-      ctxByIdx.set(i, { stemDir, beamY });
+      ctxByIdx.set(i, { stemDir, stemEndY });
       // 修正 stemXs 为真实方向下的 x
       stemXs[k] = stemDir === 'up' ? x + headHalfW - stemW / 2 : x - headHalfW + stemW / 2;
     }
@@ -376,12 +384,7 @@ function renderBeams(groups: BeamGroup[], piece: Piece, layout: Layout): { svg: 
     const x2 = stemXs[stemXs.length - 1] + stemW / 2;
     const thick = BEAM_THICKNESS * ss;
     svg += drawBeam(x1, x2, beamY, thick, stemDir);
-
-    // 双横梁：再画一根，偏移 BEAM_GAP*ss（朝远离符头方向）
-    if (g.level === 'double') {
-      const beamY2 = stemDir === 'up' ? beamY - BEAM_GAP * ss : beamY + BEAM_GAP * ss;
-      svg += drawBeam(x1, x2, beamY2, thick, stemDir);
-    }
+    if (isDouble) svg += drawBeam(x1, x2, beamY2, thick, stemDir);
   }
 
   return { svg, ctxByIdx };
