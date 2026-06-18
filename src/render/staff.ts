@@ -7,9 +7,10 @@ import { G, advanceSS } from './glyphs';
 import { computeBeams, BeamGroup } from './beam';
 
 // 连梁几何常量（单位 staff space）
-const BEAM_THICKNESS = 0.5;  // 单根横梁厚度
-const BEAM_GAP = 0.8;        // 双横梁间距（两根梁的中心距）
-const STEM_MIN_BEAM = 3;     // 连梁时符干最短长度，避免梁贴着符头
+const BEAM_THICKNESS = 0.5;   // 单根横梁厚度
+const BEAM_GAP = 0.8;         // 双横梁间距（两根梁的中心距）
+const STEM_MIN_BEAM = 3;      // 连梁时符干最短长度，避免梁贴着符头
+const BEAM_OVERHANG = 2.5;    // 横梁允许超出五线谱顶/底线的距离（staff space）
 
 export interface RenderInput {
   piece: Piece;
@@ -348,6 +349,17 @@ function renderBeams(groups: BeamGroup[], piece: Piece, layout: Layout): { svg: 
     } else {
       const nearestHead = Math.max(...headYs);
       if (beamY - nearestHead < STEM_MIN_BEAM * ss) beamY = nearestHead + STEM_MIN_BEAM * ss;
+    }
+    // 边界 clamp：横梁不能冲出 SVG 可见区。双横梁时副梁比主梁更靠外，
+    // 朝上副梁在主梁上方 gap 处、朝下副梁在主梁下方 gap 处，故 clamp 阈值要把 gap 算进去。
+    const isDouble = g.level === 'double';
+    const overhang = (BEAM_OVERHANG - (isDouble ? BEAM_GAP : 0)) * ss;
+    const beamMaxY = layout.staffBottom + overhang;
+    const beamMinY = layout.staffTop - overhang;
+    if (stemDir === 'up' && beamY < beamMinY) {
+      beamY = beamMinY;
+    } else if (stemDir === 'down' && beamY > beamMaxY) {
+      beamY = beamMaxY;
     }
 
     // 记录每个音符的 BeamCtx（用各自真实 stemX，方向由组定）
