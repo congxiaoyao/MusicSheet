@@ -1,0 +1,85 @@
+// 导出：合成合并版 SVG → 内嵌 base64 字体 → PNG 下载
+
+import { Piece } from '../core/types';
+import { Layout } from './layout';
+import { renderStaffSVG, RenderInput } from './staff';
+import { renderJianpuSVG } from './jianpu';
+import { ensureFontLoaded } from './glyphs';
+
+/** 构造完整 SVG 字符串（含 <svg> 包裹），可同时用于屏幕与导出 */
+export function buildSVG(piece: Piece, layout: Layout, playingIndex: number, opts: { exportMode?: boolean; hover?: { midi: number; x: number } | null } = {}): string {
+  const input: RenderInput = { piece, layout, playingIndex, hover: opts.exportMode ? null : (opts.hover ?? null) };
+  const staff = renderStaffSVG(input);
+  const jianpu = renderJianpuSVG(input);
+  const bg = opts.exportMode ? `<rect x="0" y="0" width="${layout.width}" height="${layout.height}" fill="#ffffff"/>` : '';
+  const title = opts.exportMode
+    ? `<text x="${layout.contentLeft}" y="18" font-family='system-ui,sans-serif' font-size="13" fill="#64748b">五线谱 — 简谱对照</text>`
+    : '';
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${layout.width}" height="${layout.height}" viewBox="0 0 ${layout.width} ${layout.height}">${bg}${title}${staff}${jianpu}</svg>`;
+}
+
+let cachedFontDataUrl: string | null = null;
+
+async function loadFontAsDataUrl(): Promise<string> {
+  if (cachedFontDataUrl) return cachedFontDataUrl;
+  await ensureFontLoaded();
+  const res = await fetch('./bravura.woff2');
+  const buf = await res.arrayBuffer();
+  const b64 = arrayBufferToBase64(buf);
+  cachedFontDataUrl = `data:font/woff2;base64,${b64}`;
+  return cachedFontDataUrl;
+}
+
+function arrayBufferToBase64(buf: ArrayBuffer): string {
+  let binary = '';
+  const bytes = new Uint8Array(buf);
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunk)) as unknown as number[]);
+  }
+  return btoa(binary);
+}
+
+/** 导出 PNG：内嵌字体 → 加载 SVG 为 image → 画到 canvas → 下载 */
+export async function exportPNG(piece: Piece, layout: Layout): Promise<void> {
+  const fontDataUrl = await loadFontAsDataUrl();
+  // 内嵌字体的 SVG
+  const styleTag = `<style>@font-face{font-family:"Bravura";src:url("${fontDataUrl}") format("woff2");}</style>`;
+  let svg = buildSVG(piece, layout, -1, { exportMode: true });
+  svg = svg.replace('<svg ', `<svg xmlns:xlink="http://www.w3.org/1999/xlink" `).replace('>', `><defs>${styleTag}</defs>`, );
+
+  const scale = 2; // 2x 清晰度
+  const blob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+
+  const img = new Image();
+  img.width = layout.width;
+  img.height = layout.height;
+  await new Promise<void>((resolve, reject) => {
+    img.onload = () => resolve();
+    img.onerror = () => reject(new Error('图像加载失败'));
+    img.src = url;
+  });
+
+  const canvas = document.createElement('canvas');
+  canvas.width = layout.width * scale;
+  canvas.height = layout.height * scale;
+  const ctx = canvas.getContext('2d')!;
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+  URL.revokeObjectURL(url);
+
+  await new Promise<void>((resolve) => {
+    canvas.toBlob((b) => {
+      if (b) {
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(b);
+        a.download = 'musicsheet.png';
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+      }
+      resolve();
+    }, 'image/png');
+  });
+}
