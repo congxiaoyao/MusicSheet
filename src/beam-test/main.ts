@@ -5,6 +5,10 @@
 // 用例覆盖：成组、跨拍、复合拍、十六分双梁、混合时值断开、跨小节、
 //           休止符断开、孤立音符、组内方向统一（跨中线、全高、全低）等。
 
+// 关键：必须引入 style.css，它声明了 @font-face Bravura。
+// 否则 ensureFontLoaded 找不到字体族，符头/谱号等字形无法渲染
+// （符干/横梁是 SVG 几何图形不依赖字体，会正常显示，造成「只有线条没有符头」的假象）。
+import '../style.css';
 import { Note, Piece, DurationValue } from '../core/types';
 import { KEYS } from '../core/theory';
 import { computeLayout } from '../render/layout';
