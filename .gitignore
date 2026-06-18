@@ -27,3 +27,6 @@ pnpm-debug.log*
 # 临时文件
 /tmp/
 *.tmp
+beam-shots-final/
+pup-*.png
+beam-test-shots/
