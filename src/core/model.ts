@@ -10,6 +10,7 @@ export function createPiece(): Piece {
     clef: 'treble',
     key: { name: 'C', tonic: 0, sharps: [], flats: [] },
     time: { num: 4, den: 4 },
+    measureCount: 2,
     notes: [],
   };
 }
@@ -21,9 +22,9 @@ export function totalBeats(piece: Piece): number {
   return sum;
 }
 
-/** 最大可容纳拍数 = 4 个小节 */
+/** 最大可容纳拍数 = measureCount 个小节 */
 export function capacityBeats(piece: Piece): number {
-  return beatsPerBar(piece.time) * 4;
+  return beatsPerBar(piece.time) * piece.measureCount;
 }
 
 /** 还能再插入多少拍 */
@@ -74,8 +75,11 @@ export function noteStartBeats(piece: Piece): number[] {
   return starts;
 }
 
-/** 计算小节分割线的拍数位置：0, bpb, 2*bpb, 3*bpb, 4*bpb */
+/** 计算小节分割线的拍数位置：0, bpb, 2*bpb, ..., measureCount*bpb */
 export function barLineBeats(piece: Piece): number[] {
   const bpb = beatsPerBar(piece.time);
-  return [0, bpb, bpb * 2, bpb * 3, bpb * 4];
+  const bars = piece.measureCount;
+  const out: number[] = [];
+  for (let i = 0; i <= bars; i++) out.push(bpb * i);
+  return out;
 }

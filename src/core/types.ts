@@ -46,6 +46,8 @@ export interface Piece {
   clef: Clef;
   key: KeySig;
   time: TimeSig;
+  /** 总小节数（单行）。写满后不可再输入。 */
+  measureCount: number;
   /** 扁平的音符数组，按时间顺序（追加式录入） */
   notes: Note[];
 }

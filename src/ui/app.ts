@@ -171,7 +171,7 @@ export class App {
   /** appendNote 拒绝时给出精确提示：区分「整个谱写满」和「本小节放不下」 */
   private flashOverfillRejected(): void {
     if (remainingBeats(this.piece) < 1e-6) {
-      this.flash('已写满 4 个小节');
+      this.flash(`已写满 ${this.piece.measureCount} 个小节`);
     } else {
       const rem = remainingBeatsInCurrentBar(this.piece);
       this.flash(rem < 1e-6 ? '本小节已满，请先删一个音符或换小节' : `本小节剩 ${rem.toFixed(2)} 拍，放不下此音符`);
@@ -188,12 +188,14 @@ export class App {
   private onToolChange(): void {
     const oldClef = this.piece.clef;
     const oldTime = `${this.piece.time.num}/${this.piece.time.den}`;
+    const oldMeasureCount = this.piece.measureCount;
     this.piece.clef = this.tool.clef;
     this.piece.key = KEYS[this.tool.key];
     this.piece.time = { ...this.tool.time };
-    // 切换谱号 / 拍号：清空已输入的音符（避免错位与节奏错乱）
+    this.piece.measureCount = this.tool.measureCount;
+    // 切换谱号 / 拍号 / 小节数：清空已输入的音符（避免错位与节奏错乱）
     const newTime = `${this.piece.time.num}/${this.piece.time.den}`;
-    if (oldClef !== this.piece.clef || oldTime !== newTime) {
+    if (oldClef !== this.piece.clef || oldTime !== newTime || oldMeasureCount !== this.piece.measureCount) {
       this.piece.notes = [];
       this.playingIndex = -1;
     }
@@ -240,16 +242,18 @@ export class App {
     this.piece.clef = this.tool.clef;
     this.piece.key = KEYS[this.tool.key];
     this.piece.time = { ...this.tool.time };
+    this.piece.measureCount = this.tool.measureCount;
     this.playingIndex = -1;
     this.render();
   }
 
   private loadExample(): void {
-    this.piece = twinkleExample();
+    this.piece = twinkleExample(this.tool.measureCount);
     // 保留用户当前选择的调号与拍号（示例用绝对 MIDI 音高，调号只影响显示与简谱）
     this.piece.clef = this.tool.clef;
     this.piece.key = KEYS[this.tool.key];
     this.piece.time = { ...this.tool.time };
+    this.piece.measureCount = this.tool.measureCount;
     this.rebuildToolbar();
     this.render();
   }

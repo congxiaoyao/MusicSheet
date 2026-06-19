@@ -12,6 +12,8 @@ export interface ToolState {
   clef: Clef;
   key: KeyName;
   time: TimeSig;
+  /** 总小节数（单行） */
+  measureCount: number;
 }
 
 export function defaultTool(): ToolState {
@@ -23,6 +25,7 @@ export function defaultTool(): ToolState {
     clef: 'treble',
     key: 'C',
     time: { num: 4, den: 4 },
+    measureCount: 2,
   };
 }
 
@@ -183,6 +186,25 @@ export function buildToolbar(state: ToolState, cb: ToolbarCallbacks): HTMLElemen
     timeWrap.appendChild(b);
   }
   setWrap.appendChild(timeWrap);
+
+  // 小节数（总小节数，单行）：离散选项 2/3/4/5/6
+  const barWrap = document.createElement('div');
+  barWrap.className = 'seg';
+  const BAR_OPTIONS = [2, 3, 4, 5, 6];
+  const barBtns: HTMLButtonElement[] = [];
+  for (const n of BAR_OPTIONS) {
+    const b = segBtn(String(n), `${n} 个小节`);
+    if (state.measureCount === n) b.classList.add('active');
+    b.onclick = () => {
+      state.measureCount = n;
+      barBtns.forEach(x => x.classList.remove('active'));
+      b.classList.add('active');
+      cb.onChange();
+    };
+    barBtns.push(b);
+    barWrap.appendChild(b);
+  }
+  setWrap.appendChild(barWrap);
   root.appendChild(setWrap);
 
   // 返回需要重置修饰的钩子（休止符现在是动作按钮，无需重置）。
