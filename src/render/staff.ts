@@ -12,6 +12,9 @@ const BEAM_GAP = 0.8;         // 双横梁间距（两根梁的中心距）
 const STEM_MIN_BEAM = 3;      // 连梁时符干最短长度，避免梁贴着符头
 const BEAM_OVERHANG = 2.5;    // 横梁允许超出五线谱顶/底线的距离（staff space）
 const MAX_BEAM_SLOPE = 1.5;   // 倾斜梁首尾最大垂直差（≈ 一个三度），超过削平
+// 符干水平内偏移：符干贴符头侧边时会顶出符头一点，往左（朝符头中心）挪此值，
+// 让符头遮住符干内侧，视觉更干净（朝上/朝下都往左挪）。
+const STEM_INSET = 0.1;      // 单位 staff space
 
 export interface RenderInput {
   piece: Piece;
@@ -174,10 +177,11 @@ function computeStem(step: number, x: number, headHalfW: number, layout: Layout,
 } {
   const ss = layout.staffSpace;
   const stemW = Math.max(1.5, ss * 0.17);
+  const inset = STEM_INSET * ss;
   const headY = stepToY(step, layout);
   if (beam) {
     const stemUp = beam.stemDir === 'up';
-    const stemX = stemUp ? x + headHalfW - stemW / 2 : x - headHalfW + stemW / 2;
+    const stemX = (stemUp ? x + headHalfW - stemW / 2 : x - headHalfW + stemW / 2) - inset;
     if (stemUp) {
       return { stemUp, stemW, stemX, stemTop: beam.stemEndY, stemBot: headY };
     } else {
@@ -186,7 +190,7 @@ function computeStem(step: number, x: number, headHalfW: number, layout: Layout,
   }
   // 无连梁：原有逻辑
   const stemUp = step <= 6;
-  const stemX = stemUp ? x + headHalfW - stemW / 2 : x - headHalfW + stemW / 2;
+  const stemX = (stemUp ? x + headHalfW - stemW / 2 : x - headHalfW + stemW / 2) - inset;
   const stemLen = ss * 7;
   return {
     stemUp, stemW, stemX,
@@ -402,7 +406,7 @@ function renderBeams(groups: BeamGroup[], piece: Piece, layout: Layout): { svg: 
         ? (stemDir === 'up' ? mainBeamYatK - BEAM_GAP * ss : mainBeamYatK + BEAM_GAP * ss)
         : mainBeamYatK;
       ctxByIdx.set(i, { stemDir, stemEndY: outerBeamYatK });
-      stemXs[k] = stemDir === 'up' ? x + headHalfW - stemW / 2 : x - headHalfW + stemW / 2;
+      stemXs[k] = (stemDir === 'up' ? x + headHalfW - stemW / 2 : x - headHalfW + stemW / 2) - STEM_INSET * ss;
     }
 
     // 画横梁：x 范围覆盖首尾符干的全宽（左边缘→右边缘），保证梁盖住符干顶端，
