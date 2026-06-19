@@ -7,14 +7,22 @@ import { G, advanceSS } from './glyphs';
 import { computeBeams, BeamGroup } from './beam';
 
 // 连梁几何常量（单位 staff space）
-const BEAM_THICKNESS = 0.5;   // 单根横梁厚度
-const BEAM_GAP = 0.8;         // 双横梁间距（两根梁的中心距）
+const BEAM_THICKNESS = 0.5;   // 单根横梁厚度（SMuFL beamThickness）
+const BEAM_GAP = 0.75;        // 双横梁中心距 = beamThickness(0.5) + beamSpacing(0.25)（SMuFL）
 const STEM_MIN_BEAM = 3;      // 连梁时符干最短长度，避免梁贴着符头
 const BEAM_OVERHANG = 2.5;    // 横梁允许超出五线谱顶/底线的距离（staff space）
 const MAX_BEAM_SLOPE = 1.5;   // 倾斜梁首尾最大垂直差（≈ 一个三度），超过削平
 // 符干水平内偏移：符干贴符头侧边时会顶出符头一点，往左（朝符头中心）挪此值，
 // 让符头遮住符干内侧，视觉更干净（朝上/朝下都往左挪）。
 const STEM_INSET = 0.1;      // 单位 staff space
+
+// 线宽常量（staff space 单位，遵循 SMuFL engravingDefaults 推荐值）。
+// staff line 0.13；barline 细 0.16 / 粗(终止) 0.5；ledger line 0.16；stem 0.12。
+const W_STAFF = 0.13;
+const W_BARLINE = 0.16;
+const W_BARLINE_FINAL = 0.5;
+const W_LEDGER = 0.16;
+const W_STEM = 0.12;
 
 export interface RenderInput {
   piece: Piece;
@@ -58,9 +66,10 @@ function polygon(points: [number, number][], opts: { fill?: string; class?: stri
   return `<polygon points="${pts}" fill="${fill}"${cls}/>`;
 }
 
-/** step（0=最下线，每步 1 个自然音级）→ y 坐标 */
+/** step（0=最下线，每步 1 个自然音级 = 半个线距）→ y 坐标。
+ *  staffSpace 现在是真实线距(=2 个 step 高度)，故 1 step = staffSpace/2。 */
 function stepToY(step: number, layout: Layout): number {
-  return layout.bottomLineY - step * layout.staffSpace;
+  return layout.bottomLineY - step * layout.staffSpace / 2;
 }
 
 // ── 组件渲染 ────────────────────────────────────────────────
@@ -68,32 +77,32 @@ function stepToY(step: number, layout: Layout): number {
 function renderStaffLines(layout: Layout): string {
   let s = '';
   for (let i = 0; i < 5; i++) {
-    const y = layout.staffTop + i * layout.staffSpace * 2;
-    s += line(layout.barLines[0], y, layout.barLines[layout.barLines.length - 1], y, '#1f2430', 1.1);
+    const y = layout.staffTop + i * layout.staffSpace;   // staffSpace = 线距
+    // 五条线贯穿整张画布：左端到画布最左(staffLeftX)，右端到末根小节线。
+    // 谱号/调号/拍号会叠加画在这段线上（渲染顺序在后，盖住线），符合标准记谱。
+    s += line(layout.staffLeftX, y, layout.barLines[layout.barLines.length - 1], y, '#1f2430', W_STAFF * layout.staffSpace);
   }
   return s;
 }
 
-/** 谱号。Bravura gClef 的「基准线锚点」对应 G4（高音谱号从下数第 2 条线）。
- *  我们把字符基线放到那条线上方一点，让谱号视觉上坐落在谱表上。 */
+/** 谱号。实测 Bravura 字形（font-size=46, ss=11.5，alphabetic baseline）：
+ *  - gClef：baseline=G4(第2线) 时，G 圈压在第2线、字形向上延伸到接近顶线。ascent=4.43ss/descent=2.70ss。
+ *  - fClef：两点在 baseline 上方约 1.13ss 处(ascent)，故 baseline 需在 F3(低音第2线)下方 1.13ss，两点才压在 F3。
+ *           字形 descent=2.61ss，整体偏低，向 F3 下方偏移。 */
 function renderClef(piece: Piece, layout: Layout): string {
   const fs = layout.fontSize;
   const { clefX } = layout;
+  const ss = layout.staffSpace;
   if (piece.clef === 'treble') {
-    // 高音谱号：Bravura gClef 字形的基线放在「最上面那条线」附近时，
-    // 它的卷曲中心会落在 G4（第 2 条线）上。经测试基线 ≈ topLine + 0.5ss。
-    const y = layout.staffTop + layout.staffSpace * 0.5;
-    return text(G.gClef, clefX, y, fs);
-  } else {
-    // 低音谱号 fClef：基线放在 F3（第 2 条线）附近
-    const y = stepToY(2, layout) - layout.staffSpace * 0.5;
-    return text(G.fClef, clefX, y, fs);
+    return text(G.gClef, clefX, stepToY(2, layout), fs);          // baseline=G4
   }
+  return text(G.fClef, clefX, stepToY(6, layout) + ss * 1.13, fs); // 两点压在 F3
 }
 
-/** 调号：升/降号依次排在谱号右侧。垂直位置遵循标准记谱约定（每个字母所在的线/间）。
- *  字母→相对于「最下线」的 step 映射，分高音/低音谱号。
- *  letters 存的是 0..6（C=0..B=6）的字母索引，已按升号或降号顺序。 */
+/** 调号：升/降号依次排在谱号右侧，压在标准记谱约定的线/间上。
+ *  letter 是 0..6（C=0..B=6）的字母索引；step 是相对「最下线」的位置（0=底线，每升一线/间 +1）。
+ *  升号整体偏上（高音位置集 {3..9}），降号整体偏下（高音位置集 {1..8}）。
+ *  高音谱号底线 E4=step0；低音谱号底线 G2=step0。 */
 function renderKeySignature(piece: Piece, layout: Layout): string {
   if (!layout.hasKey) return '';
   const fs = layout.fontSize * 0.7;
@@ -101,63 +110,61 @@ function renderKeySignature(piece: Piece, layout: Layout): string {
   const letters = piece.key.sharps.length ? piece.key.sharps : piece.key.flats;
   const isSharp = piece.key.sharps.length > 0;
 
-  // 标准调号位置（step，0=最下线）。
-  // 升号顺序 F# C# G# D# A# E# B# ；降号顺序 Bb Eb Ab Db Gb Cb Fb
-  // 字母索引：C=0 D=1 E=2 F=3 G=4 A=5 B=6
-  const sharpOrder = [3, 0, 4, 1, 5, 2, 6]; // F C G D A E B
-  const flatOrder = [6, 2, 5, 1, 4, 0, 3];  // B E A D G C F
-
-  // 高音谱号下各字母的「标准调号 step」（最下线 E4=0）
-  // F5=8(顶线), C5=5, G5=9(上加间), D5=6, A4=3, E5=7(顶间), B4=4
-  // 低音谱号下（最下线 G2=0）
-  const stepMapTreble: Record<number, number> = { 0: 5, 1: 6, 2: 7, 3: 8, 4: 9, 5: 3, 6: 4 };
-  // 实际上要按 sharpOrder/flatOrder 的标准位置：
-  const trebleSharpStep: Record<number, number> = { 3: 8, 0: 5, 4: 9, 1: 6, 5: 3, 2: 7, 6: 4 }; // F C G D A E B
-  const trebleFlatStep: Record<number, number> = { 6: 4, 2: 7, 5: 3, 1: 6, 4: 1, 0: 5, 3: 8 };   // B E A D G C F
-  const bassSharpStep: Record<number, number> = { 3: 2, 0: 6, 4: 3, 1: 0, 5: 4, 2: 1, 6: 5 };     // 低音谱号下移
-  const bassFlatStep: Record<number, number> = { 6: 5, 2: 1, 5: 4, 1: 0, 4: 3, 0: 2, 3: 6 };
-
-  void sharpOrder; void flatOrder; void stepMapTreble;
+  // 标准 step 位置：键=字母索引(C=0 D=1 E=2 F=3 G=4 A=5 B=6)。
+  // 高音：升号 F#C#G#D#A#E#B# = 8,5,9,6,3,7,4 ；降号 BbEbAbDbGbCbFb = 4,7,3,6,8,5,1
+  // 低音：升号 = 6,3,7,4,8,5,2 ；降号 = 2,5,1,4,0,3,6
+  const trebleSharp: Record<number, number> = { 3: 8, 0: 5, 4: 9, 1: 6, 5: 3, 2: 7, 6: 4 };
+  const trebleFlat: Record<number, number>  = { 6: 4, 2: 7, 5: 3, 1: 6, 4: 8, 0: 5, 3: 1 };
+  const bassSharp: Record<number, number>   = { 3: 6, 0: 3, 4: 7, 1: 4, 5: 8, 2: 5, 6: 2 };
+  const bassFlat: Record<number, number>    = { 6: 2, 2: 5, 5: 1, 1: 4, 4: 0, 0: 3, 3: 6 };
   const map = piece.clef === 'treble'
-    ? (isSharp ? trebleSharpStep : trebleFlatStep)
-    : (isSharp ? bassSharpStep : bassFlatStep);
+    ? (isSharp ? trebleSharp : trebleFlat)
+    : (isSharp ? bassSharp : bassFlat);
 
   let s = '';
   let x = layout.keyStartX;
   for (const letter of letters) {
     const step = map[letter] ?? 4;
-    const y = stepToY(step, layout) + ss * 0.4;
+    // 实测：sharp baseline 在中心(ascent=descent)，直接压在目标 y；
+    //        flat baseline 偏上(中心约 baseline-0.5ss)，下移 0.5ss 让中心对齐目标。
+    const y = stepToY(step, layout) + (isSharp ? 0 : ss * 0.5);
     const glyph = isSharp ? G.accidentalSharp : G.accidentalFlat;
     s += text(glyph, x, y, fs);
-    x += ss * 1.6;
+    x += ss * 0.95;   // 与 layout.KEY_PER_GLYPH 一致：渲染步进 = 布局预留宽度，防溢出重叠
   }
   return s;
 }
 
-/** 拍号 */
+/** 拍号。实测 timeSig 数字字形 ascent≈descent≈1ss，即 baseline 在数字垂直中心。
+ *  标准 4/4：两数字关于中线 B4 对称，各偏离 1ss（上数字中心在第4间、下数字中心在第2间）。 */
 function renderTimeSignature(piece: Piece, layout: Layout): string {
   const fs = layout.fontSize;
   const { timeSigX } = layout;
-  const topY = stepToY(2, layout) + layout.staffSpace * 0.5;
-  const botY = stepToY(4, layout) - layout.staffSpace * 0.5;
-  return text(G.timeSig(piece.time.num), timeSigX, topY, fs) + text(G.timeSig(piece.time.den), timeSigX, botY, fs);
+  const ss = layout.staffSpace;
+  const midY = stepToY(4, layout); // 中线 B4
+  // y 向下增大：上数字中心在中线上方(midY-ss)，下数字在中线下方(midY+ss)。baseline=中心。
+  return text(G.timeSig(piece.time.num), timeSigX, midY - ss, fs)
+       + text(G.timeSig(piece.time.den), timeSigX, midY + ss, fs);
 }
 
-/** 小节线 */
+/** 小节线 + 起始线。
+ *  barLines[0] = contentLeft（第1小节起点，不画——标准乐谱拍号后无分隔线）；
+ *  barLines[1..N-1] = 小节分隔线；barLines[N] = 末尾终止线。
+ *  起始单线单独画在 staffLeftX（画布最左，谱号左侧），与终止线呼应。 */
 function renderBarLines(layout: Layout): string {
   let s = '';
-  for (let i = 0; i < layout.barLines.length; i++) {
+  const ss = layout.staffSpace;
+  const thin = W_BARLINE * ss;
+  const thick = W_BARLINE_FINAL * ss;
+  // 起始单线（画布最左）
+  s += line(layout.staffLeftX, layout.staffTop, layout.staffLeftX, layout.staffBottom, '#1f2430', thin);
+  for (let i = 1; i < layout.barLines.length; i++) {
     const x = layout.barLines[i];
     const isLast = i === layout.barLines.length - 1;
-    const isFirst = i === 0;
-    const w = isLast ? 2.6 : 1.1;
-    s += line(x, layout.staffTop, x, layout.staffBottom, '#1f2430', w);
+    s += line(x, layout.staffTop, x, layout.staffBottom, '#1f2430', isLast ? thick : thin);
     if (isLast) {
-      // 终止线：细线 + 粗线
-      s += line(x - 4, layout.staffTop, x - 4, layout.staffBottom, '#1f2430', 1.1);
-    }
-    if (isFirst) {
-      // 起始单线
+      // 终止线：粗线左侧约 0.4ss 处的细线
+      s += line(x - 0.75 * ss, layout.staffTop, x - 0.75 * ss, layout.staffBottom, '#1f2430', thin);
     }
   }
   return s;
@@ -176,7 +183,7 @@ function computeStem(step: number, x: number, headHalfW: number, layout: Layout,
   stemUp: boolean; stemW: number; stemX: number; stemTop: number; stemBot: number;
 } {
   const ss = layout.staffSpace;
-  const stemW = Math.max(1.5, ss * 0.17);
+  const stemW = Math.max(1.5, W_STEM * ss);
   const inset = STEM_INSET * ss;
   const headY = stepToY(step, layout);
   if (beam) {
@@ -191,7 +198,7 @@ function computeStem(step: number, x: number, headHalfW: number, layout: Layout,
   // 无连梁：原有逻辑
   const stemUp = step <= 6;
   const stemX = (stemUp ? x + headHalfW - stemW / 2 : x - headHalfW + stemW / 2) - inset;
-  const stemLen = ss * 7;
+  const stemLen = ss * 3.5;   // 标准符干长 ≈ 3.5 线距(ss 现为线距)
   return {
     stemUp, stemW, stemX,
     stemTop: stemUp ? headY - stemLen : headY,
@@ -227,12 +234,12 @@ function renderNote(note: Note, x: number, piece: Piece, layout: Layout, highlig
   if (step > 8) {
     for (let st = 10; st <= step; st += 2) {
       const ly = stepToY(st, layout);
-      s += line(x - ss * 1.7, ly, x + ss * 1.7, ly, '#1f2430', 1.2);
+      s += line(x - ss * 1.7, ly, x + ss * 1.7, ly, '#1f2430', W_LEDGER * ss);
     }
   } else if (step < 0) {
     for (let st = -2; st >= step; st -= 2) {
       const ly = stepToY(st, layout);
-      s += line(x - ss * 1.7, ly, x + ss * 1.7, ly, '#1f2430', 1.2);
+      s += line(x - ss * 1.7, ly, x + ss * 1.7, ly, '#1f2430', W_LEDGER * ss);
     }
   }
 
@@ -280,10 +287,10 @@ function renderNote(note: Note, x: number, piece: Piece, layout: Layout, highlig
  *  填充透明度由 CSS 动画驱动（0.2↔0.5），边框保持不透明。 */
 function renderNextSlot(layout: Layout): string {
   if (layout.isFull) return '';
-  const w = Math.min(layout.nextSlotW, layout.staffSpace * 12);
-  const h = (layout.staffBottom - layout.staffTop) + layout.staffSpace * 2;
+  const w = Math.min(layout.nextSlotW, layout.staffSpace * 6);
+  const h = (layout.staffBottom - layout.staffTop) + layout.staffSpace;
   const x = layout.nextSlotX - w / 2;
-  const y = layout.staffTop - layout.staffSpace;
+  const y = layout.staffTop - layout.staffSpace / 2;
   return rect(x, y, w, h, { fill: '#4f46e5', stroke: '#4f46e5', sw: 1.8, rx: 7, class: 'next-slot' });
 }
 
@@ -323,7 +330,7 @@ function renderBeams(groups: BeamGroup[], piece: Piece, layout: Layout): { svg: 
   const ss = layout.staffSpace;
   const ctxByIdx = new Map<number, BeamCtx>();
   let svg = '';
-  const stemW = Math.max(1.5, ss * 0.17);
+  const stemW = Math.max(1.5, W_STEM * ss);
   const headHalfW = advanceSS('noteheadBlack') / 2 * ss;
 
   for (const g of groups) {
@@ -347,7 +354,7 @@ function renderBeams(groups: BeamGroup[], piece: Piece, layout: Layout): { svg: 
     const stemDir: 'up' | 'down' = avgStep <= 6 ? 'up' : 'down';
 
     // ── 倾斜梁几何：首尾两端各自的 y，中间符干对齐首尾连线 ──
-    const stdLen = ss * 7;
+    const stdLen = ss * 3.5;
     const isDouble = g.level === 'double';
     // 标准端点：每个符头按 ss*7 算（up 端点在符头上方，down 在下方）
     const endAt = (hy: number) => stemDir === 'up' ? hy - stdLen : hy + stdLen;
@@ -467,8 +474,8 @@ export function renderStaffSVG(input: RenderInput): string {
 
 // ── 点击 → 音高 / x ─────────────────────────────────────────
 
-/** 把点击的 y 坐标换算成 MIDI（吸附到最近线/间） */
+/** 把点击的 y 坐标换算成 MIDI（吸附到最近线/间）。stepToY 的反函数（1 step = staffSpace/2） */
 export function clickYToMidi(y: number, piece: Piece, layout: Layout): number {
-  const step = Math.round((layout.bottomLineY - y) / layout.staffSpace);
+  const step = Math.round((layout.bottomLineY - y) / (layout.staffSpace / 2));
   return staffStepToMidi(piece.clef, step);
 }
