@@ -378,18 +378,25 @@ function renderBeams(groups: BeamGroup[], piece: Piece, layout: Layout): { svg: 
       }
     }
 
-    // 边界 clamp：首尾两端各自 clamp 到谱表上下界内（双梁阈值减 gap）。
-    // clamp 可能改变 dy，接受（边界优先于斜率）。
+    // 边界 clamp：保留倾斜斜率。若任一端超出边界，整体平移让「最远端」贴界，
+    // 另一端 = 贴界端 + dy，从而保留斜率（而不是两端各自 clamp 抹平成水平）。
+    // 双梁阈值减 gap（副梁更靠外）。
     const overhang = (BEAM_OVERHANG - (isDouble ? BEAM_GAP : 0)) * ss;
     const beamMinY = layout.staffTop - overhang;
     const beamMaxY = layout.staffBottom + overhang;
     if (stemDir === 'up') {
-      // 朝上时梁在符头上方，两端都不能高于 beamMinY
-      if (beamY1 < beamMinY) beamY1 = beamMinY;
-      if (beamY2 < beamMinY) beamY2 = beamMinY;
+      // 朝上：梁在符头上方，y 小的端更靠外。取两端最小值看是否越界。
+      const outerY = Math.min(beamY1, beamY2);
+      if (outerY < beamMinY) {
+        const shift = beamMinY - outerY; // 整体下移
+        beamY1 += shift; beamY2 += shift;
+      }
     } else {
-      if (beamY1 > beamMaxY) beamY1 = beamMaxY;
-      if (beamY2 > beamMaxY) beamY2 = beamMaxY;
+      const outerY = Math.max(beamY1, beamY2);
+      if (outerY > beamMaxY) {
+        const shift = outerY - beamMaxY; // 整体上移
+        beamY1 -= shift; beamY2 -= shift;
+      }
     }
     // 重新算实际 dy（clamp 后）
     dy = beamY2 - beamY1;
