@@ -35,12 +35,14 @@ function circle(cx: number, cy: number, r: number, fill: string): string {
   return `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${r}" fill="${fill}"/>`;
 }
 
-/** 时值 → 下划线数（0=四分及以上，1=八分，2=十六分） */
+/** 时值 → 下划线数（0=四分及以上，1=八分，2=十六分，3=三十二分） */
 function underlineCount(duration: string, dotted: boolean): number {
   let n: number;
   if (duration === 'whole' || duration === 'half' || duration === 'quarter') n = 0;
   else if (duration === 'eighth') n = 1;
-  else n = 2;
+  else if (duration === 'sixteenth') n = 2;
+  else if (duration === 'thirtysecond') n = 3;
+  else n = 2; // 兜底（未知短时值按十六分处理）
   // 附点不改下划线数
   void dotted;
   return n;

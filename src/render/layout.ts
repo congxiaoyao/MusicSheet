@@ -67,6 +67,7 @@ const SLOT_MIN: Record<DurationValue, number> = {
   quarter: 3.2,
   eighth: 2.8,
   sixteenth: 2.7,
+  thirtysecond: 2.6,
 };
 
 export function computeLayout(piece: Piece, containerWidth: number, currentDuration: DurationValue = 'quarter'): Layout {

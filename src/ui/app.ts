@@ -210,6 +210,7 @@ export class App {
         case '3': this.tool.duration = 'quarter'; this.syncToolbarDurations(); break;
         case '4': this.tool.duration = 'eighth'; this.syncToolbarDurations(); break;
         case '5': this.tool.duration = 'sixteenth'; this.syncToolbarDurations(); break;
+        case '6': this.tool.duration = 'thirtysecond'; this.syncToolbarDurations(); break;
         case '.': this.tool.dotted = !this.tool.dotted; (this.toolbar as any)._resetModifiers?.(); this.render(); break;
         case '0': this.appendRest(); break;
         case 'Backspace': popNote(this.piece); this.render(); e.preventDefault(); break;
