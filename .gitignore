@@ -30,3 +30,9 @@ pnpm-debug.log*
 beam-shots-final/
 pup-*.png
 beam-test-shots/
+beam-shots/
+test-final.png
+twinkle-loaded.png
+case13-area.png
+case10-11.png
+cov-check.png

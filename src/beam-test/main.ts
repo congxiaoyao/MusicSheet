@@ -165,19 +165,29 @@ const cases: Case[] = [
   {
     title: '12. 附点八分 + 八分（dotted 不影响连梁）',
     expect: '附点八分与后续八分仍连成单梁（dotted 只改符头附点）',
-    // 附点八分1.5 + 八分0.5 = 2拍 | 拍2,3: q | 后3小节 whole
+    // 附点八分=0.75拍。连梁组: dotted-e(0.75)+e(0.5)=1.25拍。
+    // 补满第1小节(4拍): +e(0.5)+e(0.5)+q(1)+十六(0.25)*3=0.75 ... 用最简:
+    // dotted-e+e+dotted-e+e+q+q = 0.75+0.5+0.75+0.5+1+1 = 4.5 超。
+    // 干脆用两个连梁组+half: dotted-e+e(1.25) + dotted-e+e(1.25) + ... 
+    // 最干净: 连梁组占1.25拍 + half(2) + ... 差0.75。用 dotted-quarter(1.5)超。
+    // 方案: 连梁组1.25 + q(1) + q(1) + dotted-e(0.75) = 4.0 ✅ (最后dotted-e孤立带flag)
     piece: { clef: 'treble', key: CKEY, time: T44, notes: [
-      n(C4, e, true), n(D4, e), n(E4, q), n(F4, q),
-      n(G4, w), n(A4, w), n(B4, w),
+      n(C4, e, true), n(D4, e),    // 连梁组1: 附点八分+八分 (验证 dotted 不影响连梁)
+      n(E4, q), n(F4, q),          // 补2拍
+      n(G4, e, true),              // 附点八分0.75拍, 凑满第1小节(孤立带flag)
+      n(A4, w), n(B4, w), n(C5, w),
     ] },
   },
   // ── 13. 单个孤立八分 → 不连梁，保留 flag ──
   {
     title: '13. 孤立八分（前后无短时值）',
-    expect: '单个八分音符保留 flag，不连梁',
+    expect: '单个八分音符保留 flag，不连梁（前后都是长时值）',
+    // 第1小节: whole 填满；第2小节: q + e(孤立) + q + dotted-q = 1+0.5+1+1.5 = 4拍
+    // 八分前后都是 quarter/dotted-quarter，真正孤立，带 flag
     piece: { clef: 'treble', key: CKEY, time: T44, notes: [
-      n(C4, q), n(D4, e), n(E4, q), n(F4, q), n(G4, q),
-      n(A4, w), n(B4, w), n(C5, w),
+      n(C4, w),
+      n(D4, q), n(E4, e), n(F4, q), n(G4, q, true),
+      n(A4, w), n(B4, w),
     ] },
   },
   // ── 14. 休止符夹在八分间 → 断开 ──
@@ -232,9 +242,12 @@ const cases: Case[] = [
   {
     title: '19. 三音斜梁（中间符干顶端落在首尾连线上）',
     expect: 'D4→E4→F4 微上行，中间 E4 的符干顶端对齐 D4-F4 连线',
+    // e,e,e(1.5拍) + e(0.5) + q(1) + q(1) = 4拍第1小节; 后3小节 whole
     piece: { clef: 'treble', key: CKEY, time: T44, notes: [
-      n(D4, e), n(E4, e), n(F4, e), n(G4, q), n(A4, q),
-      n(B4, w), n(C5, w), n(D5, w),
+      n(D4, e), n(E4, e), n(F4, e),    // 三音斜梁组
+      n(G4, e),                         // 补0.5拍凑满(孤立带flag)
+      n(A4, q), n(B4, q),              // 补2拍
+      n(C5, w), n(D5, w), n(E5, w),    // 后3小节
     ] },
   },
 ];
@@ -255,6 +268,17 @@ async function main() {
       <br/>每项标题下方的「预期」描述正确结果。
     </p>`;
   root.appendChild(head);
+
+  // 注入异常 tint 样式：检测到超拍的 case 整体变暗红，一眼定位
+  const tintStyle = document.createElement('style');
+  tintStyle.textContent = `
+    .has-issues { border-color:#dc2626 !important; }
+    .has-issues > div:first-child b { color:#dc2626 !important; }
+    .has-issues .svg-wrap {
+      filter: sepia(0.5) saturate(2) hue-rotate(-15deg) brightness(0.92);
+    }
+  `;
+  root.appendChild(tintStyle);
 
   // 等字体就绪，避免首帧用 fallback
   try { await ensureFontLoaded(); } catch { /* 忽略，buildSVG 仍可用 */ }
@@ -281,11 +305,27 @@ async function main() {
     stage.style.cssText = 'padding:6px;overflow-x:auto;background:#fafbfc;';
     try {
       const layout = computeLayout(c.piece, 900, 'eighth');
-      const svg = buildSVG(c.piece, layout, -1, { exportMode: true });
+      // 接入异常回调：收集 issues，渲染后若非空则 tint 红色
+      let caseIssues: import('../render/diagnostics').Issue[] = [];
+      const svg = buildSVG(c.piece, layout, -1, {
+        exportMode: true,
+        onIssues: (issues) => { caseIssues = issues; },
+      });
       const svgWrap = document.createElement('div');
+      svgWrap.className = 'svg-wrap';
       svgWrap.style.cssText = 'min-width:' + layout.width + 'px;';
       svgWrap.innerHTML = svg;
       stage.appendChild(svgWrap);
+      // 有问题 → 整个 case tint 暗红 + 显示问题清单
+      if (caseIssues.length > 0) {
+        wrap.classList.add('has-issues');
+        wrap.setAttribute('data-issue-count', String(caseIssues.length));
+        const issueList = document.createElement('div');
+        issueList.style.cssText = 'padding:8px 12px;font-family:monospace;font-size:11px;color:#b91c1c;background:#fef2f2;border-top:1px solid #fecaca;';
+        issueList.innerHTML = `<b>⚠ 检测到 ${caseIssues.length} 个问题：</b><br>` +
+          caseIssues.map(i => `· ${i.message}`).join('<br>');
+        wrap.appendChild(issueList);
+      }
     } catch (err) {
       stage.innerHTML = `<div style="color:#dc2626;font-family:monospace;font-size:12px;padding:8px;">渲染失败：${String(err)}</div>`;
     }

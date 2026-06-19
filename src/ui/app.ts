@@ -3,7 +3,7 @@
 
 import { Note, Piece } from '../core/types';
 import { KEYS } from '../core/theory';
-import { createPiece, appendNote, popNote, remainingBeats, capacityBeats, totalBeats } from '../core/model';
+import { createPiece, appendNote, popNote, remainingBeats, remainingBeatsInCurrentBar, capacityBeats, totalBeats } from '../core/model';
 import { computeLayout } from '../render/layout';
 import { buildSVG, exportPNG } from '../render/export';
 import { ensureFontLoaded } from '../render/glyphs';
@@ -157,15 +157,25 @@ export class App {
   private appendNoteWithPitch(midi: number): void {
     const note: Note = { midi, duration: this.tool.duration, dotted: this.tool.dotted, accidental: this.tool.accidental };
     const ok = appendNote(this.piece, note);
-    if (!ok) { this.flash('已写满 4 个小节'); return; }
+    if (!ok) { this.flashOverfillRejected(); return; }
     this.afterEdit();
   }
 
   private appendRest(): void {
     const note: Note = { midi: null, duration: this.tool.duration, dotted: this.tool.dotted, accidental: null };
     const ok = appendNote(this.piece, note);
-    if (!ok) { this.flash('已写满 4 个小节'); return; }
+    if (!ok) { this.flashOverfillRejected(); return; }
     this.afterEdit();
+  }
+
+  /** appendNote 拒绝时给出精确提示：区分「整个谱写满」和「本小节放不下」 */
+  private flashOverfillRejected(): void {
+    if (remainingBeats(this.piece) < 1e-6) {
+      this.flash('已写满 4 个小节');
+    } else {
+      const rem = remainingBeatsInCurrentBar(this.piece);
+      this.flash(rem < 1e-6 ? '本小节已满，请先删一个音符或换小节' : `本小节剩 ${rem.toFixed(2)} 拍，放不下此音符`);
+    }
   }
 
   private afterEdit(): void {
@@ -272,6 +282,8 @@ export class App {
     const rem = remainingBeats(this.piece);
     const pct = Math.round((totalBeats(this.piece) / capacityBeats(this.piece)) * 100);
     this.statusEl.textContent = `${this.piece.notes.length} 个音符 · 已用 ${pct}% · 还能再写约 ${rem.toFixed(1)} 拍`;
+    // 工具栏容量联动：disable 放不下的时值/附点按钮
+    (this.toolbar as any)._refreshCapacity?.(remainingBeatsInCurrentBar(this.piece), rem);
   }
 }
 
