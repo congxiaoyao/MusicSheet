@@ -245,9 +245,10 @@ export class App {
 
   private loadExample(): void {
     this.piece = twinkleExample();
-    this.tool.clef = this.piece.clef;
-    this.tool.key = this.piece.key.name;
-    this.tool.time = { ...this.piece.time };
+    // 保留用户当前选择的调号与拍号（示例用绝对 MIDI 音高，调号只影响显示与简谱）
+    this.piece.clef = this.tool.clef;
+    this.piece.key = KEYS[this.tool.key];
+    this.piece.time = { ...this.tool.time };
     this.rebuildToolbar();
     this.render();
   }
