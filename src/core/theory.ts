@@ -59,10 +59,10 @@ export const KEYS: Record<KeyName, KeySig> = {
   'F#': { name: 'F#', tonic: 3, sharps: [3, 0, 6, 2, 5, 1], flats: [] }, // ...E#
   F: { name: 'F', tonic: 3, sharps: [], flats: [6] }, // Bb
   Bb: { name: 'Bb', tonic: 6, sharps: [], flats: [6, 2] }, // Bb Eb
-  Eb: { name: 'Eb', tonic: 1, sharps: [], flats: [6, 2, 5] }, // Bb Eb Ab
+  Eb: { name: 'Eb', tonic: 2, sharps: [], flats: [6, 2, 5] }, // Bb Eb Ab
   Ab: { name: 'Ab', tonic: 5, sharps: [], flats: [6, 2, 5, 1] }, // Bb Eb Ab Db
-  Db: { name: 'Db', tonic: 0, sharps: [], flats: [6, 2, 5, 1, 4] }, // Bb Eb Ab Db Gb
-  Gb: { name: 'Gb', tonic: 3, sharps: [], flats: [6, 2, 5, 1, 4, 0] }, // ...Cb
+  Db: { name: 'Db', tonic: 1, sharps: [], flats: [6, 2, 5, 1, 4] }, // Bb Eb Ab Db Gb
+  Gb: { name: 'Gb', tonic: 4, sharps: [], flats: [6, 2, 5, 1, 4, 0] }, // ...Cb
 };
 
 // 注：types.ts 里的 KeySig.tonic 字段现在表示「字母索引」；sharps/flats 也是字母索引。

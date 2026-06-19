@@ -5,7 +5,7 @@ import { Layout } from './layout';
 import { renderStaffSVG, RenderInput } from './staff';
 import { renderJianpuSVG } from './jianpu';
 import { ensureFontLoaded } from './glyphs';
-import { diagnoseOverfill, Issue } from './diagnostics';
+import { diagnoseAll, Issue } from './diagnostics';
 
 /** buildSVG 的选项 */
 export interface BuildOpts {
@@ -33,7 +33,7 @@ export function buildSVG(piece: Piece, layout: Layout, playingIndex: number, opt
     : '';
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${layout.width}" height="${layout.height}" viewBox="0 0 ${layout.width} ${layout.height}">${bg}${title}${staff}${jianpu}</svg>`;
   // 渲染完成(已 clamp 兜底)后，抛 issues 回调。diagnose 读 piece 原始数据，不受 clamp 影响。
-  const issues = diagnoseOverfill(piece);
+  const issues = diagnoseAll(piece);
   if (issues.length) {
     const handler = opts.onIssues ?? defaultOnIssues;
     handler(issues);

@@ -46,10 +46,10 @@ const cases: Case[] = [
   {
     title: '1. 同拍 2 个八分音符',
     expect: '拍1的两个八分连成单梁；其余补齐',
-    // 拍0: e e (1拍) | 拍1: q | 拍2: q | 拍3: q  × 后3小节用 whole 补
+    // 拍0: e e (1拍) | 拍1: q | 拍2: q | 拍3: q = 4拍(第1小节) + 3个whole(12拍) = 16拍
     piece: { clef: 'treble', key: CKEY, time: T44, notes: [
       n(C4, e), n(D4, e), n(E4, q), n(F4, q), n(G4, q),
-      n(A4, w), n(B4, w), n(C5, w), n(D5, w),
+      n(A4, w), n(B4, w), n(C5, w),
     ] },
   },
   // ── 2. 一拍内 2+2 个八分（拍1、拍2 各成一组）──
