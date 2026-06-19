@@ -27,12 +27,15 @@ pnpm-debug.log*
 # 临时文件
 /tmp/
 *.tmp
-beam-shots-final/
-pup-*.png
-beam-test-shots/
+
+# 截图产物(puppeteer 截图、分段图、验证图等，不入库)
 beam-shots/
+beam-shots-final/
+beam-test-shots/
+pup-*.png
 test-final.png
 twinkle-loaded.png
-case13-area.png
-case10-11.png
+case*.png
 cov-check.png
+red-verify.png
+seg-*.png
