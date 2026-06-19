@@ -57,7 +57,7 @@ const FONT = 92;
 const SS = FONT / 4;   // = 23，真实 staff space（线间距）
 const PAD_LEFT = 22;
 const PAD_RIGHT = 24;
-const STAFF_TOP = 42;
+const STAFF_TOP = 115;   // 加大：朝上符干(3.5ss≈80px)+梁+谱号上方空间
 const JIANPU_GAP = 44;
 // prefix 区宽度按字形实际 advance（staff space 单位）定，不盲目翻倍。
 // gClef advance=2.684 → 谱号区 3.0；升降号 advance≈1 → 0.9；拍号数字 1.88 → 1.8；留白 1.2。

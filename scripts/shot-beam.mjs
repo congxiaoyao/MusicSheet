@@ -35,6 +35,7 @@ const TARGETS = [
   ['24d. 节奏型', 'beam-case24d.png'],
   ['29. 32-32-32-32', 'beam-case29.png'],
   ['31. 孤立三十二分', 'beam-case31.png'],
+  ['10. 全组高于中线', 'beam-case10.png'],
 ];
 for (const [label, fname] of TARGETS) {
   const found = await page.evaluate((lbl) => {
@@ -64,5 +65,13 @@ for (const [label, fname] of TARGETS) {
     console.log('⚠️ 未找到用例:', label);
   }
 }
+
+// 截整页的上半段与下半段（高清，便于查看每个用例顶部）
+const fullH = await page.evaluate(() => document.body.scrollHeight);
+const half = Math.floor(fullH / 2);
+await page.screenshot({ path: path.join(OUT, 'beam-all-top.png'), fullPage: false, clip: { x: 0, y: 0, width: 1400, height: half } });
+await page.screenshot({ path: path.join(OUT, 'beam-all-bottom.png'), fullPage: false, clip: { x: 0, y: half, width: 1400, height: fullH - half } });
+console.log('✅ 已截整页上半: beam-all-top.png 高', half);
+console.log('✅ 已截整页下半: beam-all-bottom.png 高', fullH - half);
 
 await browser.close();

@@ -10,7 +10,8 @@ import { computeBeams, BeamGroup, beamCountForNote } from './beam';
 const BEAM_THICKNESS = 0.5;   // 单根横梁厚度（SMuFL beamThickness）
 const BEAM_GAP = 0.75;        // 双横梁中心距 = beamThickness(0.5) + beamSpacing(0.25)（SMuFL）
 const STEM_MIN_BEAM = 3;      // 连梁时符干最短长度，避免梁贴着符头
-const BEAM_OVERHANG = 2.5;    // 横梁允许超出五线谱顶/底线的距离（staff space）
+const BEAM_OVERHANG = 3.5;    // 横梁允许超出五线谱顶/底线的距离（staff space）
+                                  // 需 ≥ stdLen(3.5ss) 朝上/朝下符干伸展空间，否则 clamp 会压短符干
 const MAX_BEAM_SLOPE = 1.5;   // 倾斜梁首尾最大垂直差（≈ 一个三度），超过削平
 // 符干水平内偏移：符干贴符头侧边时会顶出符头一点，往左（朝符头中心）挪此值，
 // 让符头遮住符干内侧，视觉更干净（朝上/朝下都往左挪）。
