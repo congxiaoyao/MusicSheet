@@ -26,7 +26,6 @@ const e = 'eighth' as DurationValue;
 const s = 'sixteenth' as DurationValue;
 const t = 'thirtysecond' as DurationValue;
 const q = 'quarter' as DurationValue;
-const w = 'whole' as DurationValue;
 
 // C 大调常用音高（MIDI）
 const C4 = 60, D4 = 62, E4 = 64, F4 = 65, G4 = 67, A4 = 69, B4 = 71;
@@ -49,18 +48,16 @@ const cases: Case[] = [
   {
     title: '1. 同拍 2 个八分音符',
     expect: '拍1的两个八分连成单梁',
-    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 2, notes: [
+    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 1, notes: [
       n(C4, e), n(D4, e), n(E4, q), n(F4, q), n(G4, q),   // 第1小节 4拍
-      n(A4, w),                                            // 第2小节
     ] },
   },
   // ── 2. 一拍内 2+2 个八分（拍1、拍2 各成一组）──
   {
     title: '2. 一拍内 2+2 个八分（拍1、拍2 各成一组）',
     expect: '拍1的两八分一组，拍2的两八分另一组',
-    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 2, notes: [
+    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 1, notes: [
       n(C4, e), n(D4, e), n(E4, e), n(F4, e), n(G4, q), n(A4, q),
-      n(B4, w),
     ] },
   },
   // ── 3. 3/8 拍号 → 复合拍每组 3 个八分（2 小节各 1.5 拍）──
@@ -76,31 +73,28 @@ const cases: Case[] = [
   {
     title: '4. 同拍 4 个十六分音符',
     expect: '4 个十六分连成一组双横梁',
-    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 2, notes: [
+    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 1, notes: [
       n(C4, s), n(D4, s), n(E4, s), n(F4, s), n(G4, q), n(A4, q), n(B4, q),
-      n(C5, w),
     ] },
   },
   // ── 5. 两拍各 4 个十六分 → 两组双梁 ──
   {
     title: '5. 两拍各 4 个十六分（按拍分两组双梁）',
     expect: '拍1的4个十六分一组双梁，拍2的4个十六分另一组双梁',
-    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 2, notes: [
+    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 1, notes: [
       n(C4, s), n(D4, s), n(E4, s), n(F4, s),
       n(G4, s), n(A4, s), n(B4, s), n(C5, s),
       n(D5, q), n(E5, q),
-      n(F5, w),
     ] },
   },
   // ── 6. 八分 + 十六分相邻 → 时值不同断开 ──
   {
     title: '6. 八分接十六分（时值不同 → 断开）',
     expect: '八分孤立带 flag；同拍的后续十六分自成一组（仅拍内同种）',
-    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 2, notes: [
+    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 1, notes: [
       n(C4, e), n(D4, e),                            // 拍0：两八分一组
       n(E4, s), n(F4, s), n(G4, s), n(A4, s),        // 拍1：四十六分一组双梁
       n(B4, q), n(C5, q),                            // 拍2,3
-      n(D5, w),
     ] },
   },
   // ── 7. 跨小节 → 强制断开（必须占 2 小节）──
@@ -118,47 +112,42 @@ const cases: Case[] = [
   {
     title: '8. 八分 + 四分 + 八分（中间长时值断开）',
     expect: '两端八分各自孤立带 flag（不连梁），中间 quarter 无符干',
-    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 2, notes: [
+    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 1, notes: [
       n(C4, e), n(D4, q), n(E4, e), n(F4, q), n(G4, q),
-      n(A4, w),
     ] },
   },
   // ── 9. 组内音高跨中线 → 平均 step 决定方向 ──
   {
     title: '9. 组内跨中线（C5 高 + C4 低）',
     expect: '平均 step 接近中线，方向由平均决定；符干对齐到同一梁',
-    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 2, notes: [
+    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 1, notes: [
       n(C5, e), n(C4, e), n(D4, q), n(E4, q), n(F4, q),
-      n(G4, w),
     ] },
   },
   // ── 10. 全组高于中线 → 符干统一朝下 ──
   {
     title: '10. 全组高于中线（符干朝下）',
     expect: '高音组，符干统一朝下，横梁在符头下方',
-    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 2, notes: [
+    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 1, notes: [
       n(C5, e), n(D5, e), n(E5, q), n(F5, q), n(G5, q),
-      n(A5, w),
     ] },
   },
   // ── 11. 全组低于中线 → 符干统一朝上 ──
   {
     title: '11. 全组低于中线（符干朝上）',
     expect: '低音组，符干统一朝上，横梁在符头上方',
-    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 2, notes: [
+    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 1, notes: [
       n(C4, e), n(D4, e), n(E4, q), n(F4, q), n(G4, q),
-      n(A4, w),
     ] },
   },
   // ── 12. 附点八分 + 八分（dotted 不影响连梁判定）──
   {
     title: '12. 附点八分 + 八分（dotted 不影响连梁）',
     expect: '附点八分与后续八分仍连成单梁（dotted 只改符头附点）',
-    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 2, notes: [
+    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 1, notes: [
       n(C4, e, true), n(D4, e),    // 连梁组1：附点八分+八分（验证 dotted 不影响连梁）
       n(E4, q), n(F4, q),          // 补2拍
       n(G4, e, true),              // 附点八分0.75拍，凑满第1小节（孤立带 flag）
-      n(A4, w),
     ] },
   },
   // ── 13. 单个孤立八分 → 不连梁，保留 flag ──
@@ -166,83 +155,74 @@ const cases: Case[] = [
     title: '13. 孤立八分（前后无短时值）',
     expect: '单个八分音符保留 flag，不连梁（前后都是长时值）',
     // 核心场景重排到第1小节：q + e(孤立) + q + dotted-q = 4拍
-    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 2, notes: [
+    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 1, notes: [
       n(D4, q), n(E4, e), n(F4, q), n(G4, q, true),   // 八分 E4 前后都是长时值，孤立带 flag
-      n(C4, w),
     ] },
   },
   // ── 14. 休止符夹在八分间 → 断开 ──
   {
     title: '14. 休止符打断连梁',
     expect: '休止符前的两八分（同拍）成组，休止后另算（休止不参与连梁）',
-    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 2, notes: [
+    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 1, notes: [
       n(C4, e), n(D4, e), n(REST, q), n(E4, e), n(F4, e), n(G4, q),
-      n(A4, w),
     ] },
   },
   // ── 15. 上行级进 4 八分 → 梁微上斜 ──
   {
     title: '15. 上行级进（梁应微上斜：末端高于首端）',
     expect: 'C4→D4→E4→F4 上行，梁从左下往右上倾斜（up 方向，末端 y 更小）',
-    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 2, notes: [
+    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 1, notes: [
       n(C4, e), n(D4, e), n(E4, e), n(F4, e), n(G4, q), n(A4, q),
-      n(B4, w),
     ] },
   },
   // ── 16. 下行级进 4 八分 → 梁微下斜 ──
   {
     title: '16. 下行级进（梁应微下斜：末端低于首端）',
     expect: 'F4→E4→D4→C4 下行，梁从左上往右下倾斜',
-    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 2, notes: [
+    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 1, notes: [
       n(F4, e), n(E4, e), n(D4, e), n(C4, e), n(G4, q), n(A4, q),
-      n(B4, w),
     ] },
   },
   // ── 17. 大跳（C4→A4，超三度）→ 倾斜被削平，不会很陡 ──
   {
     title: '17. 大跳 C4→A4（超三度，倾斜应削平到 MAX_SLOPE）',
     expect: 'C4 到 A4 跨六度，但梁倾斜不超过一个三度，被削平，不会很陡',
-    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 2, notes: [
+    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 1, notes: [
       n(C4, e), n(A4, e), n(E4, q), n(F4, q), n(G4, q),
-      n(B4, w),
     ] },
   },
   // ── 18. 首尾同高（C4-C4）→ 梁水平 ──
   {
     title: '18. C4-C4 首尾同高 → 梁水平',
     expect: '首尾 C4 同高，梁水平',
-    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 2, notes: [
+    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 1, notes: [
       n(C4, e), n(C4, e), n(E4, q), n(F4, q), n(G4, q),
-      n(A4, w),
     ] },
   },
   // ── 19. 斜梁（D4→E4→F4→G4）→ 符干对齐斜线 ──
   {
     title: '19. 斜梁（符干顶端落在首尾连线上）',
     expect: 'D4→E4→F4→G4 微上行，符干顶端对齐首尾连线',
-    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 2, notes: [
+    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 1, notes: [
       n(D4, e), n(E4, e), n(F4, e), n(G4, e), n(A4, q), n(B4, q),
-      n(C5, w),
     ] },
   },
   // ── 20. sx3：3 个十六分连成双梁（末位休止）──
   {
     title: '20. 拍内 3 个十六分 + 末位休止（sx3 双梁）',
     expect: '前 3 个十六分连成一组双横梁(3音)，末位十六分休止不参与',
-    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 2, notes: [
+    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 1, notes: [
       n(C4, s), n(D4, s), n(E4, s), n(REST, s),  // 3 连 + 休止
       n(F4, q), n(G4, q), n(A4, q),               // 补3拍
-      n(B4, w),
     ] },
   },
   // ── 21. sx2：2 个十六分连 + 八分孤立（sx2）──
   {
     title: '21. 拍内 2 个十六分连 + 1 个八分孤立（sx2）',
     expect: '前 2 个十六分连成一组双横梁(2音)，后面的八分孤立带 flag',
-    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 2, notes: [
+    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 1, notes: [
       n(C4, s), n(D4, s), n(E4, e),    // sx2：前两 s 连，e 孤立
       n(F4, q), n(G4, q), n(A4, q),    // 补3拍
-      n(B4, w),
     ] },
   },
   // ── 22. 3/8 复合拍：每小节 6 个十六分（s6 双梁，长跨度）──
@@ -306,41 +286,37 @@ const cases: Case[] = [
     title: '25. partial beam 8-16-16（八分与十六分连成一组）',
     expect: '主梁(1)贯穿三音；次梁(2)仅在后两个十六分之间（八分容量1不参与次梁）',
     // 拍0: 8(0.5)+16(0.25)+16(0.25)=1拍 | 拍1,2,3: q | 后3小节 whole
-    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 4, notes: [
+    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 1, notes: [
       n(C4, e), n(D4, s), n(E4, s),
       n(F4, q), n(G4, q), n(A4, q),
-      n(B4, w), n(C5, w), n(D5, w),
     ] },
   },
   // ── 26. partial beam：16 16 8（反向，次梁仅前两个十六分段）──
   {
     title: '26. partial beam 16-16-8（反向）',
     expect: '主梁(1)贯穿三音；次梁(2)仅在前两个十六分之间',
-    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 4, notes: [
+    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 1, notes: [
       n(C4, s), n(D4, s), n(E4, e),
       n(F4, q), n(G4, q), n(A4, q),
-      n(B4, w), n(C5, w), n(D5, w),
     ] },
   },
   // ── 27. partial beam：16 8 16（八分夹中间，次梁全断）──
   {
     title: '27. partial beam 16-8-16（八分夹中间，次梁全断）',
     expect: '主梁(1)贯穿三音；次梁(2)全断（中间八分容量1，两侧十六分与它 min=1，够不上次梁）',
-    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 4, notes: [
+    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 1, notes: [
       n(C4, s), n(D4, e), n(E4, s),
       n(F4, q), n(G4, q), n(A4, q),
-      n(B4, w), n(C5, w), n(D5, w),
     ] },
   },
   // ── 28. partial beam：8 16 16 16（八分+3十六分，次梁后三音段）──
   {
     title: '28. partial beam 8-16-16-16（次梁在后三个十六分段）',
     expect: '主梁(1)贯穿四音；次梁(2)在后三个十六分之间（首个八分容量1不参与次梁）',
-    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 4, notes: [
+    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 1, notes: [
       n(C4, e), n(D4, s), n(E4, s), n(F4, s),
       n(G4, e), n(A4, e), n(B4, e, true),  // 1.25 + 0.5+0.5+0.75 = 3.0
       n(C5, q),                              // +1 = 4.0
-      n(D5, w), n(E5, w), n(F5, w),
     ] },
   },
   // ── 29. 三十二分：32 32 32 32（三梁贯穿）──
@@ -348,11 +324,10 @@ const cases: Case[] = [
     title: '29. 32-32-32-32（三梁贯穿整组）',
     expect: '主梁(1)、次梁(2)、三梁(3)全部贯穿四音；符干延伸到最外侧三梁',
     // 拍0: 32×4(0.5拍) | 16×2(0.5拍) | q(1) | q(1) | q(1) = 4拍 | 后3小节 whole
-    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 4, notes: [
+    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 1, notes: [
       n(C4, t), n(D4, t), n(E4, t), n(F4, t),  // 三十二分四连（三梁）
       n(G4, s), n(A4, s),                        // 十六分双梁（对照）
       n(B4, q), n(C5, q), n(D5, q),
-      n(E5, w), n(F5, w), n(G5, w),
     ] },
   },
   // ── 30. 三十二分 partial：16 32 32 16（主+次贯穿、三梁仅中段）──
@@ -360,11 +335,10 @@ const cases: Case[] = [
     title: '30. 16-32-32-16（主+次贯穿，三梁仅中间32-32段）',
     expect: '主梁(1)、次梁(2)贯穿四音；三梁(3)仅在中间两个三十二分之间',
     // 16(0.25)+32(0.125)+32(0.125)+16(0.25)=0.75拍 | e(0.5)+e(0.5)+e(0.5)=1.5 | q(1)+dotted-e(0.75)=1.75 = 4.0
-    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 4, notes: [
+    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 1, notes: [
       n(C4, s), n(D4, t), n(E4, t), n(F4, s),
       n(G4, e), n(A4, e), n(B4, e),
       n(C5, q), n(D5, e, true),
-      n(E5, w), n(F5, w), n(G5, w),
     ] },
   },
   // ── 31. 孤立三十二分：夹在休止符间，保留 flag32nd ──
@@ -372,14 +346,13 @@ const cases: Case[] = [
     title: '31. 孤立三十二分（前后休止符，保留 flag32nd）',
     expect: '三十二分音符孤立带 flag（前面两十六分自成一组，休止符打断，三十二分单独 flag32nd）',
     // 16(0.25)+16(0.25)+rest8(0.5)+32(0.125)+rest32(0.125)+16×5(1.25)+dotted-q(1.5) = 4.0
-    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 4, notes: [
+    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 1, notes: [
       n(C4, s), n(D4, s),               // 两十六分一组双梁
       n(REST, e),                        // 八分休止打断
       n(E4, t),                          // 孤立三十二分（前是休止，后是休止 → flag32nd）
       n(REST, t),                        // 三十二分休止打断（验证 rest32nd 字形）
       n(F4, s), n(G4, s), n(A4, s), n(B4, s), n(C5, s),  // 五十六分（前两+后三各自成组）
       n(D5, q, true),                    // 附点四分补 1.5 拍
-      n(E5, w), n(F5, w), n(G5, w),
     ] },
   },
 ];
