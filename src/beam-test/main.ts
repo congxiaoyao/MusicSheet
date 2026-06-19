@@ -24,6 +24,7 @@ function n(midi: number | null, duration: DurationValue, dotted = false): Note {
 }
 const e = 'eighth' as DurationValue;
 const s = 'sixteenth' as DurationValue;
+const t = 'thirtysecond' as DurationValue;
 const q = 'quarter' as DurationValue;
 const w = 'whole' as DurationValue;
 
@@ -304,6 +305,87 @@ const cases: Case[] = [
       n(G5, w),
     ] },
   },
+  // ── 25. partial beam：8 16 16（八分+2十六分连一组，次梁仅16-16段）──
+  {
+    title: '25. partial beam 8-16-16（八分与十六分连成一组）',
+    expect: '主梁(1)贯穿三音；次梁(2)仅在后两个十六分之间（八分容量1不参与次梁）',
+    // 拍0: 8(0.5)+16(0.25)+16(0.25)=1拍 | 拍1,2,3: q | 后3小节 whole
+    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 4, notes: [
+      n(C4, e), n(D4, s), n(E4, s),
+      n(F4, q), n(G4, q), n(A4, q),
+      n(B4, w), n(C5, w), n(D5, w),
+    ] },
+  },
+  // ── 26. partial beam：16 16 8（反向，次梁仅前两个十六分段）──
+  {
+    title: '26. partial beam 16-16-8（反向）',
+    expect: '主梁(1)贯穿三音；次梁(2)仅在前两个十六分之间',
+    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 4, notes: [
+      n(C4, s), n(D4, s), n(E4, e),
+      n(F4, q), n(G4, q), n(A4, q),
+      n(B4, w), n(C5, w), n(D5, w),
+    ] },
+  },
+  // ── 27. partial beam：16 8 16（八分夹中间，次梁全断）──
+  {
+    title: '27. partial beam 16-8-16（八分夹中间，次梁全断）',
+    expect: '主梁(1)贯穿三音；次梁(2)全断（中间八分容量1，两侧十六分与它 min=1，够不上次梁）',
+    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 4, notes: [
+      n(C4, s), n(D4, e), n(E4, s),
+      n(F4, q), n(G4, q), n(A4, q),
+      n(B4, w), n(C5, w), n(D5, w),
+    ] },
+  },
+  // ── 28. partial beam：8 16 16 16（八分+3十六分，次梁后三音段）──
+  {
+    title: '28. partial beam 8-16-16-16（次梁在后三个十六分段）',
+    expect: '主梁(1)贯穿四音；次梁(2)在后三个十六分之间（首个八分容量1不参与次梁）',
+    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 4, notes: [
+      n(C4, e), n(D4, s), n(E4, s), n(F4, s),
+      n(G4, e), n(A4, e), n(B4, e, true),  // 1.25 + 0.5+0.5+0.75 = 3.0
+      n(C5, q),                              // +1 = 4.0
+      n(D5, w), n(E5, w), n(F5, w),
+    ] },
+  },
+  // ── 29. 三十二分：32 32 32 32（三梁贯穿）──
+  {
+    title: '29. 32-32-32-32（三梁贯穿整组）',
+    expect: '主梁(1)、次梁(2)、三梁(3)全部贯穿四音；符干延伸到最外侧三梁',
+    // 拍0: 32×4(0.5拍) | 16×2(0.5拍) | q(1) | q(1) | q(1) = 4拍 | 后3小节 whole
+    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 4, notes: [
+      n(C4, t), n(D4, t), n(E4, t), n(F4, t),  // 三十二分四连（三梁）
+      n(G4, s), n(A4, s),                        // 十六分双梁（对照）
+      n(B4, q), n(C5, q), n(D5, q),
+      n(E5, w), n(F5, w), n(G5, w),
+    ] },
+  },
+  // ── 30. 三十二分 partial：16 32 32 16（主+次贯穿、三梁仅中段）──
+  {
+    title: '30. 16-32-32-16（主+次贯穿，三梁仅中间32-32段）',
+    expect: '主梁(1)、次梁(2)贯穿四音；三梁(3)仅在中间两个三十二分之间',
+    // 16(0.25)+32(0.125)+32(0.125)+16(0.25)=0.75拍 | e(0.5)+e(0.5)+e(0.5)=1.5 | q(1)+dotted-e(0.75)=1.75 = 4.0
+    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 4, notes: [
+      n(C4, s), n(D4, t), n(E4, t), n(F4, s),
+      n(G4, e), n(A4, e), n(B4, e),
+      n(C5, q), n(D5, e, true),
+      n(E5, w), n(F5, w), n(G5, w),
+    ] },
+  },
+  // ── 31. 孤立三十二分：夹在休止符间，保留 flag32nd ──
+  {
+    title: '31. 孤立三十二分（前后休止符，保留 flag32nd）',
+    expect: '三十二分音符孤立带 flag（前面两十六分自成一组，休止符打断，三十二分单独 flag32nd）',
+    // 16(0.25)+16(0.25)+rest8(0.5)+32(0.125)+rest32(0.125)+16×5(1.25)+dotted-q(1.5) = 4.0
+    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 4, notes: [
+      n(C4, s), n(D4, s),               // 两十六分一组双梁
+      n(REST, e),                        // 八分休止打断
+      n(E4, t),                          // 孤立三十二分（前是休止，后是休止 → flag32nd）
+      n(REST, t),                        // 三十二分休止打断（验证 rest32nd 字形）
+      n(F4, s), n(G4, s), n(A4, s), n(B4, s), n(C5, s),  // 五十六分（前两+后三各自成组）
+      n(D5, q, true),                    // 附点四分补 1.5 拍
+      n(E5, w), n(F5, w), n(G5, w),
+    ] },
+  },
 ];
 
 // ── 渲染 ────────────────────────────────────────────────
@@ -352,7 +434,7 @@ async function main() {
     info.innerHTML = `
       <b style="font-size:14px;color:#1f2430;">${c.title}</b>
       <span style="font-size:12px;color:#64748b;">预期：${c.expect}</span>
-      <span style="font-size:11px;color:#94a3b8;margin-left:auto;">分组结果：${groups.length ? groups.map(g => `[${g.startIdx}..${g.endIdx}] ${g.level}`).join('  ') : '（无连梁组）'}</span>`;
+      <span style="font-size:11px;color:#94a3b8;margin-left:auto;">分组结果：${groups.length ? groups.map(g => `[${g.startIdx}..${g.endIdx}] m${g.maxBeamCount}`).join('  ') : '（无连梁组）'}</span>`;
     wrap.appendChild(info);
 
     const stage = document.createElement('div');

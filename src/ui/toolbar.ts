@@ -35,6 +35,7 @@ const DURATIONS: { value: DurationValue; label: string; sub: string }[] = [
   { value: 'quarter', label: '♩', sub: '四分' },
   { value: 'eighth', label: '♪', sub: '八分' },
   { value: 'sixteenth', label: '𝅘𝅥𝅯', sub: '十六分' },
+  { value: 'thirtysecond', label: '𝅘𝅥𝅰', sub: '三十二分' },
 ];
 
 const KEYS_ORDER: KeyName[] = ['C', 'G', 'D', 'A', 'E', 'B', 'F#', 'F', 'Bb', 'Eb', 'Ab', 'Db', 'Gb'];

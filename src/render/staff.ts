@@ -4,7 +4,7 @@ import { Piece, Note } from '../core/types';
 import { staffStepToMidi, resolvePitch } from '../core/theory';
 import { Layout } from './layout';
 import { G, advanceSS } from './glyphs';
-import { computeBeams, BeamGroup } from './beam';
+import { computeBeams, BeamGroup, beamCountForNote } from './beam';
 
 // 连梁几何常量（单位 staff space）
 const BEAM_THICKNESS = 0.5;   // 单根横梁厚度（SMuFL beamThickness）
@@ -220,7 +220,8 @@ function renderNote(note: Note, x: number, piece: Piece, layout: Layout, highlig
       : note.duration === 'half' ? G.restHalf
       : note.duration === 'quarter' ? G.restQuarter
       : note.duration === 'eighth' ? G.rest8th
-      : G.rest16th;
+      : note.duration === 'sixteenth' ? G.rest16th
+      : G.rest32nd;
     s += text(glyph, x, restY + ss * 2, fs * 0.72);
     return s;
   }
@@ -265,11 +266,13 @@ function renderNote(note: Note, x: number, piece: Piece, layout: Layout, highlig
   if (note.duration !== 'whole') {
     const { stemUp, stemW, stemX, stemTop, stemBot } = computeStem(step, x, headHalfW, layout, beam);
     s += rect(stemX, stemTop, stemW, stemBot - stemTop, { fill });
-    // 符尾：只有未连梁的八分/十六分才画 flag（连梁的由横梁代替）
-    if (!beam && (note.duration === 'eighth' || note.duration === 'sixteenth')) {
+    // 符尾：只有未连梁的八分/十六分/三十二分才画 flag（连梁的由横梁代替）
+    if (!beam && (note.duration === 'eighth' || note.duration === 'sixteenth' || note.duration === 'thirtysecond')) {
       const flagGlyph = note.duration === 'eighth'
         ? (stemUp ? G.flag8thUp : G.flag8thDown)
-        : (stemUp ? G.flag16thUp : G.flag16thDown);
+        : note.duration === 'sixteenth'
+        ? (stemUp ? G.flag16thUp : G.flag16thDown)
+        : (stemUp ? G.flag32ndUp : G.flag32ndDown);
       const flagY = stemUp ? stemTop : stemBot;
       s += text(flagGlyph, stemX + stemW / 2, flagY, fs, { fill, anchor: 'start' });
     }
@@ -318,121 +321,155 @@ function midiStep(midi: number, piece: Piece): number {
 }
 
 /** 计算并渲染连梁：返回「音符索引 → BeamCtx」映射，供 renderNote 对齐符干。
- *  几何规则（倾斜梁）：
+ *  采用「梁容量」模型：每个音符按 duration 有容量（eighth=1 / sixteenth=2 / thirtysecond=3）。
+ *
+ *  梁层级（从外往内编号 j=1..maxCount），遵循标准记谱法（primary beam 在最外侧）：
+ *    - 第 1 根 = primary（主梁）：离符头最远、最外侧，贯穿整组首尾不断。
+ *    - 第 j≥2 根 = secondary（次梁/三梁）：越靠内越短，只在「相邻两音容量都 ≥j」的连续段画。
+ *  这样主梁最长（贯穿），次梁在更短时值处出现并更靠内 —— 读时值靠数每根符干连了几根梁。
+ *
+ *  几何规则（倾斜 primary 梁）：
  *    - 组内统一方向 = 组平均 step ≤ 6（中线 B4）→ up，否则 down
- *    - 首尾两端各自的梁 y：由首/末符头按标准长度 ss*7 算端点，首端取「最远」端点，
- *      斜率 dy = 末端端点 − 首端端点，封顶在 ±MAX_BEAM_SLOPE*ss（一个三度）
- *    - 最短符干约束：首尾任一端符干 < STEM_MIN_BEAM*ss 时整体平移补偿
- *    - 边界 clamp：首尾 y 各自 clamp 到谱表上下界内（可能改变 dy，边界优先）
- *    - 中间符干顶端沿首尾连线线性插值
- *    - level=double 画两根平行斜梁，第二根朝外平移 BEAM_GAP*ss，符干贯穿两根 */
+ *    - primary 首尾 y：由首/末符头按标准长度 ss*7 算端点，首端取「最远」端点，
+ *      斜率 dy 封顶在 ±MAX_BEAM_SLOPE*ss（一个三度）
+ *    - 最短符干约束：仅检查 primary 首尾端符干 < STEM_MIN_BEAM*ss 时整体平移补偿
+ *    - 边界 clamp：primary 即最外侧梁，整组平移到谱表上下界内（overhang 固定，内侧梁更靠内不会越界）
+ *    - 所有符干顶端都对齐到 primary（等长）—— 因 primary 是最外侧，符干必穿过内侧各次梁
+ *    - 第 j≥2 根次梁 y = primary 在该 x 的 y + (j-1)*BEAM_GAP*ss 朝内偏移 */
 function renderBeams(groups: BeamGroup[], piece: Piece, layout: Layout): { svg: string; ctxByIdx: Map<number, BeamCtx> } {
   const ss = layout.staffSpace;
   const ctxByIdx = new Map<number, BeamCtx>();
   let svg = '';
   const stemW = Math.max(1.5, W_STEM * ss);
   const headHalfW = advanceSS('noteheadBlack') / 2 * ss;
+  const thick = BEAM_THICKNESS * ss;
 
   for (const g of groups) {
-    // 收集组内 step 与符头 y
+    // 收集组内音符的 step、符头 y、符干 x、每音梁容量
+    const idxs: number[] = [];      // 组内音符在 notes 数组中的真实索引（跳过休止）
     const steps: number[] = [];
     const headYs: number[] = [];
-    const stemXs: number[] = [];
+    const caps: number[] = [];       // beamCountForNote per note
+    const stemXs: number[] = [];     // 符干 x（先按 up 占位，方向定后改写）
     for (let i = g.startIdx; i <= g.endIdx; i++) {
       const note = piece.notes[i];
       if (note.midi === null) continue;
-      const step = resolvePitch(note.midi, piece.clef, piece.key, note.accidental).step;
-      steps.push(step);
-      headYs.push(stepToY(step, layout));
-      // 暂用 up 方向算 stemX（x 对齐用），方向定后不依赖此值
+      idxs.push(i);
+      steps.push(resolvePitch(note.midi, piece.clef, piece.key, note.accidental).step);
+      headYs.push(stepToY(steps[steps.length - 1], layout));
+      caps.push(beamCountForNote(note.duration));
       const x = layout.noteX[i];
       stemXs.push(x + headHalfW - stemW / 2);
     }
-    if (steps.length < 2) continue;
+    const n = idxs.length;
+    if (n < 2) continue;
 
+    const maxCount = g.maxBeamCount;
     const avgStep = steps.reduce((a, b) => a + b, 0) / steps.length;
     const stemDir: 'up' | 'down' = avgStep <= 6 ? 'up' : 'down';
 
-    // ── 倾斜梁几何：首尾两端各自的 y，中间符干对齐首尾连线 ──
+    // ── primary（第 1 根，最外侧）几何：首尾两端各自的 y ──
+    // stdLen 用 ss*3.5：FONT=92 后 SS=23，物理符干长度与五线谱比例匹配（原 ss*7 是 FONT 未翻倍时的值）
     const stdLen = ss * 3.5;
-    const isDouble = g.level === 'double';
-    // 标准端点：每个符头按 ss*7 算（up 端点在符头上方，down 在下方）
     const endAt = (hy: number) => stemDir === 'up' ? hy - stdLen : hy + stdLen;
     const end0 = endAt(headYs[0]);
-    const endN = endAt(headYs[headYs.length - 1]);
-    // 斜率：首尾端点差，封顶在 ±MAX_BEAM_SLOPE*ss（一个三度），超过削平
+    const endN = endAt(headYs[n - 1]);
     const maxSlope = MAX_BEAM_SLOPE * ss;
     let dy = Math.max(-maxSlope, Math.min(maxSlope, endN - end0));
-    // 首端取「最远」端点（保留水平梁时的逻辑：保证最短符干的一端也够长）。
-    // 倾斜下改为：首端 beamY1 = 首尾标准端点中「最远」的那个，末端 = 首端 + dy。
+    // 首端取「最远」端点（primary 在最外侧），末端 = 首端 + dy
     let beamY1 = stemDir === 'up' ? Math.min(end0, endN) : Math.max(end0, endN);
     let beamY2 = beamY1 + dy;
 
-    // 最短符干约束：首尾两端任一符干 < STEM_MIN_BEAM*ss → 整体平移补偿
+    // 最短符干约束：仅检查 primary 首尾端，整体平移补偿
     const minLen = STEM_MIN_BEAM * ss;
     if (stemDir === 'up') {
-      // 首尾符头到梁的距离 = headY - beamY，取两端最小者
-      const shortBy = Math.min(headYs[0] - beamY1, headYs[headYs.length - 1] - beamY2);
-      if (shortBy < minLen) {
-        const shift = minLen - shortBy; // 梁需往上移 shift
-        beamY1 -= shift; beamY2 -= shift;
-      }
+      const shortBy = Math.min(headYs[0] - beamY1, headYs[n - 1] - beamY2);
+      if (shortBy < minLen) { const shift = minLen - shortBy; beamY1 -= shift; beamY2 -= shift; }
     } else {
-      const shortBy = Math.min(beamY1 - headYs[0], beamY2 - headYs[headYs.length - 1]);
-      if (shortBy < minLen) {
-        const shift = minLen - shortBy;
-        beamY1 += shift; beamY2 += shift;
-      }
+      const shortBy = Math.min(beamY1 - headYs[0], beamY2 - headYs[n - 1]);
+      if (shortBy < minLen) { const shift = minLen - shortBy; beamY1 += shift; beamY2 += shift; }
     }
 
-    // 边界 clamp：保留倾斜斜率。若任一端超出边界，整体平移让「最远端」贴界，
-    // 另一端 = 贴界端 + dy，从而保留斜率（而不是两端各自 clamp 抹平成水平）。
-    // 双梁阈值减 gap（副梁更靠外）。
-    const overhang = (BEAM_OVERHANG - (isDouble ? BEAM_GAP : 0)) * ss;
+    // 边界 clamp：primary 即最外侧梁，整组平移到界内（内侧次梁更靠内不会越界，故 overhang 固定）
+    const overhang = BEAM_OVERHANG * ss;
     const beamMinY = layout.staffTop - overhang;
     const beamMaxY = layout.staffBottom + overhang;
     if (stemDir === 'up') {
-      // 朝上：梁在符头上方，y 小的端更靠外。取两端最小值看是否越界。
       const outerY = Math.min(beamY1, beamY2);
-      if (outerY < beamMinY) {
-        const shift = beamMinY - outerY; // 整体下移
-        beamY1 += shift; beamY2 += shift;
-      }
+      if (outerY < beamMinY) { const shift = beamMinY - outerY; beamY1 += shift; beamY2 += shift; }
     } else {
       const outerY = Math.max(beamY1, beamY2);
-      if (outerY > beamMaxY) {
-        const shift = outerY - beamMaxY; // 整体上移
-        beamY1 -= shift; beamY2 -= shift;
-      }
+      if (outerY > beamMaxY) { const shift = outerY - beamMaxY; beamY1 -= shift; beamY2 -= shift; }
     }
-    // 重新算实际 dy（clamp 后）
     dy = beamY2 - beamY1;
 
-    // 每个音符的符干端点：沿首尾连线线性插值。t = 该音符在组内的位置比例。
-    // 双梁时符干延伸到外侧梁（朝上取减 gap，朝下取加 gap），保证贯穿两根。
-    const n = steps.length;
+    // primary 在某音符（组内序号 k）处的 y：沿首尾连线线性插值
+    const primaryYAt = (k: number) => beamY1 + dy * (n === 1 ? 0 : k / (n - 1));
+    // 朝内方向偏移系数：次梁比 primary 更靠近符头。up 时梁在上方，「内」= y 更大（往下）→ +1；
+    // down 时梁在下方，「内」= y 更小（往上）→ -1。
+    const inSign = stemDir === 'up' ? 1 : -1;
+    const gap = BEAM_GAP * ss;
+
+    // 每个音符的符干端点都对齐到 primary（最外侧）→ 组内符干等长；
+    // 同时确定每个符干的正确 x（含方向偏移与 inset）。
     for (let k = 0; k < n; k++) {
-      const i = g.startIdx + k;
+      const i = idxs[k];
+      ctxByIdx.set(i, { stemDir, stemEndY: primaryYAt(k) });
       const x = layout.noteX[i];
-      const t = n === 1 ? 0 : k / (n - 1);
-      const mainBeamYatK = beamY1 + dy * t;       // 第一根梁在该音符处的 y
-      const outerBeamYatK = isDouble
-        ? (stemDir === 'up' ? mainBeamYatK - BEAM_GAP * ss : mainBeamYatK + BEAM_GAP * ss)
-        : mainBeamYatK;
-      ctxByIdx.set(i, { stemDir, stemEndY: outerBeamYatK });
       stemXs[k] = (stemDir === 'up' ? x + headHalfW - stemW / 2 : x - headHalfW + stemW / 2) - STEM_INSET * ss;
     }
 
-    // 画横梁：x 范围覆盖首尾符干的全宽（左边缘→右边缘），保证梁盖住符干顶端，
-    // 不让符干从梁的斜边旁露出来。双梁画两根，第二根两端 y 朝外平移 BEAM_GAP*ss。
-    const x1 = stemXs[0];                      // 首符干左边缘
-    const x2 = stemXs[n - 1] + stemW;          // 末符干右边缘
-    const thick = BEAM_THICKNESS * ss;
+    // primary 首尾两端的 x（必须在符干 x 确定后取，否则用的是占位值）
+    const x1 = stemXs[0];
+    const x2 = stemXs[n - 1] + stemW;
+    // primary 线在任意 x 处的 y（按首尾端点线性插值，供短桩两端跟随主梁斜率，使短桩与主梁平行）
+    const primaryLineY = (x: number) => beamY1 + dy * (x - x1) / (x2 - x1);
+
+    // ── 画梁 ──
+    // 第 1 根（primary，最外侧）贯穿整组首尾。
+    // 第 j≥2 根（次梁，朝内偏移 (j-1)*BEAM_GAP*ss）：
+    //   - 相邻两音都容量 ≥j → 连成一段（贯穿这些音）。
+    //   - 容量 ≥j 但左右邻居都连不上该梁的「孤立」音 → 画一根短桩（stub），从符干伸出一个
+    //     符头宽度，让读者能识别它是更短时值（如 16-8-16 两端的十六分各有一小段次梁）。
+    //     短桩两端跟随 primary 主梁斜率（用 primaryLineY），与主梁平行。
+    //     短桩朝向：朝相邻同组音的方向（右优先）；组末孤立音朝左。
     svg += drawBeam(x1, beamY1, x2, beamY2, thick);
-    if (isDouble) {
-      const off = BEAM_GAP * ss;
-      svg += drawBeam(x1, beamY1 - (stemDir === 'up' ? off : -off),
-                      x2, beamY2 - (stemDir === 'up' ? off : -off), thick);
+    const stubLen = headHalfW * 2; // 短桩长度 ≈ 一个符头宽
+    for (let level = 2; level <= maxCount; level++) {
+      const off = (level - 1) * gap * inSign;
+      const inBeam = (k: number) => caps[k] >= level;          // 该音是否参与第 level 梁
+      const linkedRight = (k: number) => k < n - 1 && inBeam(k) && inBeam(k + 1); // 与右邻连该梁
+      // 先画「连续段」：相邻参与音合并贯穿
+      let segStart = -1;
+      for (let k = 0; k < n; k++) {
+        if (linkedRight(k)) {
+          if (segStart < 0) segStart = k;
+        } else {
+          if (segStart >= 0) {
+            // 段 segStart..k（含两端）画一根第 level 梁
+            const yA = primaryYAt(segStart) + off;
+            const yB = primaryYAt(k) + off;
+            svg += drawBeam(stemXs[segStart], yA, stemXs[k] + stemW, yB, thick);
+            segStart = -1;
+          }
+        }
+      }
+      // 再补「孤立短桩」：参与该梁但左右都没连上的音
+      for (let k = 0; k < n; k++) {
+        if (!inBeam(k)) continue;
+        if (linkedRight(k)) continue;            // 已在连续段里
+        if (k > 0 && inBeam(k - 1)) continue;    // 左邻参与 → 已被左侧连续段覆盖
+        // 孤立参与音：画短桩，两端跟随 primary 斜率
+        if (k < n - 1) {
+          const sx0 = stemXs[k];
+          const sx1 = stemXs[k] + stubLen;
+          svg += drawBeam(sx0, primaryLineY(sx0) + off, sx1, primaryLineY(sx1) + off, thick);
+        } else {
+          const sx0 = stemXs[k] + stemW - stubLen;
+          const sx1 = stemXs[k] + stemW;
+          svg += drawBeam(sx0, primaryLineY(sx0) + off, sx1, primaryLineY(sx1) + off, thick);
+        }
+      }
     }
   }
 

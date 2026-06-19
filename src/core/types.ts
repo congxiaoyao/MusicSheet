@@ -7,7 +7,7 @@ export type Clef = 'treble' | 'bass';
 export type Accidental = 'sharp' | 'flat' | 'natural' | null;
 
 /** 音符时值（以四分音符为单位）。null 表示这是用户显式指定的休止符。 */
-export type DurationValue = 'whole' | 'half' | 'quarter' | 'eighth' | 'sixteenth';
+export type DurationValue = 'whole' | 'half' | 'quarter' | 'eighth' | 'sixteenth' | 'thirtysecond';
 
 /** 一个音符或休止符 */
 export interface Note {
@@ -60,6 +60,7 @@ export function durationBeats(d: DurationValue, dotted: boolean): number {
     quarter: 1,
     eighth: 0.5,
     sixteenth: 0.25,
+    thirtysecond: 0.125,
   };
   const v = base[d];
   return dotted ? v * 1.5 : v;
