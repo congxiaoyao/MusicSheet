@@ -24,6 +24,7 @@ const e = 'eighth' as DurationValue;
 const s = 'sixteenth' as DurationValue;
 const t = 'thirtysecond' as DurationValue;
 const q = 'quarter' as DurationValue;
+const h = 'half' as DurationValue;
 const w = 'whole' as DurationValue;
 
 // C 大调常用音高（MIDI）
@@ -391,6 +392,70 @@ const cases: Case[] = [
       n(F4, s), n(G4, s), n(A4, s), n(B4, s), n(C5, s),  // 五十六分（前两+后三各自成组）
       n(D5, q, true),                    // 附点四分补 1.5 拍
       n(E5, w), n(F5, w), n(G5, w),
+    ] },
+  },
+  // ── 32. 一拍 8 个三十二分（经典「一拍八连」，三梁长组贯穿）──
+  {
+    title: '32. 一拍 8 个三十二分（三梁长组贯穿）',
+    expect: '8 个三十二分连成一组：primary、次梁、三梁全部贯穿 8 音；符干等长到最外侧 primary',
+    // t×8(1拍) | q q q(3) = 4拍 | 后3小节 whole
+    piece: { clef: 'treble', key: CKEY, time: T44, notes: [
+      n(C4, t), n(D4, t), n(E4, t), n(F4, t), n(G4, t), n(A4, t), n(B4, t), n(C5, t),
+      n(D5, q), n(E5, q), n(F5, q),
+      n(G5, w), n(A5, w), n(B5, w),
+    ] },
+  },
+  // ── 33. 16-32-32（十六分接两三十二分：三梁仅后两 32 段）──
+  {
+    title: '33. 16-32-32（三梁仅在后两个三十二分段）',
+    expect: 'primary+次梁贯穿三音；三梁(最内侧)仅在后两个三十二分之间（首个十六分容量2不够三梁）',
+    // 16(0.25)+32(0.125)+32(0.125)=0.5拍 | half(2)+dotted-q(1.5)=3.5 → 4.0 | 后3小节 whole
+    piece: { clef: 'treble', key: CKEY, time: T44, notes: [
+      n(C4, s), n(D4, t), n(E4, t),
+      n(F4, h), n(G4, q, true),
+      n(A4, w), n(B4, w), n(C5, w),
+    ] },
+  },
+  // ── 34. 32-32-16（反向：三梁仅前两 32 段）──
+  {
+    title: '34. 32-32-16（三梁仅在前两个三十二分段）',
+    expect: 'primary+次梁贯穿三音；三梁(最内侧)仅在前两个三十二分之间',
+    piece: { clef: 'treble', key: CKEY, time: T44, notes: [
+      n(C4, t), n(D4, t), n(E4, s),
+      n(F4, h), n(G4, q, true),
+      n(A4, w), n(B4, w), n(C5, w),
+    ] },
+  },
+  // ── 35. 32-16-32（十六分夹中间，三梁两侧短桩）──
+  {
+    title: '35. 32-16-32（三梁两侧短桩：两端32分各一短桩，中间16分处断）',
+    expect: 'primary+次梁贯穿三音；三梁(最内侧)在两端三十二分各画一短桩（跟随主梁斜率），中间十六分处断开',
+    piece: { clef: 'treble', key: CKEY, time: T44, notes: [
+      n(C4, t), n(D4, s), n(E4, t),
+      n(F4, h), n(G4, q, true),
+      n(A4, w), n(B4, w), n(C5, w),
+    ] },
+  },
+  // ── 36. 8-32-32-32-32（八分接 4 个三十二分：次梁+三梁仅后4个32段）──
+  {
+    title: '36. 8-32-32-32-32（八分容量1不参与次/三梁，后4个32分连次+三梁）',
+    expect: 'primary 贯穿5音；次梁、三梁仅在后4个三十二分之间（首个八分容量1只到 primary）',
+    // e(0.5)+t×4(0.5)=1拍 | q(1)+half(2)=3 → 4.0 | 后3小节 whole
+    piece: { clef: 'treble', key: CKEY, time: T44, notes: [
+      n(C4, e), n(D4, t), n(E4, t), n(F4, t), n(G4, t),
+      n(A4, q), n(B4, h),
+      n(C5, w), n(D5, w), n(E5, w),
+    ] },
+  },
+  // ── 37. 16-16-32-32-32-32（两十六分接四三十二分：次梁贯穿，三梁仅后四32段）──
+  {
+    title: '37. 16-16-32-32-32-32（次梁贯穿，三梁仅在后四个三十二分段）',
+    expect: 'primary+次梁贯穿6音（全部容量≥2）；三梁(最内侧)仅在后四个三十二分之间（前两个十六分容量2不够三梁）',
+    // 16-16-32-32-32-32 = 0.25+0.25+0.125×4 = 1拍 | q(1)+half(2)=3 → 4拍 | 后3小节 whole
+    piece: { clef: 'treble', key: CKEY, time: T44, notes: [
+      n(C4, s), n(D4, s), n(E4, t), n(F4, t), n(G4, t), n(A4, t),  // 16-16-32-32-32-32 = 1拍
+      n(B4, q), n(C5, h),
+      n(D5, w), n(E5, w), n(F5, w),
     ] },
   },
 ];
