@@ -28,14 +28,5 @@ pnpm-debug.log*
 /tmp/
 *.tmp
 
-# 截图产物(puppeteer 截图、分段图、验证图等，不入库)
-beam-shots/
-beam-shots-final/
-beam-test-shots/
-pup-*.png
-test-final.png
-twinkle-loaded.png
-case*.png
-cov-check.png
-red-verify.png
-seg-*.png
+# 截图产物(puppeteer 截图、分段图、验证图等，统一放此目录)
+screenshots/

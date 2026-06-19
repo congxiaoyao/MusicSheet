@@ -21,7 +21,7 @@ const { launch } = require('puppeteer-core');
   });
   console.log('点了小星星按钮:', clicked);
   await new Promise(r => setTimeout(r, 800));
-  await page.screenshot({ path: '/home/cong/AgentProjects/MusicSheet/twinkle-loaded.png', fullPage: false });
+  await page.screenshot({ path: '/home/cong/AgentProjects/MusicSheet/screenshots/twinkle.png', fullPage: false });
   await browser.close();
   console.log('saved');
 })();

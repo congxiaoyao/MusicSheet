@@ -16,7 +16,7 @@ const { launch } = require('puppeteer-core');
     if (document.fonts) for (const c of chars) try { await document.fonts.load('40px Bravura', c); } catch {}
   });
   await new Promise(r => setTimeout(r, 1500));
-  await page.screenshot({ path: '/home/cong/AgentProjects/MusicSheet/test-final.png', fullPage: true });
+  await page.screenshot({ path: '/home/cong/AgentProjects/MusicSheet/screenshots/test-final.png', fullPage: true });
   await browser.close();
   console.log('saved');
 })();
