@@ -264,45 +264,41 @@ const cases: Case[] = [
       n(G4, e), n(A4, e), n(B4, s), n(C5, s),
     ] },
   },
-  // ── 24a. 节奏型：8-16-16-16-16-8-16-8-16-8-8 ──
+  // ── 24a. 节奏型：8-16-16-16-16-8-16-8-16-8-8（1 小节，正好 4 拍）──
   {
     title: '24a. 节奏型：8 16 16 16 16 8 16 8 16 8 8',
     expect: '混合八分/十六分，按拍分组（e 孤立 / 四十六分双梁）',
-    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 2, notes: [
+    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 1, notes: [
       n(C4, e), n(D4, s), n(E4, s), n(F4, s), n(G4, s),
       n(A4, e), n(B4, s), n(C5, e), n(D5, s), n(E5, e), n(F5, e),
-      n(G5, w),
     ] },
   },
-  // ── 24b. 节奏型：16-8-16-8-16-16-16-8-16-8-8 ──
+  // ── 24b. 节奏型：16-8-16-8-16-16-16-8-16-8-8（1 小节，正好 4 拍）──
   {
     title: '24b. 节奏型：16 8 16 8 16 16 16 8 16 8 8',
     expect: '混合八分/十六分，十六分起拍',
-    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 2, notes: [
+    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 1, notes: [
       n(G4, s), n(A4, e), n(B4, s), n(C5, e), n(D5, s),
       n(E5, s), n(F5, s), n(G5, e), n(A5, s), n(B5, e), n(C5, e),
-      n(D5, w),
     ] },
   },
-  // ── 24c. 节奏型：8-16-16 ×4 组 ──
+  // ── 24c. 节奏型：8-16-16 ×4 组（1 小节，正好 4 拍）──
   {
     title: '24c. 节奏型：8 16 16 ×4 组',
     expect: '每拍一个八分接两个十六分（八分孤立带 flag / 两十六分双梁）',
-    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 2, notes: [
+    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 1, notes: [
       n(C4, e), n(D4, s), n(E4, s),
       n(F4, e), n(G4, s), n(A4, s),
       n(B4, e), n(C5, s), n(D5, s),
       n(E5, e), n(F5, s), n(G5, s),
-      n(A5, w),
     ] },
   },
-  // ── 24d. 节奏型：附点4-16-16-4-4 ──
+  // ── 24d. 节奏型：附点4-16-16-4-4（1 小节，正好 4 拍）──
   {
     title: '24d. 节奏型：附点4 16 16 4 4',
     expect: '附点四分 + 两个十六分双梁 + 两个四分（1.5+0.5+2 = 4拍，正好填满）',
-    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 2, notes: [
+    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 1, notes: [
       n(B4, q, true), n(C5, s), n(D5, s), n(E5, q), n(F5, q),   // 1.5+0.25+0.25+1+1 = 4拍
-      n(G5, w),
     ] },
   },
   // ── 25. partial beam：8 16 16（八分+2十六分连一组，次梁仅16-16段）──

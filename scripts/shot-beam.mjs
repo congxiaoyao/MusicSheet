@@ -26,12 +26,21 @@ await page.screenshot({ path: path.join(OUT, 'beam-all.png'), fullPage: true });
 console.log('✅ 已截整页:', path.join(OUT, 'beam-all.png'));
 
 // 定位：标题在 <b> 内，向上找到 .case-wrap 祖先（带 border 的卡片），截该卡片。
-for (const label of ['4. 同拍 4 个十六分音符', '5. 两拍各 4 个十六分']) {
+const TARGETS = [
+  ['4. 同拍 4 个十六分音符', 'beam-case4.png'],
+  ['5. 两拍各 4 个十六分', 'beam-case5.png'],
+  ['24a. 节奏型', 'beam-case24a.png'],
+  ['24b. 节奏型', 'beam-case24b.png'],
+  ['24c. 节奏型', 'beam-case24c.png'],
+  ['24d. 节奏型', 'beam-case24d.png'],
+  ['29. 32-32-32-32', 'beam-case29.png'],
+  ['31. 孤立三十二分', 'beam-case31.png'],
+];
+for (const [label, fname] of TARGETS) {
   const found = await page.evaluate((lbl) => {
     const bs = Array.from(document.querySelectorAll('b'));
     const el = bs.find(e => (e.textContent || '').includes(lbl));
     if (!el) return null;
-    // 向上找带 border 的卡片容器（case-wrap）
     let node = el;
     for (let i = 0; i < 6 && node; i++) {
       const cs = node.style && getComputedStyle(node);
@@ -41,7 +50,6 @@ for (const label of ['4. 同拍 4 个十六分音符', '5. 两拍各 4 个十六
       }
       node = node.parentElement;
     }
-    // 兜底：用 svgWrap
     const svg = document.querySelector('svg');
     if (svg) {
       const r = svg.getBoundingClientRect();
@@ -50,7 +58,6 @@ for (const label of ['4. 同拍 4 个十六分音符', '5. 两拍各 4 个十六
     return null;
   }, label);
   if (found) {
-    const fname = label.startsWith('4') ? 'beam-case4.png' : 'beam-case5.png';
     await page.screenshot({ path: path.join(OUT, fname), clip: { x: found.x, y: found.y, width: found.w, height: found.h } });
     console.log('✅ 已截:', path.join(OUT, fname), JSON.stringify(found));
   } else {
