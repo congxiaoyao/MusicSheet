@@ -405,9 +405,10 @@ function renderBeams(groups: BeamGroup[], piece: Piece, layout: Layout): { svg: 
       stemXs[k] = stemDir === 'up' ? x + headHalfW - stemW / 2 : x - headHalfW + stemW / 2;
     }
 
-    // 画横梁：首尾 stemX + 首尾 y。双梁画两根，第二根两端 y 朝外平移 BEAM_GAP*ss。
-    const x1 = stemXs[0] + stemW / 2;
-    const x2 = stemXs[n - 1] + stemW / 2;
+    // 画横梁：x 范围覆盖首尾符干的全宽（左边缘→右边缘），保证梁盖住符干顶端，
+    // 不让符干从梁的斜边旁露出来。双梁画两根，第二根两端 y 朝外平移 BEAM_GAP*ss。
+    const x1 = stemXs[0];                      // 首符干左边缘
+    const x2 = stemXs[n - 1] + stemW;          // 末符干右边缘
     const thick = BEAM_THICKNESS * ss;
     svg += drawBeam(x1, beamY1, x2, beamY2, thick);
     if (isDouble) {
