@@ -122,6 +122,11 @@ html, body {
 }
 .chip:hover { border-color: #cbd5e1; background: #f8fafc; transform: translateY(-1px); }
 .chip:active { transform: translateY(0); }
+/* 放不进当前小节的时值/附点按钮：置灰禁用 */
+.chip:disabled, .seg-btn:disabled {
+  opacity: 0.35; cursor: not-allowed; transform: none;
+}
+.chip:disabled:hover, .seg-btn:disabled:hover { border-color: var(--border); background: transparent; transform: none; }
 .chip.active {
   background: var(--accent-soft);
   border-color: var(--accent);

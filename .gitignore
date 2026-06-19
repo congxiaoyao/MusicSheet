@@ -27,3 +27,6 @@ pnpm-debug.log*
 # 临时文件
 /tmp/
 *.tmp
+
+# 截图产物(puppeteer 截图、分段图、验证图等，统一放此目录)
+screenshots/

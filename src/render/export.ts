@@ -5,9 +5,25 @@ import { Layout } from './layout';
 import { renderStaffSVG, RenderInput } from './staff';
 import { renderJianpuSVG } from './jianpu';
 import { ensureFontLoaded } from './glyphs';
+import { diagnoseAll, Issue } from './diagnostics';
+
+/** buildSVG 的选项 */
+export interface BuildOpts {
+  exportMode?: boolean;
+  hover?: { midi: number; x: number } | null;
+  /** 渲染后(已兜底)回调，告知发现了哪些 issues。
+   *  不传时走默认实现：console.warn 打印问题清单(layout 已 clamp 兜底，不影响渲染)。 */
+  onIssues?: (issues: Issue[]) => void;
+}
+
+/** 默认 onIssues：静默兜底已由 layout 完成，这里只 console.warn 便于开发者察觉 */
+function defaultOnIssues(issues: Issue[]): void {
+  console.warn(`[MusicSheet] 检测到 ${issues.length} 个谱面问题(已兜底):\n` +
+    issues.map(i => `  - ${i.message}`).join('\n'));
+}
 
 /** 构造完整 SVG 字符串（含 <svg> 包裹），可同时用于屏幕与导出 */
-export function buildSVG(piece: Piece, layout: Layout, playingIndex: number, opts: { exportMode?: boolean; hover?: { midi: number; x: number } | null } = {}): string {
+export function buildSVG(piece: Piece, layout: Layout, playingIndex: number, opts: BuildOpts = {}): string {
   const input: RenderInput = { piece, layout, playingIndex, hover: opts.exportMode ? null : (opts.hover ?? null) };
   const staff = renderStaffSVG(input);
   const jianpu = renderJianpuSVG(input);
@@ -15,7 +31,14 @@ export function buildSVG(piece: Piece, layout: Layout, playingIndex: number, opt
   const title = opts.exportMode
     ? `<text x="${layout.contentLeft}" y="18" font-family='system-ui,sans-serif' font-size="13" fill="#64748b">五线谱 — 简谱对照</text>`
     : '';
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${layout.width}" height="${layout.height}" viewBox="0 0 ${layout.width} ${layout.height}">${bg}${title}${staff}${jianpu}</svg>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${layout.width}" height="${layout.height}" viewBox="0 0 ${layout.width} ${layout.height}">${bg}${title}${staff}${jianpu}</svg>`;
+  // 渲染完成(已 clamp 兜底)后，抛 issues 回调。diagnose 读 piece 原始数据，不受 clamp 影响。
+  const issues = diagnoseAll(piece);
+  if (issues.length) {
+    const handler = opts.onIssues ?? defaultOnIssues;
+    handler(issues);
+  }
+  return svg;
 }
 
 let cachedFontDataUrl: string | null = null;

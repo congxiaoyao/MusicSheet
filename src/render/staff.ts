@@ -4,6 +4,17 @@ import { Piece, Note } from '../core/types';
 import { staffStepToMidi, resolvePitch } from '../core/theory';
 import { Layout } from './layout';
 import { G, advanceSS } from './glyphs';
+import { computeBeams, BeamGroup } from './beam';
+
+// 连梁几何常量（单位 staff space）
+const BEAM_THICKNESS = 0.5;   // 单根横梁厚度
+const BEAM_GAP = 0.8;         // 双横梁间距（两根梁的中心距）
+const STEM_MIN_BEAM = 3;      // 连梁时符干最短长度，避免梁贴着符头
+const BEAM_OVERHANG = 2.5;    // 横梁允许超出五线谱顶/底线的距离（staff space）
+const MAX_BEAM_SLOPE = 1.5;   // 倾斜梁首尾最大垂直差（≈ 一个三度），超过削平
+// 符干水平内偏移：符干贴符头侧边时会顶出符头一点，往左（朝符头中心）挪此值，
+// 让符头遮住符干内侧，视觉更干净（朝上/朝下都往左挪）。
+const STEM_INSET = 0.1;      // 单位 staff space
 
 export interface RenderInput {
   piece: Piece;
@@ -37,6 +48,14 @@ function rect(x: number, y: number, w: number, h: number, opts: { fill?: string;
   const cls = opts.class ? ` class="${opts.class}"` : '';
   const op = opts.opacity !== undefined ? ` opacity="${opts.opacity}"` : '';
   return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" fill="${fill}"${fillOp}${stroke}${rx}${cls}${op}/>`;
+}
+
+/** 多边形：连梁横梁用，画平行四边形使两端切口平直。points 为 [x,y][]。 */
+function polygon(points: [number, number][], opts: { fill?: string; class?: string } = {}): string {
+  const fill = opts.fill ?? '#1f2430';
+  const cls = opts.class ? ` class="${opts.class}"` : '';
+  const pts = points.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
+  return `<polygon points="${pts}" fill="${fill}"${cls}/>`;
 }
 
 /** step（0=最下线，每步 1 个自然音级）→ y 坐标 */
@@ -144,8 +163,45 @@ function renderBarLines(layout: Layout): string {
   return s;
 }
 
-/** 渲染单个音符（含符头、符干、符尾、加线、临时记号、附点） */
-function renderNote(note: Note, x: number, piece: Piece, layout: Layout, highlight: boolean): string {
+/** 连梁上下文：组内每个音符渲染时传入，决定符干方向、对齐端点、是否画 flag。
+ *  stemEndY 是符干应延伸到的最远端点 y —— 双梁时是外侧那根梁的位置，
+ *  保证符干贯穿两根梁；单梁时就是梁本身的位置。 */
+interface BeamCtx {
+  stemDir: 'up' | 'down';
+  stemEndY: number;
+}
+
+/** 计算单个音符的符干几何。无 beam 时按自身音高定方向与长度；有 beam 时对齐到组统一端点。 */
+function computeStem(step: number, x: number, headHalfW: number, layout: Layout, beam: BeamCtx | undefined): {
+  stemUp: boolean; stemW: number; stemX: number; stemTop: number; stemBot: number;
+} {
+  const ss = layout.staffSpace;
+  const stemW = Math.max(1.5, ss * 0.17);
+  const inset = STEM_INSET * ss;
+  const headY = stepToY(step, layout);
+  if (beam) {
+    const stemUp = beam.stemDir === 'up';
+    const stemX = (stemUp ? x + headHalfW - stemW / 2 : x - headHalfW + stemW / 2) - inset;
+    if (stemUp) {
+      return { stemUp, stemW, stemX, stemTop: beam.stemEndY, stemBot: headY };
+    } else {
+      return { stemUp, stemW, stemX, stemTop: headY, stemBot: beam.stemEndY };
+    }
+  }
+  // 无连梁：原有逻辑
+  const stemUp = step <= 6;
+  const stemX = (stemUp ? x + headHalfW - stemW / 2 : x - headHalfW + stemW / 2) - inset;
+  const stemLen = ss * 7;
+  return {
+    stemUp, stemW, stemX,
+    stemTop: stemUp ? headY - stemLen : headY,
+    stemBot: stemUp ? headY : headY + stemLen,
+  };
+}
+
+/** 渲染单个音符（含符头、符干、符尾、加线、临时记号、附点）。
+ *  beam 非空时：符干对齐组端点，且不画 flag（flag 由连梁代替）。 */
+function renderNote(note: Note, x: number, piece: Piece, layout: Layout, highlight: boolean, beam?: BeamCtx): string {
   const fs = layout.fontSize;
   const ss = layout.staffSpace;
   let s = '';
@@ -198,19 +254,12 @@ function renderNote(note: Note, x: number, piece: Piece, layout: Layout, highlig
     : G.noteheadBlack;
   s += text(headGlyph, x, y, fs, { fill });
 
-  // 符干 + 符尾（whole 无）。符干方向：高于中线 → 朝下，否则朝上。
+  // 符干 + 符尾（whole 无）
   if (note.duration !== 'whole') {
-    const stemUp = step <= 6; // 中线及以下朝上
-    const stemW = Math.max(1.5, ss * 0.17);
-    // 符干贴住符头侧边
-    const stemX = stemUp ? x + headHalfW - stemW / 2 : x - headHalfW + stemW / 2;
-    // 标准符干长度 = 一个八度（3.5 线距 = 7 staff space）
-    const stemLen = ss * 7;
-    const stemTop = stemUp ? y - stemLen : y;
-    const stemBot = stemUp ? y : y + stemLen;
-    s += rect(stemX, stemTop, stemW, stemLen, { fill });
-    // 符尾：锚定在符干末端
-    if (note.duration === 'eighth' || note.duration === 'sixteenth') {
+    const { stemUp, stemW, stemX, stemTop, stemBot } = computeStem(step, x, headHalfW, layout, beam);
+    s += rect(stemX, stemTop, stemW, stemBot - stemTop, { fill });
+    // 符尾：只有未连梁的八分/十六分才画 flag（连梁的由横梁代替）
+    if (!beam && (note.duration === 'eighth' || note.duration === 'sixteenth')) {
       const flagGlyph = note.duration === 'eighth'
         ? (stemUp ? G.flag8thUp : G.flag8thDown)
         : (stemUp ? G.flag16thUp : G.flag16thDown);
@@ -261,6 +310,139 @@ function midiStep(midi: number, piece: Piece): number {
   return p.step;
 }
 
+/** 计算并渲染连梁：返回「音符索引 → BeamCtx」映射，供 renderNote 对齐符干。
+ *  几何规则（倾斜梁）：
+ *    - 组内统一方向 = 组平均 step ≤ 6（中线 B4）→ up，否则 down
+ *    - 首尾两端各自的梁 y：由首/末符头按标准长度 ss*7 算端点，首端取「最远」端点，
+ *      斜率 dy = 末端端点 − 首端端点，封顶在 ±MAX_BEAM_SLOPE*ss（一个三度）
+ *    - 最短符干约束：首尾任一端符干 < STEM_MIN_BEAM*ss 时整体平移补偿
+ *    - 边界 clamp：首尾 y 各自 clamp 到谱表上下界内（可能改变 dy，边界优先）
+ *    - 中间符干顶端沿首尾连线线性插值
+ *    - level=double 画两根平行斜梁，第二根朝外平移 BEAM_GAP*ss，符干贯穿两根 */
+function renderBeams(groups: BeamGroup[], piece: Piece, layout: Layout): { svg: string; ctxByIdx: Map<number, BeamCtx> } {
+  const ss = layout.staffSpace;
+  const ctxByIdx = new Map<number, BeamCtx>();
+  let svg = '';
+  const stemW = Math.max(1.5, ss * 0.17);
+  const headHalfW = advanceSS('noteheadBlack') / 2 * ss;
+
+  for (const g of groups) {
+    // 收集组内 step 与符头 y
+    const steps: number[] = [];
+    const headYs: number[] = [];
+    const stemXs: number[] = [];
+    for (let i = g.startIdx; i <= g.endIdx; i++) {
+      const note = piece.notes[i];
+      if (note.midi === null) continue;
+      const step = resolvePitch(note.midi, piece.clef, piece.key, note.accidental).step;
+      steps.push(step);
+      headYs.push(stepToY(step, layout));
+      // 暂用 up 方向算 stemX（x 对齐用），方向定后不依赖此值
+      const x = layout.noteX[i];
+      stemXs.push(x + headHalfW - stemW / 2);
+    }
+    if (steps.length < 2) continue;
+
+    const avgStep = steps.reduce((a, b) => a + b, 0) / steps.length;
+    const stemDir: 'up' | 'down' = avgStep <= 6 ? 'up' : 'down';
+
+    // ── 倾斜梁几何：首尾两端各自的 y，中间符干对齐首尾连线 ──
+    const stdLen = ss * 7;
+    const isDouble = g.level === 'double';
+    // 标准端点：每个符头按 ss*7 算（up 端点在符头上方，down 在下方）
+    const endAt = (hy: number) => stemDir === 'up' ? hy - stdLen : hy + stdLen;
+    const end0 = endAt(headYs[0]);
+    const endN = endAt(headYs[headYs.length - 1]);
+    // 斜率：首尾端点差，封顶在 ±MAX_BEAM_SLOPE*ss（一个三度），超过削平
+    const maxSlope = MAX_BEAM_SLOPE * ss;
+    let dy = Math.max(-maxSlope, Math.min(maxSlope, endN - end0));
+    // 首端取「最远」端点（保留水平梁时的逻辑：保证最短符干的一端也够长）。
+    // 倾斜下改为：首端 beamY1 = 首尾标准端点中「最远」的那个，末端 = 首端 + dy。
+    let beamY1 = stemDir === 'up' ? Math.min(end0, endN) : Math.max(end0, endN);
+    let beamY2 = beamY1 + dy;
+
+    // 最短符干约束：首尾两端任一符干 < STEM_MIN_BEAM*ss → 整体平移补偿
+    const minLen = STEM_MIN_BEAM * ss;
+    if (stemDir === 'up') {
+      // 首尾符头到梁的距离 = headY - beamY，取两端最小者
+      const shortBy = Math.min(headYs[0] - beamY1, headYs[headYs.length - 1] - beamY2);
+      if (shortBy < minLen) {
+        const shift = minLen - shortBy; // 梁需往上移 shift
+        beamY1 -= shift; beamY2 -= shift;
+      }
+    } else {
+      const shortBy = Math.min(beamY1 - headYs[0], beamY2 - headYs[headYs.length - 1]);
+      if (shortBy < minLen) {
+        const shift = minLen - shortBy;
+        beamY1 += shift; beamY2 += shift;
+      }
+    }
+
+    // 边界 clamp：保留倾斜斜率。若任一端超出边界，整体平移让「最远端」贴界，
+    // 另一端 = 贴界端 + dy，从而保留斜率（而不是两端各自 clamp 抹平成水平）。
+    // 双梁阈值减 gap（副梁更靠外）。
+    const overhang = (BEAM_OVERHANG - (isDouble ? BEAM_GAP : 0)) * ss;
+    const beamMinY = layout.staffTop - overhang;
+    const beamMaxY = layout.staffBottom + overhang;
+    if (stemDir === 'up') {
+      // 朝上：梁在符头上方，y 小的端更靠外。取两端最小值看是否越界。
+      const outerY = Math.min(beamY1, beamY2);
+      if (outerY < beamMinY) {
+        const shift = beamMinY - outerY; // 整体下移
+        beamY1 += shift; beamY2 += shift;
+      }
+    } else {
+      const outerY = Math.max(beamY1, beamY2);
+      if (outerY > beamMaxY) {
+        const shift = outerY - beamMaxY; // 整体上移
+        beamY1 -= shift; beamY2 -= shift;
+      }
+    }
+    // 重新算实际 dy（clamp 后）
+    dy = beamY2 - beamY1;
+
+    // 每个音符的符干端点：沿首尾连线线性插值。t = 该音符在组内的位置比例。
+    // 双梁时符干延伸到外侧梁（朝上取减 gap，朝下取加 gap），保证贯穿两根。
+    const n = steps.length;
+    for (let k = 0; k < n; k++) {
+      const i = g.startIdx + k;
+      const x = layout.noteX[i];
+      const t = n === 1 ? 0 : k / (n - 1);
+      const mainBeamYatK = beamY1 + dy * t;       // 第一根梁在该音符处的 y
+      const outerBeamYatK = isDouble
+        ? (stemDir === 'up' ? mainBeamYatK - BEAM_GAP * ss : mainBeamYatK + BEAM_GAP * ss)
+        : mainBeamYatK;
+      ctxByIdx.set(i, { stemDir, stemEndY: outerBeamYatK });
+      stemXs[k] = (stemDir === 'up' ? x + headHalfW - stemW / 2 : x - headHalfW + stemW / 2) - STEM_INSET * ss;
+    }
+
+    // 画横梁：x 范围覆盖首尾符干的全宽（左边缘→右边缘），保证梁盖住符干顶端，
+    // 不让符干从梁的斜边旁露出来。双梁画两根，第二根两端 y 朝外平移 BEAM_GAP*ss。
+    const x1 = stemXs[0];                      // 首符干左边缘
+    const x2 = stemXs[n - 1] + stemW;          // 末符干右边缘
+    const thick = BEAM_THICKNESS * ss;
+    svg += drawBeam(x1, beamY1, x2, beamY2, thick);
+    if (isDouble) {
+      const off = BEAM_GAP * ss;
+      svg += drawBeam(x1, beamY1 - (stemDir === 'up' ? off : -off),
+                      x2, beamY2 - (stemDir === 'up' ? off : -off), thick);
+    }
+  }
+
+  return { svg, ctxByIdx };
+}
+
+/** 画一根横梁：倾斜平行四边形。(x1,y1) 是首端梁中心、(x2,y2) 是末端梁中心，
+ *  thick 是梁厚度。两端以各自 y 为中心上下各 thick/2，形成平行四边形（两端切口竖直）。 */
+function drawBeam(x1: number, y1: number, x2: number, y2: number, thick: number): string {
+  const half = thick / 2;
+  const pts: [number, number][] = [
+    [x1, y1 - half], [x2, y2 - half], // 上边：首→末
+    [x2, y2 + half], [x1, y1 + half], // 下边：末→首
+  ];
+  return polygon(pts, { fill: '#1f2430' });
+}
+
 /** 主渲染：返回 SVG 内部内容（不含 <svg> 标签） */
 export function renderStaffSVG(input: RenderInput): string {
   const { piece, layout, playingIndex } = input;
@@ -272,8 +454,13 @@ export function renderStaffSVG(input: RenderInput): string {
   s += renderBarLines(layout);
   s += renderNextSlot(layout);
   s += renderHover(input, layout);
+  // 连梁：先算几何，画横梁（置于音符符头之下，符干之上 → 渲染顺序：梁先画，后画符头/符干会盖住梁端）
+  // 但符干需要在梁之上（符干顶端连到梁）。采用顺序：先画梁，再画音符；音符的符干会从符头画到 beamY，
+  // 与梁重叠，视觉上符干接入梁。
+  const { svg: beamSvg, ctxByIdx } = renderBeams(computeBeams(piece), piece, layout);
+  s += beamSvg;
   for (let i = 0; i < piece.notes.length; i++) {
-    s += renderNote(piece.notes[i], layout.noteX[i], piece, layout, i === playingIndex);
+    s += renderNote(piece.notes[i], layout.noteX[i], piece, layout, i === playingIndex, ctxByIdx.get(i));
   }
   return s;
 }

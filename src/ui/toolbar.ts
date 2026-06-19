@@ -1,6 +1,6 @@
 // 工具栏：当前编辑状态 + 控件渲染
 
-import { Clef, DurationValue, KeyName, TimeSig } from '../core/types';
+import { Clef, DurationValue, KeyName, TimeSig, durationBeats } from '../core/types';
 
 /** 用户当前的「输入笔」状态 */
 export interface ToolState {
@@ -184,12 +184,25 @@ export function buildToolbar(state: ToolState, cb: ToolbarCallbacks): HTMLElemen
   setWrap.appendChild(timeWrap);
   root.appendChild(setWrap);
 
-  // 返回需要重置修饰的钩子（休止符现在是动作按钮，无需重置）
+  // 返回需要重置修饰的钩子（休止符现在是动作按钮，无需重置）。
+  // 同时暴露容量刷新：根据「本小节剩余拍数」「全局剩余拍数」disable 放不下的时值/附点按钮。
   (root as any)._resetModifiers = () => {
     state.dotted = false;
     state.accidental = null;
     dotBtn.set(false);
     updateAcc();
+  };
+  (root as any)._refreshCapacity = (remBarBeats: number, remPieceBeats: number) => {
+    const pieceFull = remPieceBeats < 1e-6;
+    // 时值按钮：该时值(非附点)放不进本小节剩余 → disable
+    durBtns.forEach((b, i) => {
+      const dur = DURATIONS[i].value;
+      const need = durationBeats(dur, false);
+      b.disabled = pieceFull || need > remBarBeats + 1e-6;
+    });
+    // 附点按钮：当前选中时值加附点放不进 → disable
+    const dottedNeed = durationBeats(state.duration, true);
+    dotBtn.el.disabled = pieceFull || dottedNeed > remBarBeats + 1e-6;
   };
 
   return root;
