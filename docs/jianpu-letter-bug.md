@@ -1,6 +1,15 @@
 # 简谱翻译 Bug:`letter` 双基准导致升/降号调简谱错位
 
-> 状态:**已确认的 bug,未修复**
+> 状态:**已修复 (2026-06-19)**
+>
+> 修复要点:
+> 1. KEYS 升号顺序纠正为标准 F C G D A E B(原 G 错成 B);降号纠正为 B E A D G C F
+> 2. noteToJianpu 改用「音级中心法」(遍历 7 级找最近半音)算数字,消除 letter 双基准错位
+> 3. tonicPc 考虑调号升降(Bb 主音 B 在 flats 里 → 11-1=10)
+> 4. letterFromPc 平局偏向上方字母(降号拼写);平局裁决按调号升/降方向
+> 5. 八度点 round→floor(C4~B4 同属无点区)
+>
+> 验证: `npx tsx scripts/verify-jianpu.mjs` 全部 ✅;10 个调 in-key 音阶均输出 1 2 3 4 5 6 7
 > 影响范围:除 C 大调外,所有带升降号的调号,简谱数字会错位或临时记号方向错
 > 复现脚本:`npx tsx scripts/verify-jianpu.mjs`
 

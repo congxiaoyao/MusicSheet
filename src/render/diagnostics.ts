@@ -22,13 +22,20 @@ export interface Issue {
 }
 
 /**
- * 调号自洽性校验（静态，不依赖 notes）。首版只做最可靠的检查，避免字母索引语义
- * 歧义导致的误报：
+ * 调号自洽性校验（静态，不依赖 notes）。三层检查：
  *   - sharps/flats 互斥（不能同时非空）
- *   - sharps/flats 数量与调名在五度圈的期望数量一致（升号侧 0-6，降号侧 0-6）
- * 主音 pc 的精细校验因字母索引语义在代码里未统一，暂不做（留待 tonic 语义统一后）。
- * 防御 KEYS 表结构性错误（数量/互斥）。
+ *   - sharps/flats 数量与调名在五度圈的期望数量一致
+ *   - 主音 pc 精细校验：主音字母的自然 pc 经调号修饰后，必须等于调名应有 pc
+ *     （如 Eb 调主音字母 E=2，E 在 flats 里则 pc=4-1=3 == Eb 的 pc，对；若 tonic 写错则检出）
+ * letter 基准已统一为固定 C=0（resolvePitch 已修），故可与 tonic 同基准校验。
  */
+// 字母 C D E F G A B 的自然 pitch-class
+const NATURAL_PC = [0, 2, 4, 5, 7, 9, 11];
+// 各调名应有的主音 pitch-class（五度圈推导）
+const KEY_PC: Record<string, number> = {
+  C: 0, G: 7, D: 2, A: 9, E: 4, B: 11, 'F#': 6,
+  F: 5, Bb: 10, Eb: 3, Ab: 8, Db: 1, Gb: 6,
+};
 export function diagnoseKeySignature(piece: Piece): Issue[] {
   const issues: Issue[] = [];
   const key = piece.key;
@@ -51,6 +58,19 @@ export function diagnoseKeySignature(piece: Piece): Issue[] {
   if (name in EXPECT_FLATS && key.flats.length !== EXPECT_FLATS[name]) {
     issues.push({ kind: 'keysig', noteIdx: -1, barIdx: -1,
       message: `调号 ${name} 降号数 ${key.flats.length} 与期望 ${EXPECT_FLATS[name]} 不符` });
+  }
+
+  // 主音 pc 精细校验：主音字母的自然 pc，经调号升降修饰后，必须等于调名应有 pc。
+  // 如 Eb：主音字母 E(索引2) 在 flats 里 → pc = 4-1 = 3 == KEY_PC.Eb，对。
+  // 防御 tonic 字段写错（历史上 Eb/Db/Gb 曾各少1，已被本检查当时的简化版间接捕获）。
+  if (name in KEY_PC) {
+    let tonicPc = NATURAL_PC[key.tonic] ?? -1;
+    if (key.sharps.includes(key.tonic)) tonicPc = (tonicPc + 1) % 12;
+    if (key.flats.includes(key.tonic)) tonicPc = (tonicPc + 11) % 12;
+    if (tonicPc !== KEY_PC[name]) {
+      issues.push({ kind: 'keysig', noteIdx: -1, barIdx: -1,
+        message: `调号 ${name} 主音错误：tonic=${key.tonic} 经调号修饰后 pc=${tonicPc}，应为 ${KEY_PC[name]}` });
+    }
   }
 
   return issues;

@@ -32,22 +32,22 @@ allOk = show('G', 60, 'C4', '4') && allOk;
 allOk = show('G', 62, 'D4', '5') && allOk;
 allOk = show('G', 64, 'E4', '6') && allOk;
 // F4 在 G 调是 F#(7级升)。注意:若 resolvePitch 把 F4 当成 E#(letter偏移)，数字会错
-allOk = show('G', 65, 'F4(应7)', '7(sharp)') && allOk;
+allOk = show('G', 65, 'F4(应7)', '7(flat)') && allOk;  // F自然<in-key F# → 降
 
 console.log('\n═══ A 大调(3升 F# C# G#) 预期: A=1 B=2 C#=3(sharp) D=4 E=5 F#=6(sharp) G#=7(sharp) ═══');
 allOk = show('A', 69, 'A4', '1') && allOk;
 allOk = show('A', 71, 'B4', '2') && allOk;
-allOk = show('A', 60, 'C4(应3)', '3(sharp)') && allOk;  // ← 当前 bug: 输出 2
+allOk = show('A', 60, 'C4(应3)', '3(flat)') && allOk;  // C自然<in-key C# → 降
 allOk = show('A', 62, 'D4', '4') && allOk;
 allOk = show('A', 64, 'E4', '5') && allOk;
-allOk = show('A', 65, 'F4(应6)', '6(sharp)') && allOk;
-allOk = show('A', 67, 'G4(应7)', '7(sharp)') && allOk;
+allOk = show('A', 65, 'F4(应6)', '6(flat)') && allOk;
+allOk = show('A', 67, 'G4(应7)', '7(flat)') && allOk;
 
 console.log('\n═══ F 大调(1降 Bb) 预期: F=1 G=2 A=3 Bb=4(flat) C=5 D=6 E=7 ═══');
 allOk = show('F', 65, 'F4', '1') && allOk;
 allOk = show('F', 67, 'G4', '2') && allOk;
 allOk = show('F', 69, 'A4', '3') && allOk;
-allOk = show('F', 71, 'B4(应4)', '4(flat)') && allOk;
+allOk = show('F', 71, 'B4(应4)', '4(sharp)') && allOk;  // B自然>in-key Bb → 升
 allOk = show('F', 60, 'C4', '5') && allOk;
 allOk = show('F', 62, 'D4', '6') && allOk;
 allOk = show('F', 64, 'E4', '7') && allOk;

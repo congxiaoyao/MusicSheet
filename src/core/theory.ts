@@ -53,10 +53,10 @@ export const KEYS: Record<KeyName, KeySig> = {
   C: { name: 'C', tonic: 0, sharps: [], flats: [] },
   G: { name: 'G', tonic: 4, sharps: [3], flats: [] }, // F#
   D: { name: 'D', tonic: 1, sharps: [3, 0], flats: [] }, // F# C#
-  A: { name: 'A', tonic: 5, sharps: [3, 0, 6], flats: [] }, // F# C# G#
-  E: { name: 'E', tonic: 2, sharps: [3, 0, 6, 2], flats: [] }, // F# C# G# D#
-  B: { name: 'B', tonic: 6, sharps: [3, 0, 6, 2, 5], flats: [] }, // F# C# G# D# A#
-  'F#': { name: 'F#', tonic: 3, sharps: [3, 0, 6, 2, 5, 1], flats: [] }, // ...E#
+  A: { name: 'A', tonic: 5, sharps: [3, 0, 4], flats: [] }, // F# C# G#
+  E: { name: 'E', tonic: 2, sharps: [3, 0, 4, 1], flats: [] }, // F# C# G# D#
+  B: { name: 'B', tonic: 6, sharps: [3, 0, 4, 1, 5], flats: [] }, // F# C# G# D# A#
+  'F#': { name: 'F#', tonic: 3, sharps: [3, 0, 4, 1, 5, 2], flats: [] }, // ...E#
   F: { name: 'F', tonic: 3, sharps: [], flats: [6] }, // Bb
   Bb: { name: 'Bb', tonic: 6, sharps: [], flats: [6, 2] }, // Bb Eb
   Eb: { name: 'Eb', tonic: 2, sharps: [], flats: [6, 2, 5] }, // Bb Eb Ab
@@ -140,7 +140,7 @@ function letterFromPc(pc: number): number {
   let bestErr = 99;
   for (let l = 0; l < 7; l++) {
     const err = Math.abs(NATURAL_SEMITONE[l] - pc);
-    if (err < bestErr) {
+    if (err < bestErr || (err === bestErr && NATURAL_SEMITONE[l] > NATURAL_SEMITONE[best])) {
       bestErr = err;
       best = l;
     }
@@ -168,27 +168,43 @@ export function noteToJianpu(note: Note, key: KeySig): JianpuGlyph | null {
   const midi = note.midi;
   const pc = midi % 12;
   const tonicLetter = key.tonic;
-  const tonicPc = NATURAL_SEMITONE[tonicLetter];
+  // 主音的实际半音：若主音字母在调号升降里，要相应 ±1（如 Bb 大调主音 B 在 flats 里 → 11-1=10）
+  let tonicPc = NATURAL_SEMITONE[tonicLetter];
+  if (key.sharps.includes(tonicLetter)) tonicPc = (tonicPc + 1) % 12;
+  if (key.flats.includes(tonicLetter)) tonicPc = (tonicPc + 11) % 12;
 
-  // 决定字母
-  let letter: number;
-  if (note.accidental === 'sharp') {
-    letter = letterFromPc((pc + 11) % 12);
-  } else if (note.accidental === 'flat') {
-    letter = letterFromPc((pc + 1) % 12);
-  } else {
-    const sharpLetter = key.sharps.find(l => (NATURAL_SEMITONE[l] + 1) % 12 === pc);
-    const flatLetter = key.flats.find(l => (NATURAL_SEMITONE[l] + 11) % 12 === pc);
-    if (sharpLetter !== undefined) letter = sharpLetter;
-    else if (flatLetter !== undefined) letter = flatLetter;
-    else letter = letterFromPc(pc);
+  // 用「音级中心法」决定简谱数字与字母，避免升/降调下字母解析的二义性：
+  // 遍历 7 个音级，找哪个音级的自然半音距 pc 最近 → 该音级即简谱数字。
+  // （升号调的 in-key 升音、降号调的 in-key 降音都会自然落到正确音级。）
+  let bestDeg = 0;
+  let bestDist = 99;
+  for (let i = 0; i < 7; i++) {
+    const nat = (tonicPc + SCALE_SEMITONES[i]) % 12;
+    // 半音距离（环状）
+    const d = Math.min((pc - nat + 12) % 12, (nat - pc + 12) % 12);
+    if (d < bestDist) {
+      bestDist = d; bestDeg = i;
+    } else if (d === bestDist) {
+      // 距离相同时（如 C4 同时接近 B 和 C#）：偏向「该音级字母是调内升降音」的那一级，
+      // 这样调外自然音会落到正确的 in-key 升/降音级上（A 调 C4 → C# 那级 = 3，而非 B 那级 = 2）
+      const letterI = ((tonicLetter + i) % 7 + 7) % 7;
+      const letterBest = ((tonicLetter + bestDeg) % 7 + 7) % 7;
+      const iInKey = key.sharps.includes(letterI) || key.flats.includes(letterI);
+      const bestInKey = key.sharps.includes(letterBest) || key.flats.includes(letterBest);
+      const natI = (tonicPc + SCALE_SEMITONES[i]) % 12;
+      const iBelow = (natI - pc + 12) % 12 === 1;
+      const preferI =
+        (iInKey && !bestInKey) ||
+        (iInKey && bestInKey && key.sharps.length > 0 && iBelow) ||
+        (iInKey && bestInKey && key.flats.length > 0 && !iBelow);
+      if (preferI) bestDeg = i;
+    }
   }
+  const digit = bestDeg + 1;
+  // 字母 = 主音字母 + 音级偏移（固定基准，与 tonicLetter 同基准）
+  const letter = ((tonicLetter + bestDeg) % 7 + 7) % 7;
 
-  // 数字（首调）
-  const digit = (((letter - tonicLetter) % 7) + 7) % 7 + 1;
-
-  // 八度点：用「自然音字母连续坐标」算。do-ti 一个八度（如 C4~B4）= 无点区。
-  // 以「主音字母落在第 4 八度」为基准：C4..B4 = 无点，C5..B5 = 上一点，C3..B3 = 下一点。
+  // 八度点：do-ti 一个八度（如 C4~B4）= 无点区。
   const noteOctave = Math.floor(midi / 12) - 1;
   const noteCoord = noteOctave * 7 + letter;
   const tonicCoord = 4 * 7 + tonicLetter;
@@ -202,7 +218,10 @@ export function noteToJianpu(note: Note, key: KeySig): JianpuGlyph | null {
     else if ((naturalPc + 11) % 12 === pc) accidental = 'flat';
     else accidental = 'sharp';
   }
-  // 调号内的升降音：不另写记号
+  // 用户强制记号优先
+  if (note.accidental === 'sharp') accidental = 'sharp';
+  else if (note.accidental === 'flat') accidental = 'flat';
+  // 调号内的升降音（该音级正好是调号里的升降音）：不另写记号
   if (accidental === 'sharp' && key.sharps.includes(letter)) accidental = null;
   if (accidental === 'flat' && key.flats.includes(letter)) accidental = null;
 
