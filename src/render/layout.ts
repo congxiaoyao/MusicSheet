@@ -9,7 +9,7 @@
 // 这样不论音符多寡、时值长短，都能均匀填满整个小节，不会有大段右侧留白。
 // 下一个待输入位置的「格子宽度」也由当前时值决定 → 圆角框宽度随时值变化。
 
-import { Piece, DurationValue, durationBeats } from '../core/types';
+import { Piece, DurationValue, durationBeats, noteValueBeats } from '../core/types';
 import { beatsPerBar } from '../core/types';
 import { noteStartBeats, capacityBeats } from '../core/model';
 
@@ -127,7 +127,7 @@ export function computeLayout(piece: Piece, containerWidth: number, currentDurat
   let nextBeat = 0;
   if (piece.notes.length) {
     const last = piece.notes.length - 1;
-    nextBeat = starts[last] + durationBeats(piece.notes[last].duration, piece.notes[last].dotted);
+    nextBeat = starts[last] + durationBeats(piece.notes[last]);
   }
   const isFull = nextBeat >= capBeats - 1e-6;
   const nextBarIdx = Math.min(Math.floor(Math.min(nextBeat, capBeats - 0.001) / bpb), measures - 1);
@@ -157,7 +157,7 @@ export function computeLayout(piece: Piece, containerWidth: number, currentDurat
  *  兜底：若音符的 beatInBar 超出小节容量(超拍数据)，clamp 到小节内，
  *  防止音符漂到下一小节视觉区/压小节线。可能和相邻音符挤一起，但至少在小节框内。 */
 function positionInBar(notes: Piece['notes'], startBeat: number, barIdx: number, barWidth: number, bpb: number, noteIdx: number, barLines: number[]): { x: number; slotW: number } {
-  const dur = durationBeats(notes[noteIdx].duration, notes[noteIdx].dotted);
+  const dur = durationBeats(notes[noteIdx]);
   // clamp beatInBar 到 [0, bpb - dur]：超拍时不让音符漂出当前小节
   const rawBeatInBar = startBeat - barIdx * bpb;
   const beatInBar = Math.min(Math.max(0, rawBeatInBar), Math.max(0, bpb - dur));
@@ -168,7 +168,7 @@ function positionInBar(notes: Piece['notes'], startBeat: number, barIdx: number,
 
 /** 下一个待输入格子的宽度（按时值占比，但保证最小可读宽度）。 */
 function slotWidthFor(duration: DurationValue, bpb: number, barWidth: number): number {
-  const ratio = durationBeats(duration, false) / bpb;
+  const ratio = noteValueBeats(duration, false) / bpb;
   const minW = SLOT_MIN[duration] * SS;
   return Math.max(barWidth * ratio, minW);
 }

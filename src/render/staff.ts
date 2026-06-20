@@ -5,6 +5,7 @@ import { staffStepToMidi, resolvePitch } from '../core/theory';
 import { Layout } from './layout';
 import { G, advanceSS } from './glyphs';
 import { computeBeams, BeamGroup, beamCountForNote } from './beam';
+import { tupletGroups } from '../core/model';
 
 // 连梁几何常量（单位 staff space）
 const BEAM_THICKNESS = 0.5;   // 单根横梁厚度（SMuFL beamThickness）
@@ -567,6 +568,59 @@ function renderTies(piece: Piece, layout: Layout): string {
   return s;
 }
 
+/** 渲染连音组(tuplet)标记：每组上方画方括号 + 居中数字(actual，如三连音「3」)。
+ *  bracket 顶部横线 + 两端短竖线，数字居中。y 在组内最高符头之上（避开符头/连梁）。 */
+function renderTuplets(piece: Piece, layout: Layout, ctxByIdx: Map<number, BeamCtx>): string {
+  const ss = layout.staffSpace;
+  const groups = tupletGroups(piece);
+  let s = '';
+  const fs = ss * 2.6;                       // 数字字号（标准约 1.5-2 staff space 高）
+  // 连梁候选时值（这些时值会被 computeBeams 连梁）
+  const beamable = (d: Note['duration']) => d === 'eighth' || d === 'sixteenth' || d === 'thirtysecond';
+  for (const g of groups) {
+    // 组首末 x（含符头半宽，让标记略宽于音符）
+    const headHalfW = advanceSS('noteheadBlack') / 2 * ss;
+    const x1 = layout.noteX[g.startIdx] - headHalfW * 0.5;
+    const x2 = layout.noteX[g.endIdx] + headHalfW * 0.5;
+    // 组内最高符头 y（最小 y = 最靠上）→ 标记画在其上方
+    let topY = Infinity;
+    for (let i = g.startIdx; i <= g.endIdx; i++) {
+      const note = piece.notes[i];
+      if (note.midi === null) continue;
+      const step = resolvePitch(note.midi, piece.clef, piece.key, note.accidental).step;
+      topY = Math.min(topY, stepToY(step, layout));
+    }
+    if (topY === Infinity) continue;
+    const mx = (x1 + x2) / 2;
+    // Gould《Behind Bars》：有连梁的连音组（八分/十六分/三十二分三连音）省略方括号，
+    // 数字直接放梁上方；无连梁的组（如四分三连音）才画方括号 + 数字。
+    const hasBeam = piece.notes.slice(g.startIdx, g.endIdx + 1).every(n => n.midi !== null && beamable(n.duration));
+    if (!hasBeam) {
+      // 无连梁：方括号 + 数字。bracket 横线在最高符头上方 2.4ss，数字在其上方。
+      const markY = topY - ss * 2.4;
+      const bracketH = ss * 0.7;
+      const lw = Math.max(1.2, ss * 0.13);
+      s += line(x1, markY, x2, markY, '#1f2430', lw);
+      s += line(x1, markY, x1, markY + bracketH, '#1f2430', lw);
+      s += line(x2, markY, x2, markY + bracketH, '#1f2430', lw);
+      s += text(String(g.actual), mx, markY - ss * 0.4, fs, { fill: '#1f2430', anchor: 'middle' });
+    } else {
+      // 有连梁：只画数字，贴在 primary 梁上方。用 renderBeams 算出的真实 stemEndY
+      // 数字居中在组中点 mx，其正下方的 primary 梁 y = 首末音 stemEndY 的中点
+      // （primary 梁贯穿整组、斜率线性，首末端的 y 平均即中点 y，对任意音数精确）。
+      const firstBeam = ctxByIdx.get(g.startIdx);
+      const lastBeam = ctxByIdx.get(g.endIdx);
+      if (firstBeam && lastBeam) {
+        const beamMidY = (firstBeam.stemEndY + lastBeam.stemEndY) / 2;
+        const stemDir = firstBeam.stemDir;
+        const numY = stemDir === 'up' ? beamMidY - ss * 0.4 : beamMidY + ss * 0.4;
+        s += text(String(g.actual), mx, numY, fs, { fill: '#1f2430', anchor: 'middle' });
+      }
+    }
+  }
+  return s;
+}
+
 /** 主渲染：返回 SVG 内部内容（不含 <svg> 标签） */
 export function renderStaffSVG(input: RenderInput): string {
   const { piece, layout, playingIndex } = input;
@@ -588,6 +642,8 @@ export function renderStaffSVG(input: RenderInput): string {
   }
   // 连音线(tie)：弧线画在符头之上，所以放在音符循环之后
   s += renderTies(piece, layout);
+  // 连音组(tuplet)：方括号+数字画在最上层
+  s += renderTuplets(piece, layout, ctxByIdx);
   return s;
 }
 

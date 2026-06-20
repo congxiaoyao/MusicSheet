@@ -2,6 +2,7 @@
 
 import { noteToJianpu } from '../core/theory';
 import { RenderInput } from './staff';
+import { tupletGroups } from '../core/model';
 
 const NUMBER_FONT = '"Bravura", "Times New Roman", serif';
 const DIGIT_FS = 26;
@@ -143,6 +144,21 @@ export function renderJianpuSVG(input: RenderInput): string {
       const dx = x + 16 + d * 14;
       s += line(dx - 6, baseY - 4, dx + 6, baseY - 4, fill, 1.8);
     }
+  }
+
+  // 连音组(tuplet)标记。简谱规范：数字 + 弧线（连接组首到组末，在数字下方/音符上方），
+  // 不论时值都画弧线（简谱的下划线是时值线，与连音弧线是两回事）。
+  for (const g of tupletGroups(piece)) {
+    const x1 = layout.noteX[g.startIdx] - 6;
+    const x2 = layout.noteX[g.endIdx] + 6;
+    const mx = (x1 + x2) / 2;
+    const numY = baseY - 28;                       // 数字 y（上方）
+    const arcY = baseY - 20;                       // 弧线 y（数字下方、音符上方，往上提）
+    // 数字（actual）
+    s += text(String(g.actual), mx, numY, DIGIT_FS * 0.7, { fill: '#1f2430', weight: '500' });
+    // 弧线：朝上凸，连接组首到组末
+    const my = arcY - 5;
+    s += path(`M ${x1.toFixed(1)} ${arcY.toFixed(1)} Q ${mx.toFixed(1)} ${my.toFixed(1)} ${x2.toFixed(1)} ${arcY.toFixed(1)}`, '#1f2430', 1.2);
   }
 
   // 下一个待输入位置在简谱行的对应圆角矩形指示器（宽度随时值变化；写满不显示）

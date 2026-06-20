@@ -107,11 +107,17 @@ export function computeBeams(piece: Piece): BeamGroup[] {
     // 只看「同 beatGroup 且不跨小节」。
     const sameBeatGroup = thisGroupIdx === groupBeatOrigin;
 
+    // 连音组(tuplet)强制同组连梁：当前音与组内前一音同 tuplet groupId 时，
+    // 忽略 beatGroup 判定（三连音的音拍位可能横跨多个 beatGroup，但仍应连梁成一组）。
+    const prevTupletId = notes[i - 1].tuplet?.groupId;
+    const thisTupletId = note.tuplet?.groupId;
+    const sameTuplet = !!(prevTupletId && thisTupletId && prevTupletId === thisTupletId);
+
     // 跨小节判定：检查本音符起始拍是否越过下一条小节线
     const prevBeat = starts[i - 1];
     const crossesBar = bars.some(b => prevBeat < b - 1e-6 && startBeat >= b - 1e-6);
 
-    if (sameBeatGroup && !crossesBar) {
+    if ((sameBeatGroup || sameTuplet) && !crossesBar) {
       // 继续累积：组内最大梁容量取各音的最大值
       groupMaxCount = Math.max(groupMaxCount, beamCountForNote(note.duration));
     } else {
