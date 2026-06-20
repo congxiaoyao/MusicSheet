@@ -1,6 +1,16 @@
 // 工具栏：当前编辑状态 + 控件渲染
 
-import { Clef, DurationValue, KeyName, TimeSig, durationBeats } from '../core/types';
+import { Clef, DurationValue, KeyName, TimeSig, noteValueBeats } from '../core/types';
+
+/** 连音模式。off=普通；其余值表示对应连音类型（actual:normal）。 */
+export type TupletMode = 'off' | 'triplet' | 'quintuplet' | 'sextuplet';
+
+/** 各连音模式的 actual:normal 配置。三连音=3:2(3个音占2个普通音位)；五连音=5:4；六连音=6:4。 */
+export const TUPLET_CONFIG: Record<Exclude<TupletMode, 'off'>, { actual: number; normal: number; label: string }> = {
+  triplet: { actual: 3, normal: 2, label: '三连音' },
+  quintuplet: { actual: 5, normal: 4, label: '五连音' },
+  sextuplet: { actual: 6, normal: 4, label: '六连音' },
+};
 
 /** 用户当前的「输入笔」状态 */
 export interface ToolState {
@@ -11,6 +21,9 @@ export interface ToolState {
   rest: boolean;
   /** 下一个音符是否与前一个同音高音建立连音线(tie)。一次性修饰符，录入后自动重置 */
   tieNext: boolean;
+  /** 连音组(tuplet)输入模式：off=关闭；triplet=三连音(3:2)；quintuplet=五连音(5:4)；sextuplet=六连音(6:4)。
+   *  开启后接下来输入的 actual 个音自动归为一组，输入完第 actual 个后自动关闭。 */
+  tupletMode: TupletMode;
   clef: Clef;
   key: KeyName;
   time: TimeSig;
@@ -25,6 +38,7 @@ export function defaultTool(): ToolState {
     accidental: null,
     rest: false,
     tieNext: false,
+    tupletMode: 'off',
     clef: 'treble',
     key: 'C',
     time: { num: 4, den: 4 },
@@ -95,6 +109,26 @@ export function buildToolbar(state: ToolState, cb: ToolbarCallbacks): HTMLElemen
   optWrap.appendChild(dotBtn.el);
   optWrap.appendChild(tieBtn.el);
   optWrap.appendChild(restBtn);
+  // 连音组(tuplet)：三/五/六连音三选一。点当前模式=关闭，点其他模式=切换。高亮当前活跃模式。
+  const tupletButtons: Record<string, HTMLButtonElement> = {};
+  const syncTupletUI = () => {
+    for (const [mode, btn] of Object.entries(tupletButtons)) {
+      btn.classList.toggle('active', state.tupletMode === mode);
+    }
+  };
+  for (const mode of ['triplet', 'quintuplet', 'sextuplet'] as const) {
+    const cfg = TUPLET_CONFIG[mode];
+    const btn = document.createElement('button');
+    btn.className = 'chip toggle';
+    btn.textContent = `${cfg.actual}连`;
+    btn.title = `${cfg.label}（${cfg.actual}个音占${cfg.normal}个普通音位，再按关闭）`;
+    btn.addEventListener('click', () => {
+      state.tupletMode = state.tupletMode === mode ? 'off' : mode;
+      syncTupletUI();
+    });
+    tupletButtons[mode] = btn;
+    optWrap.appendChild(btn);
+  }
 
   // 升降记号（三选一）
   const accWrap = document.createElement('div');
@@ -227,16 +261,20 @@ export function buildToolbar(state: ToolState, cb: ToolbarCallbacks): HTMLElemen
     state.tieNext = v;
     tieBtn.set(v);
   };
+  (root as any)._setTupletMode = (v: TupletMode) => {
+    state.tupletMode = v;
+    syncTupletUI();
+  };
   (root as any)._refreshCapacity = (remBarBeats: number, remPieceBeats: number) => {
     const pieceFull = remPieceBeats < 1e-6;
     // 时值按钮：该时值(非附点)放不进本小节剩余 → disable
     durBtns.forEach((b, i) => {
       const dur = DURATIONS[i].value;
-      const need = durationBeats(dur, false);
+      const need = noteValueBeats(dur, false);
       b.disabled = pieceFull || need > remBarBeats + 1e-6;
     });
     // 附点按钮：当前选中时值加附点放不进 → disable
-    const dottedNeed = durationBeats(state.duration, true);
+    const dottedNeed = noteValueBeats(state.duration, true);
     dotBtn.el.disabled = pieceFull || dottedNeed > remBarBeats + 1e-6;
   };
 

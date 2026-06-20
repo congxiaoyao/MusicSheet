@@ -47,7 +47,7 @@ export class Player {
 
     // 预算每个音的「实际发声音长」：连音线(tie)把同音高相邻音合并成一个长音。
     // tie 链的起点音吃掉整条链的总时长；链中每个 tieEnd 音发声音长=0（不重新起振，只推进时间）。
-    const voiceDur = notes.map(n => durationBeats(n.duration, n.dotted) * secPerBeat);
+    const voiceDur = notes.map(n => durationBeats(n) * secPerBeat);
     for (let i = 0; i < notes.length; i++) {
       if (notes[i].tieStart && notes[i].midi !== null
         && i + 1 < notes.length && notes[i + 1].tieEnd && notes[i + 1].midi === notes[i].midi) {
@@ -82,7 +82,7 @@ export class Player {
       if (n.midi !== null && dur > 0) {
         this.playNote(ctx, master, n.midi, t, dur);
       }
-      t += durationBeats(n.duration, n.dotted) * secPerBeat;  // 时间轴仍按各音原始时值推进
+      t += durationBeats(n) * secPerBeat;  // 时间轴仍按各音原始时值推进
     });
 
     // 结束回调

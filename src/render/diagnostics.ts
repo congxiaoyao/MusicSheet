@@ -101,7 +101,7 @@ export function diagnoseOverfill(piece: Piece): Issue[] {
   const issues: Issue[] = [];
   for (let i = 0; i < piece.notes.length; i++) {
     const startBeat = starts[i];
-    const dur = durationBeats(piece.notes[i].duration, piece.notes[i].dotted);
+    const dur = durationBeats(piece.notes[i]);
     const endBeat = startBeat + dur;
     const barIdx = Math.floor(startBeat / bpb);
     const barEnd = (barIdx + 1) * bpb;

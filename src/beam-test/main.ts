@@ -30,6 +30,14 @@ function nt(midi: number, duration: DurationValue, dotted = false): Note {
 function te(midi: number, duration: DurationValue, dotted = false): Note {
   return { midi, duration, dotted, accidental: null, tieEnd: true };
 }
+/** 连音组(tuplet)音：指定 actual:normal 与同组 groupId */
+function tup(midi: number, duration: DurationValue, actual: number, normal: number, groupId: string, dotted = false): Note {
+  return { midi, duration, dotted, accidental: null, tuplet: { actual, normal, groupId } };
+}
+/** 生成 actual 个连续同 groupId 的连音音（三/五/六连音），音高按 midis 数组 */
+function tupGroup(midis: number[], duration: DurationValue, actual: number, normal: number, groupId: string): Note[] {
+  return midis.map(m => tup(m, duration, actual, normal, groupId));
+}
 const e = 'eighth' as DurationValue;
 const s = 'sixteenth' as DurationValue;
 const t = 'thirtysecond' as DurationValue;
@@ -466,6 +474,61 @@ const cases: Case[] = [
     // 防御性：手动塞入非法 tie 标记，渲染应跳过
     piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 1, notes: [
       { midi: C4, duration: q, dotted: false, accidental: null, tieStart: true }, { midi: D4, duration: q, dotted: false, accidental: null, tieEnd: true }, n(E4, q), n(F4, q),
+    ] },
+  },
+  // ── 43. 三连音八分组（3音占1拍，数字3 + 连梁）──
+  {
+    title: '43. 三连音 triplet（3个八分占1拍，上方「3」+ 连梁成组）',
+    expect: '3个三连音八分占1拍（宽度约为普通八分2/3），上方方括号+数字「3」，3音连成一组单梁',
+    // 三连音组=1拍 + q+q+q=3拍 → 4拍
+    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 1, notes: [
+      ...tupGroup([C4, D4, E4], e, 3, 2, 'g1'), n(F4, q), n(G4, q), n(A4, q),
+    ] },
+  },
+  // ── 44. 三连音接普通八分（组内外混合）──
+  {
+    title: '44. 三连音 + 普通八分（混合）',
+    expect: '前三音三连音成组(数字3)，后接普通八分(各1根梁)；三连音组宽度=1拍，普通八分各0.5拍',
+    // 三连音组1拍 + e+e+e+e=2拍 + q=1拍 → 4拍
+    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 1, notes: [
+      ...tupGroup([C4, D4, E4], e, 3, 2, 'g2'), n(F4, e), n(G4, e), n(A4, e), n(B4, e), n(C5, q),
+    ] },
+  },
+  // ── 45. 五连音八分组（5音占2拍，数字5）──
+  {
+    title: '45. 五连音 quintuplet（5个八分占2拍，上方「5」）',
+    expect: '5个五连音八分占2拍(每个0.4拍)，上方方括号+数字「5」，5音连成一组单梁',
+    // 五连音组=2拍 + e+e=1拍 + q=1拍 → 4拍
+    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 1, notes: [
+      ...tupGroup([C4, D4, E4, F4, G4], e, 5, 4, 'g3'), n(A4, e), n(B4, e), n(C5, q),
+    ] },
+  },
+  // ── 46. 六连音八分组（6音占2拍，数字6）──
+  {
+    title: '46. 六连音 sextuplet（6个八分占2拍，上方「6」）',
+    expect: '6个六连音八分占2拍(每个1/3拍)，上方方括号+数字「6」，6音连成一组单梁',
+    // 六连音组=2拍 + e+e=1拍 + q=1拍 → 4拍
+    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 1, notes: [
+      ...tupGroup([C4, D4, E4, F4, G4, A4], e, 6, 4, 'g4'), n(B4, e), n(C5, e), n(D5, q),
+    ] },
+  },
+  // ── 47. 三连音十六分（2根梁 + 数字3）──
+  {
+    title: '47. 三连音十六分（3个十六分占0.5拍，双梁 + 数字3）',
+    expect: '3个三连音十六分占0.5拍(每个1/6拍)，双梁连成一组，上方方括号+数字「3」',
+    // 三连音十六分组=0.5拍 + q+q+q=3拍 + e=0.5拍 → 4拍
+    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 1, notes: [
+      ...tupGroup([C4, D4, E4], s, 3, 2, 'g5'), n(F4, q), n(G4, q), n(A4, q), n(B4, e),
+    ] },
+  },
+  // ── 48. 跨小节三连音（组在小节内，验证多小节布局）──
+  {
+    title: '48. 三连音跨小节布局（小节2开头三连音组）',
+    expect: '小节1普通四分×4，小节2开头三连音组(数字3)，组不跨小节线',
+    // 小节1: q×4=4拍；小节2: 三连音组1拍 + q+q+q=3拍 → 4拍
+    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 2, notes: [
+      n(C4, q), n(D4, q), n(E4, q), n(F4, q),
+      ...tupGroup([G4, A4, B4], e, 3, 2, 'g6'), n(C5, q), n(D5, q), n(E5, q),
     ] },
   },
 ];

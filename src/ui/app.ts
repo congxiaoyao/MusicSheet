@@ -8,7 +8,7 @@ import { computeLayout } from '../render/layout';
 import { buildSVG, exportPNG } from '../render/export';
 import { ensureFontLoaded } from '../render/glyphs';
 import { clickYToMidi } from '../render/staff';
-import { buildToolbar, defaultTool, ToolState } from './toolbar';
+import { buildToolbar, defaultTool, ToolState, TUPLET_CONFIG, TupletMode } from './toolbar';
 import { Player } from '../audio/player';
 import { twinkleExample } from './examples';
 
@@ -17,6 +17,10 @@ interface HoverState { midi: number; x: number; }
 export class App {
   private piece: Piece;
   private tool: ToolState;
+  /** 连音组(tuplet)输入进度：开启 tuplet 模式后，追踪当前组已输入第几个、共用 groupId。
+   *  输入第 actual 个后关闭模式并清空。null 表示不在组输入中。 */
+  private tupletProgress: { groupId: string; count: number; actual: number; normal: number } | null = null;
+  private tupletIdCounter = 0;
   private root: HTMLElement;
   private svgHost!: HTMLElement;
   private statusEl!: HTMLElement;
@@ -155,10 +159,12 @@ export class App {
   }
 
   private appendNoteWithPitch(midi: number): void {
-    const note: Note = { midi, duration: this.tool.duration, dotted: this.tool.dotted, accidental: this.tool.accidental };
+    const tuplet = this.computeTupletForNextNote();
+    const note: Note = { midi, duration: this.tool.duration, dotted: this.tool.dotted, accidental: this.tool.accidental, tuplet };
     const ok = appendNote(this.piece, note);
     if (!ok) { this.flashOverfillRejected(); return; }
     this.applyTieIfPending(midi);
+    this.advanceTupletProgress();
     this.afterEdit();
   }
 
@@ -183,10 +189,68 @@ export class App {
     }
   }
 
+  /** 计算下一个音的 tuplet 字段（若处于 tuplet 输入模式）。
+   *  首个音时开新组（生成 groupId），返回 TupletInfo；非首音复用同 groupId。
+   *  模式关闭或休止则返回 undefined。 */
+  private computeTupletForNextNote(): Note['tuplet'] {
+    const mode = this.tool.tupletMode;
+    if (mode === 'off') return undefined;
+    const cfg = TUPLET_CONFIG[mode];
+    if (!this.tupletProgress) {
+      // 开新组
+      this.tupletProgress = {
+        groupId: `tup-${++this.tupletIdCounter}`,
+        count: 0,
+        actual: cfg.actual,
+        normal: cfg.normal,
+      };
+    }
+    return { actual: this.tupletProgress.actual, normal: this.tupletProgress.normal, groupId: this.tupletProgress.groupId };
+  }
+
+  /** 输入一个音后推进 tuplet 进度：count++；达到 actual 则关闭模式、清进度。 */
+  private advanceTupletProgress(): void {
+    if (!this.tupletProgress) return;
+    this.tupletProgress.count++;
+    if (this.tupletProgress.count >= this.tupletProgress.actual) {
+      // 组凑齐，关闭模式
+      this.tupletProgress = null;
+      this.tool.tupletMode = 'off';
+      (this.toolbar as any)._setTupletMode?.('off');
+    }
+  }
+
   /** 切换「连音线」修饰符：开 → 下一个同音高音会与前音建立 tie。 */
   private toggleTieNext(): void {
     this.tool.tieNext = !this.tool.tieNext;
     (this.toolbar as any)._setTieNext?.(this.tool.tieNext);
+    this.render();
+  }
+
+  /** 切换连音组(tuplet)模式：点当前模式=关闭(off)；点其他模式=切换到该模式。
+   *  切换/关闭时若当前组未凑齐，回滚这些已输入音的 tuplet 标记（避免不完整组），
+   *  并清进度，下次开新组。 */
+  private toggleTupletMode(mode: Exclude<TupletMode, 'off'>): void {
+    const newMode = this.tool.tupletMode === mode ? 'off' : mode;
+    if (newMode === 'off' && this.tupletProgress) {
+      // 关闭且当前组未凑齐：回滚已输入音的 tuplet 标记
+      const gid = this.tupletProgress.groupId;
+      for (const n of this.piece.notes) {
+        if (n.tuplet?.groupId === gid) n.tuplet = undefined;
+      }
+      this.tupletProgress = null;
+    } else if (newMode !== 'off') {
+      // 切到新模式：若当前有未凑齐组先回滚，再重置进度（下次首个音开新组）
+      if (this.tupletProgress) {
+        const gid = this.tupletProgress.groupId;
+        for (const n of this.piece.notes) {
+          if (n.tuplet?.groupId === gid) n.tuplet = undefined;
+        }
+        this.tupletProgress = null;
+      }
+    }
+    this.tool.tupletMode = newMode;
+    (this.toolbar as any)._setTupletMode?.(newMode);
     this.render();
   }
 
@@ -237,6 +301,9 @@ export class App {
         case '6': this.tool.duration = 'thirtysecond'; this.syncToolbarDurations(); break;
         case '.': this.tool.dotted = !this.tool.dotted; (this.toolbar as any)._resetModifiers?.(); this.render(); break;
         case 't': this.toggleTieNext(); break;
+        case 'r': this.toggleTupletMode('triplet'); break;
+        case 'f': this.toggleTupletMode('quintuplet'); break;
+        case 'x': this.toggleTupletMode('sextuplet'); break;
         case '0': this.appendRest(); break;
         case 'Backspace': popNote(this.piece); this.render(); e.preventDefault(); break;
         case ' ': this.togglePlay(); e.preventDefault(); break;

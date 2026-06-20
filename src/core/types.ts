@@ -9,6 +9,16 @@ export type Accidental = 'sharp' | 'flat' | 'natural' | null;
 /** 音符时值（以四分音符为单位）。null 表示这是用户显式指定的休止符。 */
 export type DurationValue = 'whole' | 'half' | 'quarter' | 'eighth' | 'sixteenth' | 'thirtysecond';
 
+/** 连音组(tuplet)信息。如三连音=3个音占2个普通音位。挂在每个组内音符上,同组共享同值。 */
+export interface TupletInfo {
+  /** 实际音符数（时间位数）。语义为「时间位数」:未来支持和弦时,一个时间位可含多个音,actual 仍按位数算 */
+  actual: number;
+  /** 对应的普通音符数（同时间位数）。actual:normal = 3:2 即三连音 */
+  normal: number;
+  /** 同一组的唯一标识。扁平 notes 里相邻且同 groupId 的音归为一组 */
+  groupId: string;
+}
+
 /** 一个音符或休止符 */
 export interface Note {
   /** MIDI 音高；null = 休止符 */
@@ -24,6 +34,8 @@ export interface Note {
   tieStart?: boolean;
   /** 这个音符是某条连音线(tie)的终点 —— 从上一个同音高音连来。 */
   tieEnd?: boolean;
+  /** 若属于连音组(tuplet),则有此字段。同组相邻音符共享同一 groupId。 */
+  tuplet?: TupletInfo;
 }
 
 /** 调号名称 */
@@ -57,18 +69,28 @@ export interface Piece {
   notes: Note[];
 }
 
-/** 时值 → 四分音符拍数 */
-export function durationBeats(d: DurationValue, dotted: boolean): number {
-  const base: Record<DurationValue, number> = {
-    whole: 4,
-    half: 2,
-    quarter: 1,
-    eighth: 0.5,
-    sixteenth: 0.25,
-    thirtysecond: 0.125,
-  };
-  const v = base[d];
+const DURATION_BASE: Record<DurationValue, number> = {
+  whole: 4,
+  half: 2,
+  quarter: 1,
+  eighth: 0.5,
+  sixteenth: 0.25,
+  thirtysecond: 0.125,
+};
+
+/** 底层纯时值（不含连音缩放）。给「假想音符」场景用：待输入位宽度、按钮 disable 判定等
+ *  （这些场景拿不到完整 note，且不需要连音缩放）。 */
+export function noteValueBeats(d: DurationValue, dotted: boolean): number {
+  const v = DURATION_BASE[d];
   return dotted ? v * 1.5 : v;
+}
+
+/** 音符实际时值（含连音 tuplet 缩放）。绝大多数调用点用这个。
+ *  三连音八分 = noteValueBeats(eighth) × 2/3 = 1/3 拍。 */
+export function durationBeats(note: Note): number {
+  let v = noteValueBeats(note.duration, note.dotted);
+  if (note.tuplet) v = v * note.tuplet.normal / note.tuplet.actual;
+  return v;
 }
 
 /** 每个小节的总拍数 = num * (4 / den) */

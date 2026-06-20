@@ -18,7 +18,7 @@ export function createPiece(): Piece {
 /** 总拍数（四分音符为单位） */
 export function totalBeats(piece: Piece): number {
   let sum = 0;
-  for (const n of piece.notes) sum += durationBeats(n.duration, n.dotted);
+  for (const n of piece.notes) sum += durationBeats(n);
   return sum;
 }
 
@@ -48,9 +48,12 @@ export function remainingBeatsInCurrentBar(piece: Piece): number {
 
 /** 追加一个音符到末尾（短信验证码式）。若超出容量或本小节放不下则失败。 */
 export function appendNote(piece: Piece, note: Note): boolean {
-  const beats = durationBeats(note.duration, note.dotted);
+  const beats = durationBeats(note);
   if (beats > remainingBeats(piece)) return false;                    // 全局容量(保留)
-  if (beats > remainingBeatsInCurrentBar(piece) + 1e-6) return false; // 本小节放不下(新增)
+  // 连音组(tuplet)内的音放宽本小节校验：组内各音要挤进整组占的时长里，
+  // 单个音的本小节判定会误判（三连音每个 1/3 拍，但组要占满 1 拍）。
+  // 组凑齐后的整体超拍由诊断层(diagnoseOverfill)报告。非 tuplet 音仍严格校验。
+  if (!note.tuplet && beats > remainingBeatsInCurrentBar(piece) + 1e-6) return false; // 本小节放不下
   piece.notes.push(note);
   return true;
 }
@@ -75,7 +78,7 @@ export function noteStartBeats(piece: Piece): number[] {
   let acc = 0;
   for (const n of piece.notes) {
     starts.push(acc);
-    acc += durationBeats(n.duration, n.dotted);
+    acc += durationBeats(n);
   }
   return starts;
 }
@@ -87,4 +90,34 @@ export function barLineBeats(piece: Piece): number[] {
   const out: number[] = [];
   for (let i = 0; i <= bars; i++) out.push(bpb * i);
   return out;
+}
+
+/** 连音组(tuplet)在 notes 数组中的范围。startIdx..endIdx 为组内音符索引（含两端）。 */
+export interface TupletRange {
+  startIdx: number;
+  endIdx: number;
+  /** 实际音符数（时间位数） */
+  actual: number;
+  /** 对应普通音符数 */
+  normal: number;
+  /** 组标识 */
+  groupId: string;
+}
+
+/** 扫描 notes，按 tuplet.groupId 聚合出连音组范围（相邻同 groupId 的音归为一组）。
+ *  供渲染层（画数字/括号）、连梁、布局消费。 */
+export function tupletGroups(piece: Piece): TupletRange[] {
+  const notes = piece.notes;
+  const groups: TupletRange[] = [];
+  let i = 0;
+  while (i < notes.length) {
+    const t = notes[i].tuplet;
+    if (!t) { i++; continue; }
+    // 从 i 开始，向后收集同 groupId 的连续音
+    let j = i;
+    while (j < notes.length && notes[j].tuplet && notes[j].tuplet!.groupId === t.groupId) j++;
+    groups.push({ startIdx: i, endIdx: j - 1, actual: t.actual, normal: t.normal, groupId: t.groupId });
+    i = j;
+  }
+  return groups;
 }

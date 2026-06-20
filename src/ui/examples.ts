@@ -33,7 +33,7 @@ export function twinkleExample(measureCount: number = 4): Piece {
   const notes: Note[] = [];
   let acc = 0;
   for (const note of full) {
-    const beats = durationBeats(note.duration, note.dotted);
+    const beats = durationBeats(note);
     if (acc + beats > cap + 1e-6) break;   // 超出容量则停
     notes.push(note);
     acc += beats;
