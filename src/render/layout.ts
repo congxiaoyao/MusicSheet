@@ -55,7 +55,7 @@ export interface Layout {
 // 故 FONT = 4 × SS = 92，使字形按标准比例渲染。
 const FONT = 46;   // 字号减半(原92):等比缩放五线谱,缓解16/32分音符横向拥挤
 const SS = FONT / 4;   // = 23，真实 staff space（线间距）
-const PAD_LEFT = 24;   // 谱号左留白(约2.1ss)
+const PAD_LEFT = 8;    // 五线谱横线/起始线的左边缘(顶格,仅极小留白防贴死)
 const PAD_RIGHT = 12;  // 随谱表等比缩小(原24)
 const STAFF_TOP = 75;    // 谱表顶端y:字号减半后需容纳朝上符干(stdLen=3.5ss≈40px)+梁厚度+clamp阈值,原58导致梁被裁顶
 const JIANPU_GAP = 44;
@@ -67,6 +67,7 @@ const KEY_GAP = 0.5 * SS;          // 谱号→调号的间隔
 const KEY_TO_TIMESIG = 0.35 * SS;  // 调号末号→拍号的小间隔
 const TIMESIG_W = 1.8 * SS;
 const GAP_AFTER_PREFIX = 0.5 * SS;
+const CLEF_GAP = 0.92 * SS;  // 谱号中心→起始线(减半微调)
 const JIANPU_HEIGHT = 74;
 
 /** 每种时值对应的「最小格子宽度」系数（staff space 的倍数）。保证不挤。 */
@@ -94,7 +95,7 @@ export function computeLayout(piece: Piece, containerWidth: number, currentDurat
   const keyW = keyCount > 0 ? keyCount * KEY_PER_GLYPH : 0;
   // 调号→拍号间隔：有调号时用 KEY_TO_TIMESIG，无调号时谱号直接到拍号用 KEY_GAP
   const keyToTime = keyCount > 0 ? KEY_TO_TIMESIG : KEY_GAP;
-  const prefixW = CLEF_W + keyW + keyToTime + TIMESIG_W;
+  const prefixW = CLEF_GAP + CLEF_W + keyW + keyToTime + TIMESIG_W;  // CLEF_GAP=谱号离起始线间距
 
   const contentLeft = PAD_LEFT + prefixW + GAP_AFTER_PREFIX;
   const contentRight = width - PAD_RIGHT;
@@ -102,9 +103,9 @@ export function computeLayout(piece: Piece, containerWidth: number, currentDurat
   const prefixRight = contentLeft - GAP_AFTER_PREFIX * 0.5;
   const bpb = beatsPerBar(piece.time);
 
-  const clefX = PAD_LEFT + CLEF_W / 2;
-  const keyStartX = PAD_LEFT + CLEF_W + KEY_GAP;
-  const timeSigX = PAD_LEFT + CLEF_W + keyW + keyToTime + TIMESIG_W / 2;
+  const clefX = PAD_LEFT + CLEF_GAP + CLEF_W / 2;  // 谱号在五线谱内部右移 CLEF_GAP
+  const keyStartX = PAD_LEFT + CLEF_GAP + CLEF_W + KEY_GAP;
+  const timeSigX = PAD_LEFT + CLEF_GAP + CLEF_W + keyW + keyToTime + TIMESIG_W / 2;
 
   const measures = piece.measureCount;
   const barWidth = contentWidth / measures;
