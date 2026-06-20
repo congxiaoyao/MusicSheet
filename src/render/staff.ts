@@ -126,10 +126,12 @@ function renderKeySignature(piece: Piece, layout: Layout): string {
   let x = layout.keyStartX;
   for (const letter of letters) {
     const step = map[letter] ?? 4;
-    // 调号用 keySigSharp/keySigFlat:字形上下对称(ascent=descent),baseline 即中心,
-    // 直接压在目标线/间,无需偏移(accidentalFlat 不对称会整体偏下)。
-    const y = stepToY(step, layout);
-    const glyph = isSharp ? G.keySigSharp : G.keySigFlat;
+    // 调号用 accidentalFlat/accidentalSharp(单字形)。sharp 上下对称(中心偏移≈0)直接对齐；
+    // flat 不对称(墨迹质心在 baseline 上方 0.37ss,几何中心 0.53ss),
+    // 用质心偏移 0.37ss 下移让视觉重心对齐目标线/间(用几何中心会偏下)。
+    const off = isSharp ? 0 : 0.37;
+    const y = stepToY(step, layout) + off * ss;
+    const glyph = isSharp ? G.accidentalSharp : G.accidentalFlat;
     s += text(glyph, x, y, fs);
     x += ss * 0.95;   // 与 layout.KEY_PER_GLYPH 一致：渲染步进 = 布局预留宽度，防溢出重叠
   }

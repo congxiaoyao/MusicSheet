@@ -55,7 +55,7 @@ export interface Layout {
 // 故 FONT = 4 × SS = 92，使字形按标准比例渲染。
 const FONT = 46;   // 字号减半(原92):等比缩放五线谱,缓解16/32分音符横向拥挤
 const SS = FONT / 4;   // = 23，真实 staff space（线间距）
-const PAD_LEFT = 22;   // 谱号左留白(约1.9ss,与拍号-首音符间距0.5ss同语义但更大保证不贴边)
+const PAD_LEFT = 24;   // 谱号左留白(约2.1ss)
 const PAD_RIGHT = 12;  // 随谱表等比缩小(原24)
 const STAFF_TOP = 75;    // 谱表顶端y:字号减半后需容纳朝上符干(stdLen=3.5ss≈40px)+梁厚度+clamp阈值,原58导致梁被裁顶
 const JIANPU_GAP = 44;
