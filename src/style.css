@@ -268,8 +268,8 @@ html, body {
 /* 下一个待输入位置的圆角矩形指示器（短信验证码式）。
    填充透明度做脉冲动画，边框保持不透明。 */
 @keyframes slotFillPulse {
-  0%, 100% { fill-opacity: 0.5; }
-  50%      { fill-opacity: 0.15; }
+  0%, 100% { stroke-opacity: 1; }
+  50%      { stroke-opacity: 0.35; }
 }
 .next-slot {
   animation: slotFillPulse 2.4s ease-in-out infinite;

@@ -157,15 +157,18 @@ function renderBarLines(layout: Layout): string {
   const ss = layout.staffSpace;
   const thin = W_BARLINE * ss;
   const thick = W_BARLINE_FINAL * ss;
+  // 小节线/起始线/终止线延伸半个五线谱线宽，覆盖到最外线墨迹边缘（否则视觉上比五线谱短）
+  const barTop = layout.staffTop - W_STAFF * ss / 2;
+  const barBot = layout.staffBottom + W_STAFF * ss / 2;
   // 起始单线（画布最左）
-  s += line(layout.staffLeftX, layout.staffTop, layout.staffLeftX, layout.staffBottom, '#1f2430', thin);
+  s += line(layout.staffLeftX, barTop, layout.staffLeftX, barBot, '#1f2430', thin);
   for (let i = 1; i < layout.barLines.length; i++) {
     const x = layout.barLines[i];
     const isLast = i === layout.barLines.length - 1;
-    s += line(x, layout.staffTop, x, layout.staffBottom, '#1f2430', isLast ? thick : thin);
+    s += line(x, barTop, x, barBot, '#1f2430', isLast ? thick : thin);
     if (isLast) {
       // 终止线：粗线左侧约 0.4ss 处的细线
-      s += line(x - 0.75 * ss, layout.staffTop, x - 0.75 * ss, layout.staffBottom, '#1f2430', thin);
+      s += line(x - 0.75 * ss, barTop, x - 0.75 * ss, barBot, '#1f2430', thin);
     }
   }
   return s;
@@ -215,15 +218,23 @@ function renderNote(note: Note, x: number, piece: Piece, layout: Layout, highlig
   let s = '';
 
   if (note.midi === null) {
-    // 休止符
-    const restY = (layout.staffTop + layout.staffBottom) / 2;
+    // 休止符：用全字号(标准比例)，基线按字形分类对齐
+    // 全/二分休止符挂第4线(step6)；四分及以下垂直居中于第3间(step4)附近
+    const midY = stepToY(4, layout);   // 中线 B4
+    const line4Y = stepToY(6, layout); // 第4线(从下数第4线=D5)
     const glyph = note.duration === 'whole' ? G.restWhole
       : note.duration === 'half' ? G.restHalf
       : note.duration === 'quarter' ? G.restQuarter
       : note.duration === 'eighth' ? G.rest8th
       : note.duration === 'sixteenth' ? G.rest16th
       : G.rest32nd;
-    s += text(glyph, x, restY + ss * 2, fs * 0.72);
+    // baseline 位置：全休止符(挂在第4线下方,baseline≈line4Y)；二分(挂第4线上方,baseline≈line4Y+ss*0.5)；
+    // 四分(中心居中,baseline=midY)；八分/十六分/三十二分(baseline偏下让中心居中)
+    const baseline = note.duration === 'whole' ? line4Y
+      : note.duration === 'half' ? line4Y + ss * 0.5
+      : note.duration === 'quarter' ? midY
+      : midY + ss * 0.3;   // 八分及以下字形 baseline 偏上,下移让视觉居中
+    s += text(glyph, x, baseline, fs);
     return s;
   }
 
@@ -288,14 +299,14 @@ function renderNote(note: Note, x: number, piece: Piece, layout: Layout, highlig
 }
 
 /** 下一个待输入位置的圆角矩形指示器（短信验证码式）。宽度随时值变化；写满则不显示。
- *  填充透明度由 CSS 动画驱动（0.2↔0.5），边框保持不透明。 */
+ *  无填充，仅边框做呼吸动画（stroke-opacity 由 CSS 驱动）。 */
 function renderNextSlot(layout: Layout): string {
   if (layout.isFull) return '';
   const w = Math.min(layout.nextSlotW, layout.staffSpace * 6);
   const h = (layout.staffBottom - layout.staffTop) + layout.staffSpace;
   const x = layout.nextSlotX - w / 2;
   const y = layout.staffTop - layout.staffSpace / 2;
-  return rect(x, y, w, h, { fill: '#4f46e5', stroke: '#4f46e5', sw: 1.8, rx: 7, class: 'next-slot' });
+  return rect(x, y, w, h, { fill: 'none', stroke: '#4f46e5', sw: 1.5, rx: 7, class: 'next-slot' });
 }
 
 /** 悬停 ghost 音符（预览即将输入的音） */
@@ -309,7 +320,7 @@ function renderHover(input: RenderInput, layout: Layout): string {
   const glyph = input.piece.notes.length >= 0 ? G.noteheadBlack : G.noteheadBlack;
   // 用半透明音符头 + 一条贯穿的细辅助线
   let s = '';
-  s += line(layout.barLines[0], y, layout.barLines[layout.barLines.length - 1], y, '#a5b4fc', 3, { class: 'hover-guide' });
+  s += line(layout.barLines[0], y, layout.barLines[layout.barLines.length - 1], y, '#a5b4fc', 1, { class: 'hover-guide' });
   s += text(glyph, x, y, layout.fontSize, { fill: '#a5b4fc', class: 'hover-note' });
   void ss;
   return s;
