@@ -129,7 +129,7 @@ function renderKeySignature(piece: Piece, layout: Layout): string {
     // 调号用 accidentalFlat/accidentalSharp(单字形)。sharp 上下对称(中心偏移≈0)直接对齐；
     // flat 不对称(墨迹质心在 baseline 上方 0.37ss,几何中心 0.53ss),
     // 用质心偏移 0.37ss 下移让视觉重心对齐目标线/间(用几何中心会偏下)。
-    const off = isSharp ? 0 : 0.37;
+    const off = isSharp ? 0 : 0.15;   // flat 偏移,经多轮视觉微调定为0.15ss
     const y = stepToY(step, layout) + off * ss;
     const glyph = isSharp ? G.accidentalSharp : G.accidentalFlat;
     s += text(glyph, x, y, fs);
