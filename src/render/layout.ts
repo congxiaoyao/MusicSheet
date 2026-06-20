@@ -53,11 +53,11 @@ export interface Layout {
 
 // SMuFL 标准：1 em(font-size) = 4 staff space，staff space = 五线谱相邻两线的距离。
 // 故 FONT = 4 × SS = 92，使字形按标准比例渲染。
-const FONT = 92;
+const FONT = 46;   // 字号减半(原92):等比缩放五线谱,缓解16/32分音符横向拥挤
 const SS = FONT / 4;   // = 23，真实 staff space（线间距）
-const PAD_LEFT = 22;
-const PAD_RIGHT = 24;
-const STAFF_TOP = 115;   // 加大：朝上符干(3.5ss≈80px)+梁+谱号上方空间
+const PAD_LEFT = 11;   // 随谱表等比缩小(原22)
+const PAD_RIGHT = 12;  // 随谱表等比缩小(原24)
+const STAFF_TOP = 75;    // 谱表顶端y:字号减半后需容纳朝上符干(stdLen=3.5ss≈40px)+梁厚度+clamp阈值,原58导致梁被裁顶
 const JIANPU_GAP = 44;
 // prefix 区宽度按字形实际 advance（staff space 单位）定，不盲目翻倍。
 // gClef advance=2.684 → 谱号区 3.0；升降号 advance≈1 → 0.9；拍号数字 1.88 → 1.8；留白 1.2。
