@@ -19,6 +19,11 @@ export interface Note {
   dotted: boolean;
   /** 用户手动指定的临时记号（覆盖调号）。null = 遵循调号 */
   accidental: Accidental;
+  /** 这个音符是某条连音线(tie)的起点 —— 向后连到下一个同音高音。
+   *  tie 把两个同音高音的时值合并，第二个不重新起振。 */
+  tieStart?: boolean;
+  /** 这个音符是某条连音线(tie)的终点 —— 从上一个同音高音连来。 */
+  tieEnd?: boolean;
 }
 
 /** 调号名称 */

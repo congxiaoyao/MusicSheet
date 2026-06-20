@@ -22,6 +22,14 @@ import { computeBeams } from '../render/beam';
 function n(midi: number | null, duration: DurationValue, dotted = false): Note {
   return { midi, duration, dotted, accidental: null };
 }
+/** 连音线(tie)起点音：向后连到下一个同音高音 */
+function nt(midi: number, duration: DurationValue, dotted = false): Note {
+  return { midi, duration, dotted, accidental: null, tieStart: true };
+}
+/** 连音线(tie)终点音：从前一个同音高音连来 */
+function te(midi: number, duration: DurationValue, dotted = false): Note {
+  return { midi, duration, dotted, accidental: null, tieEnd: true };
+}
 const e = 'eighth' as DurationValue;
 const s = 'sixteenth' as DurationValue;
 const t = 'thirtysecond' as DurationValue;
@@ -412,6 +420,52 @@ const cases: Case[] = [
     piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 1, notes: [
       n(C4, s), n(D4, s), n(E4, t), n(F4, t), n(G4, t), n(A4, t),  // 16-16-32-32-32-32 = 1拍
       n(B4, q), n(C5, h),
+    ] },
+  },
+  // ── 38. 连音线(tie)基础：两个同音高四分音 tie（符干朝上，弧线在符头下方朝下凸）──
+  {
+    title: '38. tie 基础（C4 四分 + C4 四分，符干朝上）',
+    expect: '两个 C4 四分音符之间一条弧线，凸向下方（符干朝上→弧线在符头下方）；播放合并为 2 拍长音',
+    // C4(1拍,tie起点)+C4(1拍,tie终点)+D4(1拍)+E4(1拍) = 4拍
+    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 1, notes: [
+      nt(C4, q), te(C4, q), n(D4, q), n(E4, q),
+    ] },
+  },
+  // ── 39. tie 符干朝下：高音区，弧线应在符头上方朝上凸 ──
+  {
+    title: '39. tie 符干朝下（C5 四分 + C5 四分，弧线朝上凸）',
+    expect: '两个 C5 四分音符之间一条弧线，凸向上方（符干朝下→弧线在符头上方）；与用例38方向相反',
+    // C5(1拍)+C5(1拍)+B4(1拍)+A4(1拍) = 4拍
+    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 1, notes: [
+      nt(C5, q), te(C5, q), n(B4, q), n(A4, q),
+    ] },
+  },
+  // ── 40. 跨小节 tie：四分音从小节1末连到小节2头（两音相邻，跨小节线）──
+  {
+    title: '40. 跨小节 tie（C4 四分跨小节线）',
+    expect: '小节1末 C4 四分(tieStart)与小节2头 C4 四分(tieEnd)相邻、横跨小节线之间一条弧线；播放合并为 2 拍长音',
+    // 小节1: D4(1)+E4(1)+F4(1)+C4(1,tie起点)=4拍；小节2: C4(1,tie终点)+G4(1)+A4(1)+B4(1)=4拍
+    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 2, notes: [
+      n(D4, q), n(E4, q), n(F4, q), nt(C4, q),
+      te(C4, q), n(G4, q), n(A4, q), n(B4, q),
+    ] },
+  },
+  // ── 41. tie 链：3 个同音高音连续 tie（A-B-C，两组 tie 弧线）──
+  {
+    title: '41. tie 链（C4 四分 ×3，两组 tie 连续）',
+    expect: '三个 C4 四分音符，前两个之间一组 tie、后两个之间一组 tie（共两段弧线）；播放合并为 3 拍长音',
+    // C4(nt,1)+C4(te&nt,1)+C4(te,1)+D4(1) = 4拍
+    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 1, notes: [
+      nt(C4, q), { midi: C4, duration: q, dotted: false, accidental: null, tieStart: true, tieEnd: true }, te(C4, q), n(D4, q),
+    ] },
+  },
+  // ── 42. 不同音高尝试 tie（应无弧线）：C4 四分 + D4 四分 ──
+  {
+    title: '42. 不同音高无 tie（C4 + D4，弧线不应出现）',
+    expect: 'C4 与 D4 音高不同，即使数据带 tieStart/tieEnd 也不画弧线（tie 必须同音高）',
+    // 防御性：手动塞入非法 tie 标记，渲染应跳过
+    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 1, notes: [
+      { midi: C4, duration: q, dotted: false, accidental: null, tieStart: true }, { midi: D4, duration: q, dotted: false, accidental: null, tieEnd: true }, n(E4, q), n(F4, q),
     ] },
   },
 ];
