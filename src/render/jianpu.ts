@@ -128,7 +128,7 @@ export function renderJianpuSVG(input: RenderInput): string {
   // 下一个待输入位置在简谱行的对应圆角矩形指示器（宽度随时值变化；写满不显示）
   if (!layout.isFull) {
     const slotW = Math.max(22, Math.min(layout.nextSlotW, layout.staffSpace * 4));
-    s += `<rect x="${(layout.nextSlotX - slotW / 2).toFixed(1)}" y="${(layout.jianpuTop + 8).toFixed(1)}" width="${slotW.toFixed(1)}" height="${(layout.jianpuBottom - layout.jianpuTop - 16).toFixed(1)}" fill="#4f46e5" stroke="#4f46e5" stroke-width="1.4" rx="5" class="next-slot"/>`;
+    s += `<rect x="${(layout.nextSlotX - slotW / 2).toFixed(1)}" y="${(layout.jianpuTop + 8).toFixed(1)}" width="${slotW.toFixed(1)}" height="${(layout.jianpuBottom - layout.jianpuTop - 16).toFixed(1)}" fill="none" stroke="#4f46e5" stroke-width="1.4" rx="5" class="next-slot"/>`;
   }
 
   return s;

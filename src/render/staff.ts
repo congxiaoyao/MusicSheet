@@ -126,10 +126,10 @@ function renderKeySignature(piece: Piece, layout: Layout): string {
   let x = layout.keyStartX;
   for (const letter of letters) {
     const step = map[letter] ?? 4;
-    // 实测：sharp baseline 在中心(ascent=descent)，直接压在目标 y；
-    //        flat baseline 偏上(中心约 baseline-0.5ss)，下移 0.5ss 让中心对齐目标。
-    const y = stepToY(step, layout) + (isSharp ? 0 : ss * 0.5);
-    const glyph = isSharp ? G.accidentalSharp : G.accidentalFlat;
+    // 调号用 keySigSharp/keySigFlat:字形上下对称(ascent=descent),baseline 即中心,
+    // 直接压在目标线/间,无需偏移(accidentalFlat 不对称会整体偏下)。
+    const y = stepToY(step, layout);
+    const glyph = isSharp ? G.keySigSharp : G.keySigFlat;
     s += text(glyph, x, y, fs);
     x += ss * 0.95;   // 与 layout.KEY_PER_GLYPH 一致：渲染步进 = 布局预留宽度，防溢出重叠
   }
@@ -247,12 +247,12 @@ function renderNote(note: Note, x: number, piece: Piece, layout: Layout, highlig
   if (step > 8) {
     for (let st = 10; st <= step; st += 2) {
       const ly = stepToY(st, layout);
-      s += line(x - ss * 1.7, ly, x + ss * 1.7, ly, '#1f2430', W_LEDGER * ss);
+      s += line(x - ss * 1.15, ly, x + ss * 1.15, ly, '#1f2430', W_LEDGER * ss);  // 加线:符头半宽0.59+延伸0.56≈1.15ss
     }
   } else if (step < 0) {
     for (let st = -2; st >= step; st -= 2) {
       const ly = stepToY(st, layout);
-      s += line(x - ss * 1.7, ly, x + ss * 1.7, ly, '#1f2430', W_LEDGER * ss);
+      s += line(x - ss * 1.15, ly, x + ss * 1.15, ly, '#1f2430', W_LEDGER * ss);  // 加线:符头半宽0.59+延伸0.56≈1.15ss
     }
   }
 
@@ -292,7 +292,7 @@ function renderNote(note: Note, x: number, piece: Piece, layout: Layout, highlig
 
   // 附点
   if (note.dotted) {
-    s += text(G.augmentationDot, x + ss * 2.4, y, fs * 0.55, { fill });
+    s += text(G.augmentationDot, x + ss * 1.7, y, fs, { fill });  // 全字号(0.4ss直径),x偏移1.7ss(符头右侧)
   }
 
   return s;
@@ -309,7 +309,7 @@ function renderNextSlot(layout: Layout): string {
   return rect(x, y, w, h, { fill: 'none', stroke: '#4f46e5', sw: 1.5, rx: 7, class: 'next-slot' });
 }
 
-/** 悬停 ghost 音符（预览即将输入的音） */
+/** 悬停 ghost 音符（预览即将输入的音）。当音超出五线谱范围时，联动指示对应加线。 */
 function renderHover(input: RenderInput, layout: Layout): string {
   if (!input.hover) return '';
   const { midi, x } = input.hover;
@@ -321,6 +321,20 @@ function renderHover(input: RenderInput, layout: Layout): string {
   // 用半透明音符头 + 一条贯穿的细辅助线
   let s = '';
   s += line(layout.barLines[0], y, layout.barLines[layout.barLines.length - 1], y, '#a5b4fc', 1, { class: 'hover-guide' });
+  // 联动加线指示：音超出五线谱时，用指示色画出对应加线
+  // (do=C4 step-2 及更低 → 下加线 / 高音6=A5 step10 及更高 → 上加线)
+  const acc = '#a5b4fc';
+  if (step > 8) {
+    for (let st = 10; st <= step; st += 2) {
+      const ly = stepToY(st, layout);
+      s += line(x - ss * 1.15, ly, x + ss * 1.15, ly, acc, W_LEDGER * ss, { class: 'hover-guide' });
+    }
+  } else if (step < 0) {
+    for (let st = -2; st >= step; st -= 2) {
+      const ly = stepToY(st, layout);
+      s += line(x - ss * 1.15, ly, x + ss * 1.15, ly, acc, W_LEDGER * ss, { class: 'hover-guide' });
+    }
+  }
   s += text(glyph, x, y, layout.fontSize, { fill: '#a5b4fc', class: 'hover-note' });
   void ss;
   return s;

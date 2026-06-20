@@ -32,6 +32,8 @@ export const G = {
   accidentalSharp: glyph('accidentalSharp'),
   accidentalFlat: glyph('accidentalFlat'),
   accidentalNatural: glyph('accidentalNatural'),
+  keySigSharp: glyph('keySigSharp'),   // 调号专用:上下对称,baseline=中心
+  keySigFlat: glyph('keySigFlat'),     // 调号专用:上下对称,baseline=中心
   restWhole: glyph('restWhole'),
   restHalf: glyph('restHalf'),
   restQuarter: glyph('restQuarter'),
