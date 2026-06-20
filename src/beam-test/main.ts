@@ -38,6 +38,18 @@ function tup(midi: number, duration: DurationValue, actual: number, normal: numb
 function tupGroup(midis: number[], duration: DurationValue, actual: number, normal: number, groupId: string): Note[] {
   return midis.map(m => tup(m, duration, actual, normal, groupId));
 }
+/** 和弦(chord)音:同 chordId 的音共享时间位。midis 为组内各声部音高 */
+function chord(midis: number[], duration: DurationValue, chordId: string, dotted = false): Note[] {
+  return midis.map(m => ({ midi: m, duration, dotted, accidental: null, chordId }));
+}
+/** 和弦 tie 起点:组内各声部标 tieStart */
+function chordT(midis: number[], duration: DurationValue, chordId: string, dotted = false): Note[] {
+  return midis.map(m => ({ midi: m, duration, dotted, accidental: null, chordId, tieStart: true }));
+}
+/** 和弦 tie 终点:组内各声部标 tieEnd */
+function chordE(midis: number[], duration: DurationValue, chordId: string, dotted = false): Note[] {
+  return midis.map(m => ({ midi: m, duration, dotted, accidental: null, chordId, tieEnd: true }));
+}
 const e = 'eighth' as DurationValue;
 const s = 'sixteenth' as DurationValue;
 const t = 'thirtysecond' as DurationValue;
@@ -529,6 +541,58 @@ const cases: Case[] = [
     piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 2, notes: [
       n(C4, q), n(D4, q), n(E4, q), n(F4, q),
       ...tupGroup([G4, A4, B4], e, 3, 2, 'g6'), n(C5, q), n(D5, q), n(E5, q),
+    ] },
+  },
+  // ── 49. 和弦基础：三和弦 C4+E4+G4(四分) + 单音 ──
+  {
+    title: '49. 和弦基础（C4+E4+G4 三和弦四分 + D4 单音）',
+    expect: '3个符头叠在同一x(C4+E4+G4),共用一根符干(朝上,组平均step≤6),占1拍;后接D4单音占1拍;简谱纵排1 3 5',
+    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 1, notes: [
+      ...chord([C4, E4, G4], q, 'c1'), n(D4, q), n(E4, q), n(F4, q),
+    ] },
+  },
+  // ── 50. 和弦符干朝下(高音和弦) ──
+  {
+    title: '50. 和弦符干朝下（C5+E5+G5 高音三和弦）',
+    expect: '高音三和弦组平均step>6→符干朝下;3符头叠放共用一根朝下符干',
+    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 1, notes: [
+      ...chord([C5, E5, G5], q, 'c1'), n(A4, q), n(B4, q), n(C5, q),
+    ] },
+  },
+  // ── 51. 两个八分和弦连梁 ──
+  {
+    title: '51. 两个八分和弦连梁（C4+E4+G4 ‖ D4+F4+A4 各占0.5拍）',
+    expect: '两个三和弦各占0.5拍,连成一组单梁;每个和弦3符头叠放,符干连到组内最极端符头,梁连到各自最远符头',
+    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 1, notes: [
+      ...chord([C4, E4, G4], e, 'c1'), ...chord([D4, F4, A4], e, 'c2'),
+      n(B4, q), n(C5, q), n(D5, q),
+    ] },
+  },
+  // ── 52. 和弦 + 三连音叠加（一个三连音位是个和弦）──
+  {
+    title: '52. 和弦三连音（3个三和弦塞进1拍 = 三和弦三连音）',
+    expect: '3个三和弦(C/E/G ‖ D/F/A ‖ E/G/B)各为三连音的一位,占1拍;上方数字3,连梁成组;每位是叠放的3符头',
+    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 1, notes: [
+      ...chord([C4, E4, G4], e, 'c1').map(x => ({ ...x, tuplet: { actual: 3, normal: 2, groupId: 't1' } })),
+      ...chord([D4, F4, A4], e, 'c2').map(x => ({ ...x, tuplet: { actual: 3, normal: 2, groupId: 't1' } })),
+      ...chord([E4, G4, B4], e, 'c3').map(x => ({ ...x, tuplet: { actual: 3, normal: 2, groupId: 't1' } })),
+      n(C5, q), n(D5, q), n(E5, q),
+    ] },
+  },
+  // ── 53. 和弦 tie（三和弦复制连音）──
+  {
+    title: '53. 和弦 tie（C4+E4+G4 三和弦复制连音）',
+    expect: '两个相同三和弦(C4+E4+G4)之间3条tie弧线(每声部一条),第二个和弦不重弹、时值相加;简谱两组纵排1 3 5间有弧线',
+    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 1, notes: [
+      ...chordT([C4, E4, G4], q, 'c1'), ...chordE([C4, E4, G4], q, 'c2'), n(D4, q), n(E4, q),
+    ] },
+  },
+  // ── 54. 和弦 + 单音 tie 混合（和弦后单音 tie）──
+  {
+    title: '54. 单音 tie 仍工作（验证tie重构未破坏单音:C4 四分 + C4 四分）',
+    expect: '两个C4四分间一条tie弧线(凸向下方,符干朝上);tie重构为复制动作后单音场景正常',
+    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 1, notes: [
+      nt(C4, q), te(C4, q), n(D4, q), n(E4, q),
     ] },
   },
 ];

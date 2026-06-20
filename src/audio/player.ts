@@ -1,6 +1,7 @@
 // 音频播放：Web Audio 合成钢琴音色 + 按拍调度 + 播放头回调
 
 import { Piece, durationBeats } from '../core/types';
+import { isChordTail } from '../core/model';
 
 export interface PlayerCallbacks {
   /** 播放到第 index 个音符时回调（用于高亮） */
@@ -45,45 +46,73 @@ export class Player {
     const secPerBeat = 60 / this.bpm;
     const notes = piece.notes;
 
-    // 预算每个音的「实际发声音长」：连音线(tie)把同音高相邻音合并成一个长音。
+    // 预算每个音的「实际发声音长」：连音线(tie)把同音高音(可跨和弦声部)合并成一个长音。
     // tie 链的起点音吃掉整条链的总时长；链中每个 tieEnd 音发声音长=0（不重新起振，只推进时间）。
+    // 配对按「时间位 + 同 midi」:前位的 tieStart 声部 ↔ 后位的 tieEnd 声部(同 midi 才连)。
+    // 这同时支持单音 tie(相邻同音高)与和弦 tie(复制组各声部与源组对应声部 midi 全等)。
     const voiceDur = notes.map(n => durationBeats(n) * secPerBeat);
-    for (let i = 0; i < notes.length; i++) {
-      if (notes[i].tieStart && notes[i].midi !== null
-        && i + 1 < notes.length && notes[i + 1].tieEnd && notes[i + 1].midi === notes[i].midi) {
-        // 找到一条 tie 链：起点 i，后续连续 tieEnd 且同音高
-        let acc = voiceDur[i];
-        let j = i + 1;
-        while (j < notes.length && notes[j].tieEnd && notes[j].midi === notes[i].midi) {
-          acc += voiceDur[j];
-          voiceDur[j] = 0;       // 链中音不发声
-          // 若该音同时也是下一条 tie 的起点（A-B-C 链），继续延长
-          if (notes[j].tieStart && j + 1 < notes.length && notes[j + 1].tieEnd
-            && notes[j + 1].midi === notes[j].midi) {
-            j++;
+    // 切时间位:连续同 chordId 归一段;无 chordId 单音自成一段
+    const slots: [number, number][] = [];
+    for (let i = 0; i < notes.length;) {
+      const cid = notes[i].chordId;
+      let j = cid ? i : i + 1;
+      if (cid) while (j < notes.length && notes[j].chordId === cid) j++;
+      slots.push([i, j - 1]);
+      i = j;
+    }
+    // 对每个 tieStart 声部,沿「后位同 midi tieEnd」向后累加时长(tie 链可能跨多个时间位)
+    for (let si = 0; si < slots.length; si++) {
+      const [a0, a1] = slots[si];
+      for (let ai = a0; ai <= a1; ai++) {
+        const a = notes[ai];
+        if (!a.tieStart || a.midi === null) continue;
+        // 沿后续时间位找同 midi 的 tieEnd 声部,累加其 voiceDur 到起点 a,并把它们置 0
+        let acc = voiceDur[ai];
+        let curSi = si + 1;
+        let chainMidi = a.midi;
+        // 链可能持续:后位的 tieEnd 同时又是再后位的 tieStart(同音高延续多段)
+        while (curSi < slots.length) {
+          const [b0, b1] = slots[curSi];
+          // 找该位中 tieEnd 且 midi===chainMidi 的声部
+          let matchedIdx = -1;
+          for (let bi = b0; bi <= b1; bi++) {
+            if (notes[bi].tieEnd && notes[bi].midi === chainMidi) { matchedIdx = bi; break; }
+          }
+          if (matchedIdx < 0) break;   // 后位无匹配 tieEnd → 链终止
+          acc += voiceDur[matchedIdx];
+          voiceDur[matchedIdx] = 0;
+          // 若该匹配音同时也是下一段的 tieStart(且下一位同 midi),继续延长
+          if (notes[matchedIdx].tieStart) {
+            curSi++;
+            chainMidi = notes[matchedIdx].midi!;   // 同音高链
           } else {
             break;
           }
         }
-        voiceDur[i] = acc;       // 起点音吃掉整链时长
+        voiceDur[ai] = acc;
       }
     }
 
     let t = ctx.currentTime + 0.08;
     this.playing = true;
 
-    notes.forEach((n, i) => {
+    for (let i = 0; i < notes.length; i++) {
+      const n = notes[i];
       const dur = voiceDur[i];
-      // 高亮回调（每个音都高亮，tie 两端视觉上都该亮）
+      const tail = isChordTail(n, i > 0 ? notes[i - 1] : null);
+      // 高亮回调（每个音都高亮，tie 两端与和弦各声部视觉上都该亮）
       const hi = window.setTimeout(() => {
         if (this.playing) this.cb.onNote(i);
       }, (t - ctx.currentTime) * 1000);
       this.timers.push(hi);
       if (n.midi !== null && dur > 0) {
-        this.playNote(ctx, master, n.midi, t, dur);
+        this.playNote(ctx, master, n.midi, t, dur);   // 和弦各声部同 t 触发 → 同时发声
       }
-      t += durationBeats(n) * secPerBeat;  // 时间轴仍按各音原始时值推进
-    });
+      // 时间轴推进:和弦尾音与首音同时,不推进;首音/普通音按其时值推进。
+      if (!tail) {
+        t += durationBeats(n) * secPerBeat;
+      }
+    }
 
     // 结束回调
     const end = window.setTimeout(() => {

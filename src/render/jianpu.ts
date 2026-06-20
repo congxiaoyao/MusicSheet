@@ -1,6 +1,7 @@
 // 简谱渲染：数字、八度点、下划线、短横、附点、临时记号
 
 import { noteToJianpu } from '../core/theory';
+import { Note } from '../core/types';
 import { RenderInput } from './staff';
 import { tupletGroups } from '../core/model';
 
@@ -79,70 +80,109 @@ export function renderJianpuSVG(input: RenderInput): string {
   s += line(layout.barLines[0], layout.jianpuTop + 6, layout.barLines[0], layout.jianpuBottom - 6, '#94a3b8', 1.4);
   s += line(layout.barLines[layout.barLines.length - 1], layout.jianpuTop + 6, layout.barLines[layout.barLines.length - 1], layout.jianpuBottom - 6, '#94a3b8', 2.2);
 
-  for (let i = 0; i < piece.notes.length; i++) {
-    const note = piece.notes[i];
-    const x = layout.noteX[i];
-    const highlight = i === playingIndex;
+  // 把 notes 切成「时间位」:连续同 chordId 归一段;无 chordId 单音自成一段 [start,end]
+  const slots: [number, number][] = [];
+  for (let i = 0; i < piece.notes.length;) {
+    const cid = piece.notes[i].chordId;
+    let j = cid ? i : i + 1;
+    if (cid) while (j < piece.notes.length && piece.notes[j].chordId === cid) j++;
+    slots.push([i, j - 1]);
+    i = j;
+  }
+  // 和弦内数字纵排:按音高从高到低(简谱数字大→小的音高顺序)从上往下叠。
+  // 行高:一个数字高约 DIGIT_FS*0.75。
+  const CHORD_LINE = DIGIT_FS * 0.78;
+
+  for (const [s0, s1] of slots) {
+    const head = piece.notes[s0];           // 首音(时值/附点/tuplet 以它为准)
+    const x = layout.noteX[s0];
+    const highlight = s0 <= playingIndex && playingIndex <= s1;
     const fill = highlight ? '#4f46e5' : '#1f2430';
-    const jp = noteToJianpu(note, piece.key);
-    if (!jp) continue;
+    // 组内各声部(含单音):休止过滤
+    const members: { idx: number; note: Note; jp: NonNullable<ReturnType<typeof noteToJianpu>> }[] = [];
+    for (let k = s0; k <= s1; k++) {
+      const jp = noteToJianpu(piece.notes[k], piece.key);
+      if (!jp) continue;
+      members.push({ idx: k, note: piece.notes[k], jp });
+    }
+    if (members.length === 0) continue;
 
-    // 临时记号（数字前）：偏移随时值动态收缩，避免窄格子里离数字太远
-    const slotW = layout.noteSlotW[i];
+    // 和弦纵排:按 midi 升序(高音在上=数字纵排顶部),算每个声部相对 baseY 的偏移。
+    // 单音(members.length===1):offset=0,数字在 baseY。
+    const sorted = members.slice().sort((a, b) => (a.note.midi ?? 0) - (b.note.midi ?? 0));
+    const nM = sorted.length;
+    const offsets = new Map<number, number>();
+    for (let r = 0; r < nM; r++) {
+      // 顶部声部(r=0,最高音)在最上方。偏移 = (顶部到该声部)*行高 - 总高的一半居中
+      const off = (r - (nM - 1) / 2) * CHORD_LINE;
+      offsets.set(sorted[r].idx, off);
+    }
+
+    const slotW = layout.noteSlotW[s0];
     const accOffset = Math.max(ACCIDENTAL_MIN, ACCIDENTAL_BASE - Math.max(0, (ACCIDENTAL_NARROW_SLOT - slotW)) * 0.35);
-    const accY = baseY - ACCIDENTAL_LIFT;
-    if (jp.accidental === 'sharp') s += text('♯', x - accOffset, accY - SHARP_EXTRA_LIFT, DIGIT_FS * 0.7, { fill });
-    else if (jp.accidental === 'flat') s += text('♭', x - accOffset, accY, DIGIT_FS * 0.7, { fill });
+    const accYBase = baseY - ACCIDENTAL_LIFT;
 
-    // 数字（休止用 0）
-    const digitStr = jp.digit === 0 ? '0' : String(jp.digit);
-    s += text(digitStr, x, baseY, DIGIT_FS, { fill, weight: '500' });
+    // 逐声部画数字 + 八度点 + 临时记号(各声部独立);时值修饰(下划线/短横/附点)整组画一次
+    for (const m of members) {
+      const yRow = baseY + (offsets.get(m.idx) ?? 0);
+      const jp = m.jp;
+      // 临时记号
+      if (jp.accidental === 'sharp') s += text('♯', x - accOffset, accYBase + (offsets.get(m.idx) ?? 0) - SHARP_EXTRA_LIFT, DIGIT_FS * 0.7, { fill });
+      else if (jp.accidental === 'flat') s += text('♭', x - accOffset, accYBase + (offsets.get(m.idx) ?? 0), DIGIT_FS * 0.7, { fill });
+      // 数字(休止用 0)
+      const digitStr = jp.digit === 0 ? '0' : String(jp.digit);
+      s += text(digitStr, x, yRow, DIGIT_FS, { fill, weight: '500' });
+      // 八度点(各声部独立,基于该声部 yRow)
+      const dotR = 2.2;
+      if (jp.octaveDots > 0) {
+        for (let d = 0; d < jp.octaveDots; d++) s += circle(x, yRow - 15 - d * 7, dotR, fill);
+      } else if (jp.octaveDots < 0) {
+        for (let d = 0; d < -jp.octaveDots; d++) s += circle(x, yRow + 10 + d * 7, dotR, fill);
+      }
+    }
 
-    // 附点
-    if (note.dotted) {
+    // 附点:整组画一次(用首音),位置在数字右侧
+    if (head.dotted) {
       s += circle(x + 11, baseY - 6, 2.2, fill);
     }
 
-    // 八度点（上方/下方）
-    const dotR = 2.2;
-    if (jp.octaveDots > 0) {
-      for (let d = 0; d < jp.octaveDots; d++) {
-        s += circle(x, baseY - 24 - d * 7, dotR, fill);
-      }
-    } else if (jp.octaveDots < 0) {
-      for (let d = 0; d < -jp.octaveDots; d++) {
-        s += circle(x, baseY + 10 + d * 7, dotR, fill);
-      }
-    }
-
-    // 下划线（时值 < 四分）
-    const ucount = underlineCount(note.duration, note.dotted);
+    // 下划线(时值<四分):整组画一次(用首音时值),位置在 baseY 下方
+    const ucount = underlineCount(head.duration, head.dotted);
     const numHalfW = 7;
     for (let u = 0; u < ucount; u++) {
       const uy = baseY + 4 + u * 5;
       s += line(x - numHalfW, uy, x + numHalfW, uy, fill, 1.4);
     }
 
-    // 连音线(tie)：当前音是 tieEnd 时，从前一音数字右侧画小弧线到当前音数字左侧（上方朝上凸），
-    // 表示与前一音相连、不重新起奏。仅当前一音同音高才画（与五线谱 tie 语义一致）。
-    if (note.tieEnd && i > 0) {
-      const prev = piece.notes[i - 1];
-      if (prev.midi !== null && prev.midi === note.midi) {
-        const prevX = layout.noteX[i - 1];
-        const tieY = baseY - 13;
-        const xa = prevX + numHalfW + 1;
-        const xb = x - numHalfW - 1;
-        const mx = (xa + xb) / 2;
-        const my = tieY - 6;                       // 控制点上抬，弧线朝上凸
-        s += path(`M ${xa.toFixed(1)} ${tieY.toFixed(1)} Q ${mx.toFixed(1)} ${my.toFixed(1)} ${xb.toFixed(1)} ${tieY.toFixed(1)}`, fill, 1.3);
-      }
-    }
-
-    // 短横（时值 > 四分）：画在数字右侧的横线，每条占约一个数字宽
-    const dcount = dashCount(note.duration, note.dotted);
+    // 短横(时值>四分):整组画一次
+    const dcount = dashCount(head.duration, head.dotted);
     for (let d = 0; d < dcount; d++) {
       const dx = x + 16 + d * 14;
       s += line(dx - 6, baseY - 4, dx + 6, baseY - 4, fill, 1.8);
+    }
+  }
+
+  // 连音线(tie):按时间位配对(同五线谱逻辑)。在前位每个 tieStart 声部与后位同 midi 的 tieEnd 声部间画弧。
+  const numHalfW2 = 7;
+  for (let si = 0; si < slots.length - 1; si++) {
+    const [a0, a1] = slots[si];
+    const [b0, b1] = slots[si + 1];
+    for (let ai = a0; ai <= a1; ai++) {
+      const a = piece.notes[ai];
+      if (!a.tieStart || a.midi === null) continue;
+      for (let bi = b0; bi <= b1; bi++) {
+        const b = piece.notes[bi];
+        if (!b.tieEnd || b.midi === null || a.midi !== b.midi) continue;
+        const prevX = layout.noteX[ai];
+        const curX = layout.noteX[bi];
+        const tieY = baseY - 13;
+        const xa = prevX + numHalfW2 + 1;
+        const xb = curX - numHalfW2 - 1;
+        const mx = (xa + xb) / 2;
+        const my = tieY - 6;
+        s += path(`M ${xa.toFixed(1)} ${tieY.toFixed(1)} Q ${mx.toFixed(1)} ${my.toFixed(1)} ${xb.toFixed(1)} ${tieY.toFixed(1)}`, '#1f2430', 1.3);
+        break;
+      }
     }
   }
 

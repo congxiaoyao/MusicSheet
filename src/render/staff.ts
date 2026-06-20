@@ -5,7 +5,7 @@ import { staffStepToMidi, resolvePitch } from '../core/theory';
 import { Layout } from './layout';
 import { G, advanceSS } from './glyphs';
 import { computeBeams, BeamGroup, beamCountForNote } from './beam';
-import { tupletGroups } from '../core/model';
+import { tupletGroups, chordGroups, isChordTail } from '../core/model';
 
 // 连梁几何常量（单位 staff space）
 const BEAM_THICKNESS = 0.5;   // 单根横梁厚度（SMuFL beamThickness）
@@ -223,8 +223,11 @@ function computeStem(step: number, x: number, headHalfW: number, layout: Layout,
 }
 
 /** 渲染单个音符（含符头、符干、符尾、加线、临时记号、附点）。
- *  beam 非空时：符干对齐组端点，且不画 flag（flag 由连梁代替）。 */
-function renderNote(note: Note, x: number, piece: Piece, layout: Layout, highlight: boolean, beam?: BeamCtx): string {
+ *  - beam 非空时：符干对齐组端点，且不画 flag（flag 由连梁代替）。
+ *  - isChordTail=true 时：和弦尾音只画符头,不画符干/flag(符干由组首音贯穿全组承担)。
+ *  - chordStemHandled=true 时(和弦首音且不在连梁里)：符干由 renderChordStems 统一画,这里跳过。
+ *    和弦首音在连梁里时,符干由 renderBeams 按代表 step 处理,chordStemHandled=false,正常走 stemCtx。 */
+function renderNote(note: Note, x: number, piece: Piece, layout: Layout, highlight: boolean, beam: BeamCtx | undefined, isChordTail: boolean, chordStemHandled: boolean): string {
   const fs = layout.fontSize;
   const ss = layout.staffSpace;
   let s = '';
@@ -286,11 +289,17 @@ function renderNote(note: Note, x: number, piece: Piece, layout: Layout, highlig
     : G.noteheadBlack;
   s += text(headGlyph, x, y, fs, { fill });
 
-  // 符干 + 符尾（whole 无）
-  if (note.duration !== 'whole') {
+  // 符干 + 符尾（whole 无符干；和弦尾音无符干——由组首音贯穿全组；
+  //  和弦首音非连梁时也无符干——由 renderChordStems 统一画贯穿全组的符干。
+  //  例外:和弦尾音若在连梁里(beam 存在),每个声部都需符干连到梁 → 仍画符干。)
+  const drawStem = note.duration !== 'whole'
+    && !(isChordTail && !beam)         // 非连梁和弦尾音:不画
+    && !(chordStemHandled);            // 和弦首音非连梁:符干由 renderChordStems 画
+  if (drawStem) {
     const { stemUp, stemW, stemX, stemTop, stemBot } = computeStem(step, x, headHalfW, layout, beam);
     s += rect(stemX, stemTop, stemW, stemBot - stemTop, { fill });
-    // 符尾：只有未连梁的八分/十六分/三十二分才画 flag（连梁的由横梁代替）
+    // 符尾：只有未连梁、且非和弦尾音的八分/十六分/三十二分才画 flag
+    // (和弦首音若不连梁且是八分及下面,flag 由 renderChordStems 画)
     if (!beam && (note.duration === 'eighth' || note.duration === 'sixteenth' || note.duration === 'thirtysecond')) {
       const flagGlyph = note.duration === 'eighth'
         ? (stemUp ? G.flag8thUp : G.flag8thDown)
@@ -383,28 +392,54 @@ function renderBeams(groups: BeamGroup[], piece: Piece, layout: Layout): { svg: 
   const thick = BEAM_THICKNESS * ss;
 
   for (const g of groups) {
-    // 收集组内音符的 step、符头 y、符干 x、每音梁容量
-    const idxs: number[] = [];      // 组内音符在 notes 数组中的真实索引（跳过休止）
-    const steps: number[] = [];
-    const headYs: number[] = [];
-    const caps: number[] = [];       // beamCountForNote per note
-    const stemXs: number[] = [];     // 符干 x（先按 up 占位，方向定后改写）
+    // 收集组内「时间位首音」的原始数据。和弦首音代表整个和弦:收集组内所有声部 step。
+    // 和弦尾音不在 BeamGroup 里(computeBeams 跳过了 tail),故无需在此处理。
+    const idxs: number[] = [];        // 时间位首音索引
+    const grpStepsArr: number[][] = []; // 每个时间位的全部声部 step(单音=[自身])
+    const caps: number[] = [];         // beamCountForNote per 时间位首音
+    const stemXs: number[] = [];       // 符干 x 占位(方向定后改写)
     for (let i = g.startIdx; i <= g.endIdx; i++) {
       const note = piece.notes[i];
       if (note.midi === null) continue;
+      // chordTail 不在 computeBeams 的分组判定里(computeBeams 跳过了它们),但 BeamGroup 范围
+      // (startIdx..endIdx)仍覆盖它们(closeGroup 用循环变量 i)。这里再过滤一次:尾音是首音的
+      // 声部之一,不应作为独立时间位处理——它们会在首音的 grp 收集里被包含。
+      if (isChordTail(note, i > 0 ? piece.notes[i - 1] : null)) continue;
       idxs.push(i);
-      steps.push(resolvePitch(note.midi, piece.clef, piece.key, note.accidental).step);
-      headYs.push(stepToY(steps[steps.length - 1], layout));
       caps.push(beamCountForNote(note.duration));
+      let grp: number[];
+      if (note.chordId) {
+        grp = [];
+        for (let k = i; k < piece.notes.length && piece.notes[k].chordId === note.chordId; k++) {
+          const mk = piece.notes[k].midi;
+          if (mk === null) continue;
+          grp.push(resolvePitch(mk, piece.clef, piece.key, piece.notes[k].accidental).step);
+        }
+      } else {
+        grp = [resolvePitch(note.midi, piece.clef, piece.key, note.accidental).step];
+      }
+      grpStepsArr.push(grp);
       const x = layout.noteX[i];
       stemXs.push(x + headHalfW - stemW / 2);
     }
     const n = idxs.length;
     if (n < 2) continue;
 
-    const maxCount = g.maxBeamCount;
-    const avgStep = steps.reduce((a, b) => a + b, 0) / steps.length;
+    // 方向:把所有时间位的全部声部 step 展平后取平均(和弦各声部都参与方向判定,符合标准记谱)
+    const allSteps = grpStepsArr.flat();
+    const avgStep = allSteps.reduce((a, b) => a + b, 0) / allSteps.length;
     const stemDir: 'up' | 'down' = avgStep <= 6 ? 'up' : 'down';
+    // 每个时间位的代表 step + 符干连接端符头 y:
+    //  up → 最高音(最大 step,最小 y);down → 最低音(最小 step,最大 y)
+    const steps: number[] = [];
+    const headYs: number[] = [];
+    for (const grp of grpStepsArr) {
+      const rep = stemDir === 'up' ? Math.max(...grp) : Math.min(...grp);
+      steps.push(rep);
+      headYs.push(stepToY(rep, layout));
+    }
+
+    const maxCount = g.maxBeamCount;
 
     // ── primary（第 1 根，最外侧）几何：首尾两端各自的 y ──
     // stdLen 用 ss*3.5：FONT=92 后 SS=23，物理符干长度与五线谱比例匹配（原 ss*7 是 FONT 未翻倍时的值）
@@ -511,6 +546,16 @@ function renderBeams(groups: BeamGroup[], piece: Piece, layout: Layout): { svg: 
     }
   }
 
+  // 和弦尾音在连梁里时也需要符干(每个声部一根连到梁)。computeBeams 跳过了 tail,
+  // 故 ctxByIdx 只含首音。把每个和弦首音的 ctx 复制给它同组的所有尾音(同时间位、同梁 y)。
+  for (const [i, ctx] of ctxByIdx) {
+    const head = piece.notes[i];
+    if (!head.chordId) continue;
+    for (let k = i + 1; k < piece.notes.length && piece.notes[k].chordId === head.chordId; k++) {
+      if (!ctxByIdx.has(k)) ctxByIdx.set(k, ctx);
+    }
+  }
+
   return { svg, ctxByIdx };
 }
 
@@ -525,45 +570,73 @@ function drawBeam(x1: number, y1: number, x2: number, y2: number, thick: number)
   return polygon(pts, { fill: '#1f2430' });
 }
 
-/** 渲染连音线(tie)：遍历 notes，找 tieStart→下一个 tieEnd 且同音高的相邻对，画弧线。
- *  弧线从左音符头右边缘连到右音符头左边缘，凸向远离符干的一侧（标准记谱：符头在弧线凹侧）。
+/** 渲染连音线(tie):按「时间位」(单音或和弦组)分组,在相邻两个时间位之间,
+ *  对每个 tieStart(前位)↔ tieEnd(后位)且同音高的声部配对画弧线。
+ *  这样和弦内部相邻声部(同时间位)不会误判为 tie。
+ *  弧线从左符头右边缘连到右符头左边缘，凸向远离符干的一侧（标准记谱：符头在弧线凹侧）。
  *  - 符干朝上(step<=6)→ 弧线在符头下方，朝下凸
  *  - 符干朝下(step>6)→ 弧线在符头上方，朝上凸
  *  用二次贝塞尔 Q：两端 y = 符头 y + ε 偏移到符头外侧，控制点 y 再凸出 bowH。 */
 function renderTies(piece: Piece, layout: Layout): string {
   const ss = layout.staffSpace;
   const notes = piece.notes;
+  const headHalfW = advanceSS('noteheadBlack') / 2 * ss;
   let s = '';
-  for (let i = 0; i < notes.length - 1; i++) {
-    const a = notes[i], b = notes[i + 1];
-    if (!a.tieStart || !b.tieEnd) continue;
-    if (a.midi === null || b.midi === null) continue;        // 休止符不画 tie
-    if (a.midi !== b.midi) continue;                          // tie 必须同音高（防御：数据异常时跳过）
-    const stepA = resolvePitch(a.midi, piece.clef, piece.key, a.accidental).step;
-    const stepB = resolvePitch(b.midi, piece.clef, piece.key, b.accidental).step;
+
+  // 画单根 tie 弧线:从 (xA,yA音高) 到 (xB,yB音高)
+  const drawArc = (stepA: number, stepB: number, xA: number, xB: number) => {
     const yA = stepToY(stepA, layout);
     const yB = stepToY(stepB, layout);
-    const xA = layout.noteX[i];
-    const xB = layout.noteX[i + 1];
-    const headHalfW = advanceSS('noteheadBlack') / 2 * ss;
-    // 弧线两端 x：连符头边缘（左音右边缘、右音左边缘），符合 Gould《Behind Bars》标准
     const x1 = xA + headHalfW * 0.85;
     const x2 = xB - headHalfW * 0.85;
     const mx = (x1 + x2) / 2;
-    // 符干方向（与 renderNote 一致：step<=6 朝上）。tie 凸向远离符干的一侧（符头那侧）。
     const stemUp = Math.min(stepA, stepB) <= 6;
-    const sign = stemUp ? 1 : -1;                              // up 时往下凸(+y)，down 时往上凸(-y)
-    // tie 两端起自符头朝凸起方向的边缘（Gould《Behind Bars》：略偏符头中心外侧，
-    // 朝凸起侧约符头半高）。符头半高≈0.4ss，再加一点间隙避免压符头。
+    const sign = stemUp ? 1 : -1;
     const headHalfH = ss * 0.4;
     const gap = ss * 0.08;
     const yAend = yA + sign * (headHalfH + gap);
     const yBend = yB + sign * (headHalfH + gap);
-    const bowH = ss * 1.1;                                     // 弧线凸起高度（标准）
-    const cy = (yAend + yBend) / 2 + sign * bowH;              // 控制点 y
-    // 单根弧线（符干级粗细，颜色同符头），二次贝塞尔
+    const bowH = ss * 1.1;
+    const cy = (yAend + yBend) / 2 + sign * bowH;
     const d = `M ${x1.toFixed(1)} ${yAend.toFixed(1)} Q ${mx.toFixed(1)} ${cy.toFixed(1)} ${x2.toFixed(1)} ${yBend.toFixed(1)}`;
     s += path(d, { stroke: '#1f2430', sw: Math.max(1.4, ss * 0.18), fill: 'none' });
+  };
+
+  // 把 notes 切成「时间位」段:连续同 chordId 的音归一段;无 chordId 的单音自成一段。
+  // 每段 [startIdx, endIdx]。
+  const slots: [number, number][] = [];
+  let i = 0;
+  while (i < notes.length) {
+    const cid = notes[i].chordId;
+    let j = i;
+    if (cid) {
+      while (j < notes.length && notes[j].chordId === cid) j++;
+    } else {
+      j = i + 1;
+    }
+    slots.push([i, j - 1]);
+    i = j;
+  }
+
+  // 遍历相邻时间位对,找 tieStart(前位声部)↔ tieEnd(后位声部)且同 midi 配对画弧
+  for (let si = 0; si < slots.length - 1; si++) {
+    const [a0, a1] = slots[si];
+    const [b0, b1] = slots[si + 1];
+    // 收集前位中标记 tieStart 的声部(按 midi 索引),后位中标记 tieEnd 的声部
+    for (let ai = a0; ai <= a1; ai++) {
+      const a = notes[ai];
+      if (!a.tieStart || a.midi === null) continue;
+      // 在后位找同 midi 且 tieEnd 的声部
+      for (let bi = b0; bi <= b1; bi++) {
+        const b = notes[bi];
+        if (!b.tieEnd || b.midi === null) continue;
+        if (a.midi !== b.midi) continue;
+        const stepA = resolvePitch(a.midi, piece.clef, piece.key, a.accidental).step;
+        const stepB = resolvePitch(b.midi, piece.clef, piece.key, b.accidental).step;
+        drawArc(stepA, stepB, layout.noteX[ai], layout.noteX[bi]);
+        break;   // 一个 tieStart 声部只配一个 tieEnd
+      }
+    }
   }
   return s;
 }
@@ -621,6 +694,71 @@ function renderTuplets(piece: Piece, layout: Layout, ctxByIdx: Map<number, BeamC
   return s;
 }
 
+/** 渲染和弦(chord)组的统一符干。每个和弦(2 音及以上、非全音符、且不在连梁里)画一根贯穿全组的符干:
+ *  - 方向 = 组平均 step ≤ 6(中线 B4)→ up,否则 down(整组同向,符合标准记谱)
+ *  - 符干一端连组内最极端符头(up=最高音/最小 y;down=最低音/最大 y),另一端延伸标准长度 ss*3.5
+ *  - 符干 x 取组首音 noteX ± headHalfW(全组同 x)
+ *  - 八分及以下时值,在符干端点画 flag(整组和弦共用一根 flag)
+ *  返回 { svg, handled }:handled 为「符干已由此处处理的音符索引集」(= 组内所有非全音符音,无论是否在连梁里,
+ *  连梁组的首/尾音代表 step 由 renderBeams 负责,这里不重复)。 */
+function renderChordStems(piece: Piece, layout: Layout, beamIdx: Set<number>): { svg: string; handled: Set<number> } {
+  const ss = layout.staffSpace;
+  const fs = layout.fontSize;
+  const groups = chordGroups(piece);
+  let svg = '';
+  const handled = new Set<number>();
+  const stemW = Math.max(1.5, W_STEM * ss);
+  const headHalfW = advanceSS('noteheadBlack') / 2 * ss;
+  const stemLen = ss * 3.5;
+  const inset = STEM_INSET * ss;
+
+  for (const g of groups) {
+    // 组内有效音(非休止)的 step;whole 时值不画符干
+    const idxs: number[] = [];
+    const steps: number[] = [];
+    for (let i = g.startIdx; i <= g.endIdx; i++) {
+      const note = piece.notes[i];
+      if (note.midi === null) continue;
+      if (note.duration === 'whole') continue;
+      idxs.push(i);
+      steps.push(resolvePitch(note.midi, piece.clef, piece.key, note.accidental).step);
+    }
+    if (idxs.length < 2) continue;   // 单音和弦(实际是单音)交给 renderNote 正常画
+    // 任一成员在连梁里 → 整组符干由 renderBeams 按代表 step 处理,跳过
+    if (idxs.some(i => beamIdx.has(i))) continue;
+
+    const avgStep = steps.reduce((a, b) => a + b, 0) / steps.length;
+    const stemUp = avgStep <= 6;
+    const x = layout.noteX[idxs[0]];
+    const stemX = (stemUp ? x + headHalfW - stemW / 2 : x - headHalfW + stemW / 2) - inset;
+    // 符干要贯穿所有符头:竖线覆盖整个和弦的垂直跨度。
+    // up: 底端=最低音符头(step最小,y最大),顶端=最高音符头 y - stemLen
+    //      (顶端从最高音再往上延伸标准长度,竖线自然贯穿最低→最高→顶端)
+    // down: 顶端=最高音符头(step最大,y最小),底端=最低音符头 y + stemLen
+    const maxY = stepToY(Math.min(...steps), layout);   // 最低音 y 最大(最靠下)
+    const minY = stepToY(Math.max(...steps), layout);   // 最高音 y 最小(最靠上)
+    const stemTop = stemUp ? minY - stemLen : minY;
+    const stemBot = stemUp ? maxY : maxY + stemLen;
+    svg += rect(stemX, stemTop, stemW, stemBot - stemTop, { fill: '#1f2430' });
+
+    // flag:整组和弦共用一根(取首音时值,组内一致)
+    const dur = piece.notes[idxs[0]].duration;
+    if (dur === 'eighth' || dur === 'sixteenth' || dur === 'thirtysecond') {
+      const flagGlyph = dur === 'eighth'
+        ? (stemUp ? G.flag8thUp : G.flag8thDown)
+        : dur === 'sixteenth'
+        ? (stemUp ? G.flag16thUp : G.flag16thDown)
+        : (stemUp ? G.flag32ndUp : G.flag32ndDown);
+      const flagY = stemUp ? stemTop : stemBot;
+      svg += text(flagGlyph, stemX + stemW / 2, flagY, fs, { fill: '#1f2430', anchor: 'start' });
+    }
+    // 标记组内所有音为「符干已处理」:首音(在主循环里 chordStemHandled=true),
+    // 尾音在主循环里本就 isChordTail=true。这里把首音加入 handled(主循环查它)。
+    handled.add(idxs[0]);
+  }
+  return { svg, handled };
+}
+
 /** 主渲染：返回 SVG 内部内容（不含 <svg> 标签） */
 export function renderStaffSVG(input: RenderInput): string {
   const { piece, layout, playingIndex } = input;
@@ -637,8 +775,16 @@ export function renderStaffSVG(input: RenderInput): string {
   // 与梁重叠，视觉上符干接入梁。
   const { svg: beamSvg, ctxByIdx } = renderBeams(computeBeams(piece), piece, layout);
   s += beamSvg;
+  // 和弦符干:连梁之后画(不和连梁和弦冲突),音符符头之前画(符头会盖住符干端)
+  const beamIdx = new Set<number>(ctxByIdx.keys());
+  const { svg: chordStemSvg, handled: chordHandled } = renderChordStems(piece, layout, beamIdx);
+  s += chordStemSvg;
   for (let i = 0; i < piece.notes.length; i++) {
-    s += renderNote(piece.notes[i], layout.noteX[i], piece, layout, i === playingIndex, ctxByIdx.get(i));
+    const note = piece.notes[i];
+    const prev = i > 0 ? piece.notes[i - 1] : null;
+    const isChordTail = !!(note.chordId && prev?.chordId === note.chordId);
+    const chordStemHandled = chordHandled.has(i);
+    s += renderNote(note, layout.noteX[i], piece, layout, i === playingIndex, ctxByIdx.get(i), isChordTail, chordStemHandled);
   }
   // 连音线(tie)：弧线画在符头之上，所以放在音符循环之后
   s += renderTies(piece, layout);

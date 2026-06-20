@@ -76,9 +76,8 @@ html, body {
 /* ── 工具栏（卡片） ── */
 .toolbar {
   display: flex;
-  flex-wrap: wrap;
-  gap: 22px;
-  align-items: center;
+  flex-direction: column;
+  gap: 10px;
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -89,9 +88,10 @@ html, body {
 .tb-group {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
 }
-.tb-group + .tb-group { padding-left: 22px; border-left: 1px solid var(--line-2); }
+.tb-group + .tb-group { padding-left: 0; border-left: none; padding-top: 10px; border-top: 1px solid var(--line-2); }
 .tb-label {
   font-size: 11px;
   color: var(--muted);
@@ -347,7 +347,7 @@ html, body {
 /* ── 响应式 ── */
 @media (max-width: 720px) {
   .app { padding: 18px 14px 28px; }
-  .toolbar { gap: 14px; padding: 12px; }
-  .tb-group + .tb-group { padding-left: 14px; }
+  .toolbar { gap: 10px; padding: 12px; }
+  .tb-group + .tb-group { padding-left: 0; }
   .app-header h1 { font-size: 20px; }
 }

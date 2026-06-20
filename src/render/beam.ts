@@ -14,7 +14,7 @@
 //        决定该组最多有几根梁。
 
 import { Note, Piece } from '../core/types';
-import { noteStartBeats, barLineBeats } from '../core/model';
+import { noteStartBeats, barLineBeats, isChordTail } from '../core/model';
 
 export interface BeamGroup {
   /** 组内首音符在 notes 数组中的索引（含） */
@@ -82,6 +82,9 @@ export function computeBeams(piece: Piece): BeamGroup[] {
 
   for (let i = 0; i < notes.length; i++) {
     const note = notes[i];
+    // 和弦尾音:与首音同时,是首音所在时间位的一部分,不作为独立连梁单位参与判定(透明跳过)。
+    // 和弦首音(非尾音)代表整个和弦参与连梁,其 step 由 renderBeams 取组内最极端值。
+    if (isChordTail(note, i > 0 ? notes[i - 1] : null)) continue;
     const isRest = note.midi === null;
     const eighths = eighthCount(note.duration);
     const canBeam = !isRest && eighths >= 0; // eighth / sixteenth / thirtysecond 且非休止

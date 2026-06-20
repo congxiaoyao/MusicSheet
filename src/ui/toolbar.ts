@@ -1,6 +1,7 @@
 // 工具栏：当前编辑状态 + 控件渲染
 
 import { Clef, DurationValue, KeyName, TimeSig, noteValueBeats } from '../core/types';
+import { G } from '../render/glyphs';
 
 /** 连音模式。off=普通；其余值表示对应连音类型（actual:normal）。 */
 export type TupletMode = 'off' | 'triplet' | 'quintuplet' | 'sextuplet';
@@ -19,11 +20,12 @@ export interface ToolState {
   accidental: 'sharp' | 'flat' | 'natural' | null;
   /** 下一个音符是否休止符 */
   rest: boolean;
-  /** 下一个音符是否与前一个同音高音建立连音线(tie)。一次性修饰符，录入后自动重置 */
-  tieNext: boolean;
   /** 连音组(tuplet)输入模式：off=关闭；triplet=三连音(3:2)；quintuplet=五连音(5:4)；sextuplet=六连音(6:4)。
    *  开启后接下来输入的 actual 个音自动归为一组，输入完第 actual 个后自动关闭。 */
   tupletMode: TupletMode;
+  /** 和弦(chord)输入模式：开启后接下来输入的若干音叠在同一时间位(不推进时间),
+   *  再按一次或输入不同时值音时关闭,光标推进到新时间位。 */
+  chordMode: boolean;
   clef: Clef;
   key: KeyName;
   time: TimeSig;
@@ -37,8 +39,8 @@ export function defaultTool(): ToolState {
     dotted: false,
     accidental: null,
     rest: false,
-    tieNext: false,
     tupletMode: 'off',
+    chordMode: false,
     clef: 'treble',
     key: 'C',
     time: { num: 4, den: 4 },
@@ -55,11 +57,53 @@ const DURATIONS: { value: DurationValue; label: string; sub: string }[] = [
   { value: 'thirtysecond', label: '𝅘𝅥𝅰', sub: '三十二分' },
 ];
 
+/** 用 Bravura 字形拼工具栏时值图标(符头 + 符干 + 符尾),与五线谱画法一致、不错位。
+ *  Bravura notehead 字形 baseline 居中穿过符头椭圆中心,故符头 baseline y = 符头垂直中心。
+ *  符干从符头右边缘竖直向上,底端 = 符头中心(不穿过符头),长 0.62em(图标紧凑)。
+ *  符干/符尾相对符头左移 3%(0.009em,符头不动)。返回 em 单位 SVG,自适应字号。 */
+function durationIcon(d: DurationValue): string {
+  const headAdv = 0.295;
+  const stemW = 0.04;
+  const shift = -0.012;                  // 符干/符尾左移 4%(符头不动)
+  const stemTop = -0.62;
+  const stemX = headAdv - stemW / 2 + shift;
+  const stem = `<rect x="${stemX.toFixed(3)}" y="${stemTop}" width="${stemW}" height="${0 - stemTop}" fill="currentColor"/>`;
+  let inner = '';
+  if (d === 'whole') {
+    inner = `<text x="0" y="0" font-family="Bravura" font-size="1" text-anchor="start" fill="currentColor">${G.noteheadWhole}</text>`;
+  } else if (d === 'half') {
+    inner = `<text x="0" y="0" font-family="Bravura" font-size="1" text-anchor="start" fill="currentColor">${G.noteheadHalf}</text>` + stem;
+  } else {
+    inner = `<text x="0" y="0" font-family="Bravura" font-size="1" text-anchor="start" fill="currentColor">${G.noteheadBlack}</text>` + stem;
+    if (d === 'eighth' || d === 'sixteenth' || d === 'thirtysecond') {
+      const flag = d === 'eighth' ? G.flag8thUp : d === 'sixteenth' ? G.flag16thUp : G.flag32ndUp;
+      inner += `<text x="${(headAdv + shift).toFixed(3)}" y="${stemTop.toFixed(3)}" font-family="Bravura" font-size="1" text-anchor="start" fill="currentColor">${flag}</text>`;
+    }
+  }
+  return `<svg viewBox="-0.05 -0.7 0.62 0.9" width="0.95em" height="1.35em" style="display:block;overflow:visible" aria-hidden="true">${inner}</svg>`;
+}
+
+/** 和弦图标:文字「和音」右侧的迷你图标。两小符头叠放 + 符干(右侧朝上)。
+ *  符干长度按标准记谱 ≈ 2.2×符头高(图标紧凑,能识别是音符又不顶出按钮)。
+ *  符头 ry=1.7(高3.4),符干=7.5。朝上符干对齐下符头(最低音)右边缘,
+ *  底端=下符头中心,向上贯穿上符头到顶端。viewBox 14×18。 */
+function chordIcon(): string {
+  return '<svg viewBox="0 0 14 18" width="12" height="15" style="display:block" aria-hidden="true">'
+    + '<ellipse cx="4.5" cy="8" rx="2.4" ry="1.7" fill="currentColor"/>'
+    + '<ellipse cx="4.5" cy="12" rx="2.4" ry="1.7" fill="currentColor"/>'
+    + '<rect x="6.3" y="4.5" width="0.9" height="7.5" fill="currentColor"/>'
+    + '</svg>';
+}
+
 const KEYS_ORDER: KeyName[] = ['C', 'G', 'D', 'A', 'E', 'B', 'F#', 'F', 'Bb', 'Eb', 'Ab', 'Db', 'Gb'];
 
 export interface ToolbarCallbacks {
   onChange: () => void;
   onRest: () => void;
+  /** 连音线(tie)动作:复制末尾音(同音高+同时值+同附点)追加进来,并打 tieStart/tieEnd */
+  onTie: () => void;
+  /** 切换和弦模式开关 */
+  onToggleChord: () => void;
 }
 
 /** 构建工具栏 DOM，并把它与 ToolState 绑定 */
@@ -76,7 +120,7 @@ export function buildToolbar(state: ToolState, cb: ToolbarCallbacks): HTMLElemen
     const b = document.createElement('button');
     b.className = 'chip';
     b.dataset.dur = d.value;
-    b.innerHTML = `<span class="chip-glyph">${d.label}</span><span class="chip-sub">${d.sub}</span>`;
+    b.innerHTML = `<span class="chip-glyph">${durationIcon(d.value)}</span><span class="chip-sub">${d.sub}</span>`;
     b.title = d.sub;
     b.addEventListener('click', () => {
       state.duration = d.value;
@@ -92,43 +136,99 @@ export function buildToolbar(state: ToolState, cb: ToolbarCallbacks): HTMLElemen
   updateDurActive();
   root.appendChild(durWrap);
 
-  // ── 附点 / 升降 / 休止 ──
+  // ── 修饰:和弦(图标)、附点、连音、休止、连音组、升降 ──
   const optWrap = document.createElement('div');
   optWrap.className = 'tb-group';
   optWrap.appendChild(label('修饰'));
 
+  // 和弦(chord)模式开关:移到修饰行首位(比休止常用)。图标(缩小符头)+ 文字「和音」。
+  const chordBtn = document.createElement('button');
+  chordBtn.className = 'chip toggle';
+  chordBtn.innerHTML = `<span style="display:inline-flex;align-items:center;gap:4px"><span>和音</span>${chordIcon()}</span>`;
+  chordBtn.title = '和弦模式(c)：连续输入的音叠加在同一时间位(再按关闭)';
+  const syncChordUI = () => { chordBtn.classList.toggle('active', state.chordMode); };
+  chordBtn.addEventListener('click', () => {
+    state.chordMode = !state.chordMode;
+    syncChordUI();
+    cb.onToggleChord();
+  });
+  optWrap.appendChild(chordBtn);
+
   const dotBtn = toggle('附点 ·', '附点音符', () => state.dotted, (v) => { state.dotted = v; });
-  // 连音线(tie)：一次性修饰符，下一个音若与前一个同音高，则二者建立 tie
-  const tieBtn = toggle('连音 ⌢', '连音线（与前一同音高音连接）', () => state.tieNext, (v) => { state.tieNext = v; });
+  optWrap.appendChild(dotBtn.el);
+  // 连音线(tie):动作按钮,点一下立刻复制末尾音进来并自动连音(类休止按钮)。
+  const tieBtn = document.createElement('button');
+  tieBtn.className = 'chip toggle';
+  tieBtn.textContent = '连音 ⌣';
+  tieBtn.title = '连音(t)：复制末尾音(同音高+同时值)追加,并自动连音';
+  tieBtn.addEventListener('click', () => { cb.onTie(); });
+  optWrap.appendChild(tieBtn);
   // 休止符：直接作为「动作按钮」，点一下立刻追加一个休止符（当前时值），不再进入休止模式
   const restBtn = document.createElement('button');
   restBtn.className = 'chip toggle';
   restBtn.textContent = '休止 0';
-  restBtn.title = '追加一个休止符';
+  restBtn.title = '追加一个休止符(0)';
   restBtn.addEventListener('click', () => { cb.onRest(); });
-  optWrap.appendChild(dotBtn.el);
-  optWrap.appendChild(tieBtn.el);
   optWrap.appendChild(restBtn);
-  // 连音组(tuplet)：三/五/六连音三选一。点当前模式=关闭，点其他模式=切换。高亮当前活跃模式。
-  const tupletButtons: Record<string, HTMLButtonElement> = {};
+
+  // 连音组(tuplet):单个按钮,左键 toggle 三连音(高频),右键弹菜单选五/六连音。
+  // 键盘 r/f/x 全保留(r=三连音、f=五连音、x=六连音)。
+  const tupletMenu = document.createElement('div');
+  tupletMenu.className = 'dropdown-menu';
+  function tupletBtnLabel(): string {
+    if (state.tupletMode === 'triplet') return '3连';
+    if (state.tupletMode === 'quintuplet') return '5连';
+    if (state.tupletMode === 'sextuplet') return '6连';
+    return '3连';
+  }
+  const tupletBtn = document.createElement('button');
+  tupletBtn.className = 'chip toggle';
+  tupletBtn.textContent = '3连';
+  tupletBtn.title = '左键=三连音(r)　右键=选五/六连音(f/x)';
   const syncTupletUI = () => {
-    for (const [mode, btn] of Object.entries(tupletButtons)) {
-      btn.classList.toggle('active', state.tupletMode === mode);
-    }
+    tupletBtn.textContent = tupletBtnLabel();
+    tupletBtn.classList.toggle('active', state.tupletMode !== 'off');
+    tupletMenu.querySelectorAll('.dropdown-item').forEach((it) => {
+      it.classList.toggle('active', state.tupletMode === (it as any).dataset.mode);
+    });
   };
+  // 左键:toggle 三连音
+  tupletBtn.addEventListener('click', () => {
+    state.tupletMode = state.tupletMode === 'triplet' ? 'off' : 'triplet';
+    syncTupletUI();
+  });
+  // 右键:弹菜单选 N 连音(阻止系统菜单)
+  tupletBtn.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    const open = tupletMenu.classList.toggle('open');
+    syncTupletUI();
+    // 定位菜单到按钮下方
+    if (open) {
+      const r = tupletBtn.getBoundingClientRect();
+      tupletMenu.style.left = r.left + 'px';
+      tupletMenu.style.top = r.bottom + 'px';
+    }
+  });
   for (const mode of ['triplet', 'quintuplet', 'sextuplet'] as const) {
     const cfg = TUPLET_CONFIG[mode];
-    const btn = document.createElement('button');
-    btn.className = 'chip toggle';
-    btn.textContent = `${cfg.actual}连`;
-    btn.title = `${cfg.label}（${cfg.actual}个音占${cfg.normal}个普通音位，再按关闭）`;
-    btn.addEventListener('click', () => {
+    const item = document.createElement('button');
+    item.className = 'dropdown-item';
+    item.type = 'button';
+    item.dataset.mode = mode;
+    item.textContent = `${cfg.label}（${cfg.actual}个音占${cfg.normal}个普通音位）`;
+    item.addEventListener('click', (e) => {
+      e.stopPropagation();
       state.tupletMode = state.tupletMode === mode ? 'off' : mode;
+      tupletMenu.classList.remove('open');
       syncTupletUI();
     });
-    tupletButtons[mode] = btn;
-    optWrap.appendChild(btn);
+    tupletMenu.appendChild(item);
   }
+  // 菜单挂在 body 下(脱离工具栏流,绝对定位)
+  document.body.appendChild(tupletMenu);
+  // 点页面其它地方关闭菜单
+  document.addEventListener('click', () => { tupletMenu.classList.remove('open'); });
+  optWrap.appendChild(tupletBtn);
 
   // 升降记号（三选一）
   const accWrap = document.createElement('div');
@@ -226,7 +326,12 @@ export function buildToolbar(state: ToolState, cb: ToolbarCallbacks): HTMLElemen
     timeWrap.appendChild(b);
   }
   setWrap.appendChild(timeWrap);
+  root.appendChild(setWrap);
 
+  // ── 排版:总小节数(单拎成独立分组) ──
+  const layoutWrap = document.createElement('div');
+  layoutWrap.className = 'tb-group';
+  layoutWrap.appendChild(label('排版'));
   // 小节数（总小节数，单行）：离散选项 2/3/4/5/6
   const barWrap = document.createElement('div');
   barWrap.className = 'seg';
@@ -244,26 +349,24 @@ export function buildToolbar(state: ToolState, cb: ToolbarCallbacks): HTMLElemen
     barBtns.push(b);
     barWrap.appendChild(b);
   }
-  setWrap.appendChild(barWrap);
-  root.appendChild(setWrap);
+  layoutWrap.appendChild(barWrap);
+  root.appendChild(layoutWrap);
 
-  // 返回需要重置修饰的钩子（休止符现在是动作按钮，无需重置）。
+  // 返回需要重置修饰的钩子（休止符/连音现在是动作按钮，无需重置；和弦模式是持久开关，也不重置）。
   // 同时暴露容量刷新：根据「本小节剩余拍数」「全局剩余拍数」disable 放不下的时值/附点按钮。
   (root as any)._resetModifiers = () => {
     state.dotted = false;
     state.accidental = null;
-    state.tieNext = false;
     dotBtn.set(false);
-    tieBtn.set(false);
     updateAcc();
-  };
-  (root as any)._setTieNext = (v: boolean) => {
-    state.tieNext = v;
-    tieBtn.set(v);
   };
   (root as any)._setTupletMode = (v: TupletMode) => {
     state.tupletMode = v;
     syncTupletUI();
+  };
+  (root as any)._setChordMode = (v: boolean) => {
+    state.chordMode = v;
+    syncChordUI();
   };
   (root as any)._refreshCapacity = (remBarBeats: number, remPieceBeats: number) => {
     const pieceFull = remPieceBeats < 1e-6;

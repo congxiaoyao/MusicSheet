@@ -36,6 +36,10 @@ export interface Note {
   tieEnd?: boolean;
   /** 若属于连音组(tuplet),则有此字段。同组相邻音符共享同一 groupId。 */
   tuplet?: TupletInfo;
+  /** 和弦(chord)分组 id。同 chordId 的音共享同一时间位(同时发声)。
+   *  追加式录入下,连续同 chordId 的第一个是首音(占时长),其余是尾音(不占时长,与首音同时)。
+   *  组内所有音的 duration 必须一致(输入层强制),保证整组占一个时间位。 */
+  chordId?: string;
 }
 
 /** 调号名称 */

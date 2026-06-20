@@ -1,7 +1,7 @@
 // 应用装配：工具栏 ↔ 画布 ↔ 简谱 ↔ 播放 ↔ 导出 ↔ 快捷键
 // 录入模型：追加式（短信验证码）—— 只能往末尾加，只能从末尾删。
 
-import { Note, Piece } from '../core/types';
+import { Note, Piece, DurationValue } from '../core/types';
 import { KEYS } from '../core/theory';
 import { createPiece, appendNote, popNote, remainingBeats, remainingBeatsInCurrentBar, capacityBeats, totalBeats } from '../core/model';
 import { computeLayout } from '../render/layout';
@@ -21,6 +21,10 @@ export class App {
    *  输入第 actual 个后关闭模式并清空。null 表示不在组输入中。 */
   private tupletProgress: { groupId: string; count: number; actual: number; normal: number } | null = null;
   private tupletIdCounter = 0;
+  /** 和弦(chord)输入:当前正在构建的和弦 chordId(和弦模式开且末尾音同此 id 时,下个音复用它做尾音)。
+   *  null/不在和弦模式 → 下个音作为新和弦首音(或单音)。 */
+  private currentChordId: string | null = null;
+  private chordIdCounter = 0;
   private root: HTMLElement;
   private svgHost!: HTMLElement;
   private statusEl!: HTMLElement;
@@ -53,7 +57,12 @@ export class App {
       <p class="hint">点击五线谱放音 → 下方实时显示简谱 · 类似短信验证码：只能往右追加，退格删除最后一个</p>`;
     this.root.appendChild(header);
 
-    this.toolbar = buildToolbar(this.tool, { onChange: () => this.onToolChange(), onRest: () => this.appendRest() });
+    this.toolbar = buildToolbar(this.tool, {
+      onChange: () => this.onToolChange(),
+      onRest: () => this.appendRest(),
+      onTie: () => this.tieRepeat(),
+      onToggleChord: () => this.onToggleChord(),
+    });
     this.root.appendChild(this.toolbar);
 
     const stageWrap = document.createElement('div');
@@ -161,32 +170,88 @@ export class App {
   private appendNoteWithPitch(midi: number): void {
     const tuplet = this.computeTupletForNextNote();
     const note: Note = { midi, duration: this.tool.duration, dotted: this.tool.dotted, accidental: this.tool.accidental, tuplet };
+    // 和弦模式:给音带上 chordId。若末尾音已是当前和弦组(首音),复用同 id → 这个音成为尾音(同时);
+    // 否则生成新 id → 这个音成为新和弦首音。组内强制 duration 与首音一致(保证占一个时间位)。
+    if (this.tool.chordMode) {
+      const last = this.piece.notes[this.piece.notes.length - 1];
+      if (last && last.chordId === this.currentChordId) {
+        note.chordId = this.currentChordId!;
+        note.duration = last.duration;   // 强制与组首音同时值
+        note.dotted = last.dotted;
+        // 尾音的 tuplet 也复用首音(一个和弦整体是一个时间位)
+        note.tuplet = last.tuplet;
+      } else {
+        this.currentChordId = `chord-${++this.chordIdCounter}`;
+        note.chordId = this.currentChordId;
+      }
+    }
     const ok = appendNote(this.piece, note);
     if (!ok) { this.flashOverfillRejected(); return; }
-    this.applyTieIfPending(midi);
     this.advanceTupletProgress();
     this.afterEdit();
   }
 
   private appendRest(): void {
+    // 休止符占独立时间位,与和弦不兼容 → 输入休止时若在和弦模式,先关闭和弦(推进到新时间位)
+    if (this.tool.chordMode) this.closeChordMode();
     const note: Note = { midi: null, duration: this.tool.duration, dotted: this.tool.dotted, accidental: null };
     const ok = appendNote(this.piece, note);
     if (!ok) { this.flashOverfillRejected(); return; }
-    // 休止符不能建立 tie（无声），tieNext 自动作废
     this.afterEdit();
   }
 
-  /** 若 tool.tieNext 为真且前一个音与新音同音高，在两者间建立连音线(tie)：
-   *  前音标 tieStart、新音标 tieEnd。音高不同或前音为休止则忽略（tie 无意义）。 */
-  private applyTieIfPending(newMidi: number): void {
-    if (!this.tool.tieNext) return;
+  /** 连音线(tie)动作:复制末尾音(同音高+同时值+同附点)追加进来,并自动在前后打 tieStart/tieEnd。
+   *  - 单音:简单复制+配对
+   *  - 和弦:复制整个和弦组(各声部),新组与旧组音高 multiset 天然全等 → 逐声部配对打 tie */
+  private tieRepeat(): void {
     const notes = this.piece.notes;
-    if (notes.length < 2) return;
-    const prev = notes[notes.length - 2];
-    if (prev.midi !== null && prev.midi === newMidi) {
-      prev.tieStart = true;
-      notes[notes.length - 1].tieEnd = true;
+    if (notes.length === 0) { this.flash('前面没有可连音的音'); return; }
+    // 和弦模式下的 tie 无意义(要在同时间位内延音)→ 先关闭
+    if (this.tool.chordMode) this.closeChordMode();
+    const last = notes[notes.length - 1];
+    if (last.midi === null) { this.flash('前面是休止符,无法连音'); return; }
+    // 找出末尾和弦组(若有)的范围 [start, end]
+    let gStart = notes.length - 1;
+    if (last.chordId) {
+      while (gStart > 0 && notes[gStart - 1].chordId === last.chordId) gStart--;
     }
+    const gEnd = notes.length - 1;
+    // 逐声部复制:每个原音复制出一个新音(同 midi+duration+dotted+accidental),旧音打 tieStart、新音打 tieEnd
+    // 复制的多个新音组成一个新和弦组(同 chordId),与原组一一对应
+    const newGroupId = last.chordId ? `chord-${++this.chordIdCounter}` : undefined;
+    for (let i = gStart; i <= gEnd; i++) {
+      const src = notes[i];
+      const dup: Note = {
+        midi: src.midi,
+        duration: src.duration,
+        dotted: src.dotted,
+        accidental: src.accidental,
+        tuplet: src.tuplet,
+        chordId: newGroupId,
+        tieEnd: true,
+      };
+      const ok = appendNote(this.piece, dup);
+      if (!ok) { this.flashOverfillRejected(); return; }
+      src.tieStart = true;   // 源音作为 tie 起点
+    }
+    this.afterEdit();
+  }
+
+  /** 切换和弦模式开关(工具栏 chip / c 键)。开启后连续输入的音叠在同一时间位。
+   *  关闭时,下个音不带 chordId → 新时间位。 */
+  private onToggleChord(): void {
+    if (!this.tool.chordMode) {
+      // 关闭:清当前 chordId,下个音开新时间位
+      this.currentChordId = null;
+    }
+    this.render();
+  }
+
+  /** 关闭和弦模式并同步 toolbar 高亮(内部用:休止/tie 等场景强制关闭) */
+  private closeChordMode(): void {
+    this.tool.chordMode = false;
+    this.currentChordId = null;
+    (this.toolbar as any)._setChordMode?.(false);
   }
 
   /** 计算下一个音的 tuplet 字段（若处于 tuplet 输入模式）。
@@ -218,13 +283,6 @@ export class App {
       this.tool.tupletMode = 'off';
       (this.toolbar as any)._setTupletMode?.('off');
     }
-  }
-
-  /** 切换「连音线」修饰符：开 → 下一个同音高音会与前音建立 tie。 */
-  private toggleTieNext(): void {
-    this.tool.tieNext = !this.tool.tieNext;
-    (this.toolbar as any)._setTieNext?.(this.tool.tieNext);
-    this.render();
   }
 
   /** 切换连音组(tuplet)模式：点当前模式=关闭(off)；点其他模式=切换到该模式。
@@ -293,22 +351,46 @@ export class App {
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'SELECT' || tag === 'INPUT') return;
       switch (e.key) {
-        case '1': this.tool.duration = 'whole'; this.syncToolbarDurations(); break;
-        case '2': this.tool.duration = 'half'; this.syncToolbarDurations(); break;
-        case '3': this.tool.duration = 'quarter'; this.syncToolbarDurations(); break;
-        case '4': this.tool.duration = 'eighth'; this.syncToolbarDurations(); break;
-        case '5': this.tool.duration = 'sixteenth'; this.syncToolbarDurations(); break;
-        case '6': this.tool.duration = 'thirtysecond'; this.syncToolbarDurations(); break;
+        case '1': this.changeDuration('whole'); break;
+        case '2': this.changeDuration('half'); break;
+        case '3': this.changeDuration('quarter'); break;
+        case '4': this.changeDuration('eighth'); break;
+        case '5': this.changeDuration('sixteenth'); break;
+        case '6': this.changeDuration('thirtysecond'); break;
         case '.': this.tool.dotted = !this.tool.dotted; (this.toolbar as any)._resetModifiers?.(); this.render(); break;
-        case 't': this.toggleTieNext(); break;
+        case 't': this.tieRepeat(); break;
+        case 'c': this.toggleChordKey(); break;
         case 'r': this.toggleTupletMode('triplet'); break;
         case 'f': this.toggleTupletMode('quintuplet'); break;
         case 'x': this.toggleTupletMode('sextuplet'); break;
         case '0': this.appendRest(); break;
-        case 'Backspace': popNote(this.piece); this.render(); e.preventDefault(); break;
+        case 'Backspace': popNote(this.piece); this.afterBackspace(); e.preventDefault(); break;
         case ' ': this.togglePlay(); e.preventDefault(); break;
       }
     });
+  }
+
+  /** 切换时值:同步工具栏高亮。在和弦模式中途换时值 → 关闭和弦(避免组内时值不一致) */
+  private changeDuration(d: DurationValue): void {
+    this.tool.duration = d;
+    this.syncToolbarDurations();
+  }
+
+  /** c 键切换和弦模式:与工具栏 chip 共用同一开关逻辑 */
+  private toggleChordKey(): void {
+    this.tool.chordMode = !this.tool.chordMode;
+    (this.toolbar as any)._setChordMode?.(this.tool.chordMode);
+    this.onToggleChord();
+  }
+
+  /** backspace 后:若删到和弦组只剩首音,无需特殊处理(单音和弦正常画)。
+   *  但若 currentChordId 已不在末尾,清掉它避免误复用。 */
+  private afterBackspace(): void {
+    const last = this.piece.notes[this.piece.notes.length - 1];
+    if (this.currentChordId && (!last || last.chordId !== this.currentChordId)) {
+      this.currentChordId = null;
+    }
+    this.render();
   }
 
   /** 键盘改了 duration 后，把工具栏高亮同步过来 */
@@ -350,7 +432,12 @@ export class App {
 
   private rebuildToolbar(): void {
     const old = this.toolbar;
-    this.toolbar = buildToolbar(this.tool, { onChange: () => this.onToolChange(), onRest: () => this.appendRest() });
+    this.toolbar = buildToolbar(this.tool, {
+      onChange: () => this.onToolChange(),
+      onRest: () => this.appendRest(),
+      onTie: () => this.tieRepeat(),
+      onToggleChord: () => this.onToggleChord(),
+    });
     old.replaceWith(this.toolbar);
   }
 

@@ -15,11 +15,22 @@ export function createPiece(): Piece {
   };
 }
 
-/** 总拍数（四分音符为单位） */
+/** 总拍数（四分音符为单位）。和弦尾音不占额外时长(与首音同时),不累加。 */
 export function totalBeats(piece: Piece): number {
   let sum = 0;
-  for (const n of piece.notes) sum += durationBeats(n);
+  for (let i = 0; i < piece.notes.length; i++) {
+    if (isChordTail(piece.notes[i], i > 0 ? piece.notes[i - 1] : null)) continue;
+    sum += durationBeats(piece.notes[i]);
+  }
   return sum;
+}
+
+/** 当前音是否是和弦的「尾音」——同 chordId 且前一音也同 chordId。
+ *  追加式录入下,连续同 chordId 的第一个是首音(占时长),其余是尾音(不占时长)。
+ *  尾音在时间位累加/播放/布局中都不推进时间,与首音共享同一时刻。
+ *  注意:prev 必须是「数组中紧邻的前一个音」(不论是否同和弦)。 */
+export function isChordTail(note: Note, prev: Note | null): boolean {
+  return !!(note.chordId && prev?.chordId === note.chordId);
 }
 
 /** 最大可容纳拍数 = measureCount 个小节 */
@@ -48,6 +59,12 @@ export function remainingBeatsInCurrentBar(piece: Piece): number {
 
 /** 追加一个音符到末尾（短信验证码式）。若超出容量或本小节放不下则失败。 */
 export function appendNote(piece: Piece, note: Note): boolean {
+  // 和弦尾音:与首音同时、不占额外时长 → 跳过容量校验直接追加。
+  const tail = isChordTail(note, piece.notes.length > 0 ? piece.notes[piece.notes.length - 1] : null);
+  if (tail) {
+    piece.notes.push(note);
+    return true;
+  }
   const beats = durationBeats(note);
   if (beats > remainingBeats(piece)) return false;                    // 全局容量(保留)
   // 连音组(tuplet)内的音放宽本小节校验：组内各音要挤进整组占的时长里，
@@ -71,14 +88,25 @@ export function popNote(piece: Piece): boolean {
 }
 
 /**
- * 计算每个音符累计的「起始拍」位置（从 0 开始）。
+ * 计算每个音符累计的「起始拍」位置（从 0 开始）。和弦尾音与首音同时,startBeat = 首音 startBeat。
  */
 export function noteStartBeats(piece: Piece): number[] {
   const starts: number[] = [];
   let acc = 0;
-  for (const n of piece.notes) {
-    starts.push(acc);
-    acc += durationBeats(n);
+  /** 当前正在累加的和弦组首音 startBeat(供尾音复用)。单音场景不用。 */
+  let curChordStart = 0;
+  for (let i = 0; i < piece.notes.length; i++) {
+    const n = piece.notes[i];
+    const tail = isChordTail(n, i > 0 ? piece.notes[i - 1] : null);
+    if (tail) {
+      // 尾音:与首音同时,startBeat = 首音的 startBeat,不推进 acc
+      starts.push(curChordStart);
+    } else {
+      // 首音或单音:占时长,startBeat = acc,推进 acc
+      starts.push(acc);
+      if (n.chordId) curChordStart = acc;
+      acc += durationBeats(n);
+    }
   }
   return starts;
 }
@@ -120,4 +148,35 @@ export function tupletGroups(piece: Piece): TupletRange[] {
     i = j;
   }
   return groups;
+}
+
+/** 和弦(chord)组在 notes 数组中的范围。startIdx=首音,endIdx=末音(含)。
+ *  组内首音占时长、尾音与首音同时。供渲染层(staff 符干/jianpu 纵排/player)消费。
+ *  连续同 chordId 的音归为一组;孤立 chordId(单音)也归一组(首=末)。 */
+export interface ChordRange {
+  startIdx: number;
+  endIdx: number;
+  groupId: string;
+}
+export function chordGroups(piece: Piece): ChordRange[] {
+  const notes = piece.notes;
+  const groups: ChordRange[] = [];
+  let i = 0;
+  while (i < notes.length) {
+    const cid = notes[i].chordId;
+    if (!cid) { i++; continue; }
+    let j = i;
+    while (j < notes.length && notes[j].chordId === cid) j++;
+    groups.push({ startIdx: i, endIdx: j - 1, groupId: cid });
+    i = j;
+  }
+  return groups;
+}
+
+/** 给定音符索引,返回它所在和弦组的 ChordRange(不在任何和弦里返回 null)。 */
+export function chordGroupOf(piece: Piece, idx: number): ChordRange | null {
+  for (const g of chordGroups(piece)) {
+    if (idx >= g.startIdx && idx <= g.endIdx) return g;
+  }
+  return null;
 }
