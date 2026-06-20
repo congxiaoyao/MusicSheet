@@ -158,6 +158,7 @@ export class App {
     const note: Note = { midi, duration: this.tool.duration, dotted: this.tool.dotted, accidental: this.tool.accidental };
     const ok = appendNote(this.piece, note);
     if (!ok) { this.flashOverfillRejected(); return; }
+    this.applyTieIfPending(midi);
     this.afterEdit();
   }
 
@@ -165,7 +166,28 @@ export class App {
     const note: Note = { midi: null, duration: this.tool.duration, dotted: this.tool.dotted, accidental: null };
     const ok = appendNote(this.piece, note);
     if (!ok) { this.flashOverfillRejected(); return; }
+    // 休止符不能建立 tie（无声），tieNext 自动作废
     this.afterEdit();
+  }
+
+  /** 若 tool.tieNext 为真且前一个音与新音同音高，在两者间建立连音线(tie)：
+   *  前音标 tieStart、新音标 tieEnd。音高不同或前音为休止则忽略（tie 无意义）。 */
+  private applyTieIfPending(newMidi: number): void {
+    if (!this.tool.tieNext) return;
+    const notes = this.piece.notes;
+    if (notes.length < 2) return;
+    const prev = notes[notes.length - 2];
+    if (prev.midi !== null && prev.midi === newMidi) {
+      prev.tieStart = true;
+      notes[notes.length - 1].tieEnd = true;
+    }
+  }
+
+  /** 切换「连音线」修饰符：开 → 下一个同音高音会与前音建立 tie。 */
+  private toggleTieNext(): void {
+    this.tool.tieNext = !this.tool.tieNext;
+    (this.toolbar as any)._setTieNext?.(this.tool.tieNext);
+    this.render();
   }
 
   /** appendNote 拒绝时给出精确提示：区分「整个谱写满」和「本小节放不下」 */
@@ -214,6 +236,7 @@ export class App {
         case '5': this.tool.duration = 'sixteenth'; this.syncToolbarDurations(); break;
         case '6': this.tool.duration = 'thirtysecond'; this.syncToolbarDurations(); break;
         case '.': this.tool.dotted = !this.tool.dotted; (this.toolbar as any)._resetModifiers?.(); this.render(); break;
+        case 't': this.toggleTieNext(); break;
         case '0': this.appendRest(); break;
         case 'Backspace': popNote(this.piece); this.render(); e.preventDefault(); break;
         case ' ': this.togglePlay(); e.preventDefault(); break;

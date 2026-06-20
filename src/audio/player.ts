@@ -43,21 +43,46 @@ export class Player {
     const ctx = this.ensureCtx();
     const master = this.master!;
     const secPerBeat = 60 / this.bpm;
+    const notes = piece.notes;
+
+    // 预算每个音的「实际发声音长」：连音线(tie)把同音高相邻音合并成一个长音。
+    // tie 链的起点音吃掉整条链的总时长；链中每个 tieEnd 音发声音长=0（不重新起振，只推进时间）。
+    const voiceDur = notes.map(n => durationBeats(n.duration, n.dotted) * secPerBeat);
+    for (let i = 0; i < notes.length; i++) {
+      if (notes[i].tieStart && notes[i].midi !== null
+        && i + 1 < notes.length && notes[i + 1].tieEnd && notes[i + 1].midi === notes[i].midi) {
+        // 找到一条 tie 链：起点 i，后续连续 tieEnd 且同音高
+        let acc = voiceDur[i];
+        let j = i + 1;
+        while (j < notes.length && notes[j].tieEnd && notes[j].midi === notes[i].midi) {
+          acc += voiceDur[j];
+          voiceDur[j] = 0;       // 链中音不发声
+          // 若该音同时也是下一条 tie 的起点（A-B-C 链），继续延长
+          if (notes[j].tieStart && j + 1 < notes.length && notes[j + 1].tieEnd
+            && notes[j + 1].midi === notes[j].midi) {
+            j++;
+          } else {
+            break;
+          }
+        }
+        voiceDur[i] = acc;       // 起点音吃掉整链时长
+      }
+    }
+
     let t = ctx.currentTime + 0.08;
     this.playing = true;
 
-    piece.notes.forEach((n, i) => {
-      const beats = durationBeats(n.duration, n.dotted);
-      const dur = beats * secPerBeat;
-      // 高亮回调
+    notes.forEach((n, i) => {
+      const dur = voiceDur[i];
+      // 高亮回调（每个音都高亮，tie 两端视觉上都该亮）
       const hi = window.setTimeout(() => {
         if (this.playing) this.cb.onNote(i);
       }, (t - ctx.currentTime) * 1000);
       this.timers.push(hi);
-      if (n.midi !== null) {
+      if (n.midi !== null && dur > 0) {
         this.playNote(ctx, master, n.midi, t, dur);
       }
-      t += dur;
+      t += durationBeats(n.duration, n.dotted) * secPerBeat;  // 时间轴仍按各音原始时值推进
     });
 
     // 结束回调

@@ -35,6 +35,11 @@ function circle(cx: number, cy: number, r: number, fill: string): string {
   return `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${r}" fill="${fill}"/>`;
 }
 
+/** SVG 路径：简谱连音线(tie)弧线用。 */
+function path(d: string, stroke: string, width: number): string {
+  return `<path d="${d}" fill="none" stroke="${stroke}" stroke-width="${width}"/>`;
+}
+
 /** 时值 → 下划线数（0=四分及以上，1=八分，2=十六分，3=三十二分） */
 function underlineCount(duration: string, dotted: boolean): number {
   let n: number;
@@ -115,6 +120,21 @@ export function renderJianpuSVG(input: RenderInput): string {
     for (let u = 0; u < ucount; u++) {
       const uy = baseY + 4 + u * 5;
       s += line(x - numHalfW, uy, x + numHalfW, uy, fill, 1.4);
+    }
+
+    // 连音线(tie)：当前音是 tieEnd 时，从前一音数字右侧画小弧线到当前音数字左侧（上方朝上凸），
+    // 表示与前一音相连、不重新起奏。仅当前一音同音高才画（与五线谱 tie 语义一致）。
+    if (note.tieEnd && i > 0) {
+      const prev = piece.notes[i - 1];
+      if (prev.midi !== null && prev.midi === note.midi) {
+        const prevX = layout.noteX[i - 1];
+        const tieY = baseY - 13;
+        const xa = prevX + numHalfW + 1;
+        const xb = x - numHalfW - 1;
+        const mx = (xa + xb) / 2;
+        const my = tieY - 6;                       // 控制点上抬，弧线朝上凸
+        s += path(`M ${xa.toFixed(1)} ${tieY.toFixed(1)} Q ${mx.toFixed(1)} ${my.toFixed(1)} ${xb.toFixed(1)} ${tieY.toFixed(1)}`, fill, 1.3);
+      }
     }
 
     // 短横（时值 > 四分）：画在数字右侧的横线，每条占约一个数字宽

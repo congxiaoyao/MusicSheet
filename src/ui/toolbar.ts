@@ -9,6 +9,8 @@ export interface ToolState {
   accidental: 'sharp' | 'flat' | 'natural' | null;
   /** 下一个音符是否休止符 */
   rest: boolean;
+  /** 下一个音符是否与前一个同音高音建立连音线(tie)。一次性修饰符，录入后自动重置 */
+  tieNext: boolean;
   clef: Clef;
   key: KeyName;
   time: TimeSig;
@@ -22,6 +24,7 @@ export function defaultTool(): ToolState {
     dotted: false,
     accidental: null,
     rest: false,
+    tieNext: false,
     clef: 'treble',
     key: 'C',
     time: { num: 4, den: 4 },
@@ -81,6 +84,8 @@ export function buildToolbar(state: ToolState, cb: ToolbarCallbacks): HTMLElemen
   optWrap.appendChild(label('修饰'));
 
   const dotBtn = toggle('附点 ·', '附点音符', () => state.dotted, (v) => { state.dotted = v; });
+  // 连音线(tie)：一次性修饰符，下一个音若与前一个同音高，则二者建立 tie
+  const tieBtn = toggle('连音 ⌢', '连音线（与前一同音高音连接）', () => state.tieNext, (v) => { state.tieNext = v; });
   // 休止符：直接作为「动作按钮」，点一下立刻追加一个休止符（当前时值），不再进入休止模式
   const restBtn = document.createElement('button');
   restBtn.className = 'chip toggle';
@@ -88,6 +93,7 @@ export function buildToolbar(state: ToolState, cb: ToolbarCallbacks): HTMLElemen
   restBtn.title = '追加一个休止符';
   restBtn.addEventListener('click', () => { cb.onRest(); });
   optWrap.appendChild(dotBtn.el);
+  optWrap.appendChild(tieBtn.el);
   optWrap.appendChild(restBtn);
 
   // 升降记号（三选一）
@@ -212,8 +218,14 @@ export function buildToolbar(state: ToolState, cb: ToolbarCallbacks): HTMLElemen
   (root as any)._resetModifiers = () => {
     state.dotted = false;
     state.accidental = null;
+    state.tieNext = false;
     dotBtn.set(false);
+    tieBtn.set(false);
     updateAcc();
+  };
+  (root as any)._setTieNext = (v: boolean) => {
+    state.tieNext = v;
+    tieBtn.set(v);
   };
   (root as any)._refreshCapacity = (remBarBeats: number, remPieceBeats: number) => {
     const pieceFull = remPieceBeats < 1e-6;

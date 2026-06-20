@@ -67,6 +67,15 @@ function polygon(points: [number, number][], opts: { fill?: string; class?: stri
   return `<polygon points="${pts}" fill="${fill}"${cls}/>`;
 }
 
+/** SVG 路径：连音线(tie)弧线等用。d 为 path data 字符串。 */
+function path(d: string, opts: { fill?: string; stroke?: string; sw?: number; class?: string } = {}): string {
+  const fill = opts.fill ?? 'none';
+  const stroke = opts.stroke ? ` stroke="${opts.stroke}"` : '';
+  const sw = opts.sw !== undefined ? ` stroke-width="${opts.sw}"` : '';
+  const cls = opts.class ? ` class="${opts.class}"` : '';
+  return `<path d="${d}" fill="${fill}"${stroke}${sw}${cls}/>`;
+}
+
 /** step（0=最下线，每步 1 个自然音级 = 半个线距）→ y 坐标。
  *  staffSpace 现在是真实线距(=2 个 step 高度)，故 1 step = staffSpace/2。 */
 function stepToY(step: number, layout: Layout): number {
@@ -488,6 +497,49 @@ function drawBeam(x1: number, y1: number, x2: number, y2: number, thick: number)
   return polygon(pts, { fill: '#1f2430' });
 }
 
+/** 渲染连音线(tie)：遍历 notes，找 tieStart→下一个 tieEnd 且同音高的相邻对，画弧线。
+ *  弧线从左音符头右边缘连到右音符头左边缘，凸向远离符干的一侧（标准记谱：符头在弧线凹侧）。
+ *  - 符干朝上(step<=6)→ 弧线在符头下方，朝下凸
+ *  - 符干朝下(step>6)→ 弧线在符头上方，朝上凸
+ *  用二次贝塞尔 Q：两端 y = 符头 y + ε 偏移到符头外侧，控制点 y 再凸出 bowH。 */
+function renderTies(piece: Piece, layout: Layout): string {
+  const ss = layout.staffSpace;
+  const notes = piece.notes;
+  let s = '';
+  for (let i = 0; i < notes.length - 1; i++) {
+    const a = notes[i], b = notes[i + 1];
+    if (!a.tieStart || !b.tieEnd) continue;
+    if (a.midi === null || b.midi === null) continue;        // 休止符不画 tie
+    if (a.midi !== b.midi) continue;                          // tie 必须同音高（防御：数据异常时跳过）
+    const stepA = resolvePitch(a.midi, piece.clef, piece.key, a.accidental).step;
+    const stepB = resolvePitch(b.midi, piece.clef, piece.key, b.accidental).step;
+    const yA = stepToY(stepA, layout);
+    const yB = stepToY(stepB, layout);
+    const xA = layout.noteX[i];
+    const xB = layout.noteX[i + 1];
+    const headHalfW = advanceSS('noteheadBlack') / 2 * ss;
+    // 弧线两端 x：连符头边缘（左音右边缘、右音左边缘），符合 Gould《Behind Bars》标准
+    const x1 = xA + headHalfW * 0.85;
+    const x2 = xB - headHalfW * 0.85;
+    const mx = (x1 + x2) / 2;
+    // 符干方向（与 renderNote 一致：step<=6 朝上）。tie 凸向远离符干的一侧（符头那侧）。
+    const stemUp = Math.min(stepA, stepB) <= 6;
+    const sign = stemUp ? 1 : -1;                              // up 时往下凸(+y)，down 时往上凸(-y)
+    // tie 两端起自符头朝凸起方向的边缘（Gould《Behind Bars》：略偏符头中心外侧，
+    // 朝凸起侧约符头半高）。符头半高≈0.4ss，再加一点间隙避免压符头。
+    const headHalfH = ss * 0.4;
+    const gap = ss * 0.08;
+    const yAend = yA + sign * (headHalfH + gap);
+    const yBend = yB + sign * (headHalfH + gap);
+    const bowH = ss * 1.1;                                     // 弧线凸起高度（标准）
+    const cy = (yAend + yBend) / 2 + sign * bowH;              // 控制点 y
+    // 单根弧线（符干级粗细，颜色同符头），二次贝塞尔
+    const d = `M ${x1.toFixed(1)} ${yAend.toFixed(1)} Q ${mx.toFixed(1)} ${cy.toFixed(1)} ${x2.toFixed(1)} ${yBend.toFixed(1)}`;
+    s += path(d, { stroke: '#1f2430', sw: Math.max(1.4, ss * 0.18), fill: 'none' });
+  }
+  return s;
+}
+
 /** 主渲染：返回 SVG 内部内容（不含 <svg> 标签） */
 export function renderStaffSVG(input: RenderInput): string {
   const { piece, layout, playingIndex } = input;
@@ -507,6 +559,8 @@ export function renderStaffSVG(input: RenderInput): string {
   for (let i = 0; i < piece.notes.length; i++) {
     s += renderNote(piece.notes[i], layout.noteX[i], piece, layout, i === playingIndex, ctxByIdx.get(i));
   }
+  // 连音线(tie)：弧线画在符头之上，所以放在音符循环之后
+  s += renderTies(piece, layout);
   return s;
 }
 

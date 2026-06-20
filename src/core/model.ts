@@ -58,7 +58,12 @@ export function appendNote(piece: Piece, note: Note): boolean {
 /** 删除末尾的最后一个音符（短信验证码式 backspace）。 */
 export function popNote(piece: Piece): boolean {
   if (piece.notes.length === 0) return false;
-  piece.notes.pop();
+  const removed = piece.notes.pop()!;
+  // 连音线清理：被删的是 tie 终点 → 前音的 tieStart 失去配对，清掉（避免孤立 tieStart）。
+  // 被删的是 tieStart 时它本就是末尾、无对应 tieEnd，无需处理。
+  if (removed.tieEnd && piece.notes.length > 0) {
+    piece.notes[piece.notes.length - 1].tieStart = false;
+  }
   return true;
 }
 
