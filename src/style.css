@@ -313,7 +313,7 @@ html, body {
 .btn-primary {
   background: var(--accent);
   color: #fff;
-  box-shadow: 0 1px 2px rgba(79, 70, 229, 0.3), 0 4px 12px rgba(79, 70, 229, 0.2);
+  box-shadow: 0 1px 2px rgba(79, 70, 229, 0.3), 0 4px 12px rgba(79, 70, 229, 0.1);
 }
 .btn-primary:hover { background: var(--accent-2); }
 .btn-accent {
@@ -408,7 +408,7 @@ html, body {
   box-shadow: var(--shadow-md);
 }
 .pb-demo-stage .svg-host { background: #fcfcfd; }
-.pb-playhead { fill: rgba(79, 70, 229, 0.2); stroke: none; }
+.pb-playhead { fill: rgba(79, 70, 229, 0.1); stroke: none; }
 
 /* 卡片本体（无标题，顶部直接是 seek 行） */
 .playback-card {
