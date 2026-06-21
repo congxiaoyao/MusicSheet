@@ -659,7 +659,8 @@ function renderTuplets(piece: Piece, layout: Layout, ctxByIdx: Map<number, BeamC
   const ss = layout.staffSpace;
   const groups = tupletGroups(piece);
   let s = '';
-  const fs = ss * 2.6;                       // 数字字号（标准约 1.5-2 staff space 高）
+  // 数字字号:调小(原 2.6ss 偏大,易与连梁/方括号挤)。标准记谱 tuplet 数字约 1.5-2ss 高。
+  const fs = ss * 1.9;
   // 连梁候选时值（这些时值会被 computeBeams 连梁）
   const beamable = (d: Note['duration']) => d === 'eighth' || d === 'sixteenth' || d === 'thirtysecond';
   for (const g of groups) {
@@ -690,15 +691,18 @@ function renderTuplets(piece: Piece, layout: Layout, ctxByIdx: Map<number, BeamC
       s += line(x2, markY, x2, markY + bracketH, '#1f2430', lw);
       s += text(String(g.actual), mx, markY - ss * 0.4, fs, { fill: '#1f2430', anchor: 'middle' });
     } else {
-      // 有连梁：只画数字，贴在 primary 梁上方。用 renderBeams 算出的真实 stemEndY
-      // 数字居中在组中点 mx，其正下方的 primary 梁 y = 首末音 stemEndY 的中点
-      // （primary 梁贯穿整组、斜率线性，首末端的 y 平均即中点 y，对任意音数精确）。
+      // 有连梁:只画数字,贴在 primary 梁外侧(朝上=梁上方,朝下=梁下方)。
+      // 数字 baseline 偏移 = 梁半厚(0.25ss) + 数字字高(约 0.7*fs≈1.3ss) + 间隙,
+      // 共约 1.6ss,确保不与梁重叠(原 0.4ss 太小,符干朝上时数字压在梁上)。
+      // ctxByIdx 只对时间位首音设置;tuplet 组内首音必在 ctxByIdx(它是连梁组首)。
+      // 末音若不在(如和弦尾音),退用首音的 ctx(梁贯穿整组,首音 stemEndY 足够代表)。
       const firstBeam = ctxByIdx.get(g.startIdx);
-      const lastBeam = ctxByIdx.get(g.endIdx);
+      const lastBeam = ctxByIdx.get(g.endIdx) ?? firstBeam;
       if (firstBeam && lastBeam) {
         const beamMidY = (firstBeam.stemEndY + lastBeam.stemEndY) / 2;
         const stemDir = firstBeam.stemDir;
-        const numY = stemDir === 'up' ? beamMidY - ss * 0.4 : beamMidY + ss * 0.4;
+        // 朝上:梁在上方(y小),数字在梁更上方 → 减偏移;朝下:梁在下方(y大),数字在梁更下方 → 加偏移
+        const numY = stemDir === 'up' ? beamMidY - ss * 1.6 : beamMidY + ss * 1.6;
         s += text(String(g.actual), mx, numY, fs, { fill: '#1f2430', anchor: 'middle' });
       }
     }
