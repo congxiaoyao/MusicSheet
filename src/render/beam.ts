@@ -14,7 +14,7 @@
 //        决定该组最多有几根梁。
 
 import { Note, Piece } from '../core/types';
-import { noteStartBeats, barLineBeats, isChordTail } from '../core/model';
+import { noteStartBeats, barLineBeats, isChordTail, beatGroupIndexOf } from '../core/model';
 
 export interface BeamGroup {
   /** 组内首音符在 notes 数组中的索引（含） */
@@ -67,9 +67,6 @@ export function computeBeams(piece: Piece): BeamGroup[] {
   let groupMaxCount = 0;
   let groupBeatOrigin = -1; // 组首音符所在的 beatGroup 序号（用于判断是否跨组）
 
-  /** beatGroup 序号 = 从乐曲开头算，第几个 beatGroup（每 beatGroup 个八分为一组） */
-  const groupIndexOfBeat = (beat: number) => Math.floor(beat * 2 / beatGroup);
-
   const closeGroup = (endIdxExclusive: number) => {
     // 组内至少 2 个音符才算一个连梁组；否则丢弃（孤立音符保持 flag）
     if (groupStart >= 0 && endIdxExclusive - groupStart >= 2 && groupMaxCount > 0) {
@@ -96,7 +93,7 @@ export function computeBeams(piece: Piece): BeamGroup[] {
     }
 
     const startBeat = starts[i];
-    const thisGroupIdx = groupIndexOfBeat(startBeat);
+    const thisGroupIdx = beatGroupIndexOf(startBeat, beatGroup);
 
     if (groupStart < 0) {
       // 开新组

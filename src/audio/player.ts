@@ -7,8 +7,8 @@
 // - seek/pause/resume：本质都是「从某 beat 重新调度」。pause 记录当前 beat 再停 osc，
 //   resume 从该 beat 重启；seek 直接 playFrom(beat)。
 
-import { durationBeats, Piece } from '../core/types';
-import { isChordTail } from '../core/model';
+import { durationBeats, Piece, beatsPerBar } from '../core/types';
+import { isChordTail, snapBeat, BEAT_EPS } from '../core/model';
 
 export type PlayState = 'stopped' | 'playing' | 'paused';
 
@@ -211,12 +211,16 @@ export class Player {
     this.rafId = requestAnimationFrame(step);
   }
 
-  /** 找 beat 落在哪个音区间内（返回 notes 下标；休止符区间也返回，让符头高亮随停顿移动） */
+  /** 找 beat 落在哪个音区间内（返回 notes 下标；休止符区间也返回，让符头高亮随停顿移动）。
+   *  区间比较带 BEAT_EPS 容忍:tuplet 累加让 endBeat 含 ~1e-16 误差,严格 < 会令
+   *  beat=末音endBeat 时落空返回 -1(末音高亮丢失)。右边界用 < endBeat - EPS,
+   *  与 tickLoop 的 beat>=totalBeats(snapBeat 后) 配合,末音区间能覆盖到结束。 */
   private noteIndexAtBeat(beat: number): number {
     for (const e of this.schedule) {
-      if (beat >= e.startBeat && beat < e.endBeat) return e.index;
+      if (beat >= e.startBeat - BEAT_EPS && beat < e.endBeat - BEAT_EPS) return e.index;
     }
-    return -1;
+    // 落在所有区间之后(已到末尾)→ 返回末音,保持末音高亮直到 finish
+    return this.schedule.length ? this.schedule[this.schedule.length - 1].index : -1;
   }
 
   private finish(): void {
@@ -238,9 +242,14 @@ export class Player {
   play(piece: Piece): void {
     this.piece = piece;
     this.schedule = this.computeSchedule(piece);
-    this.totalBeats = this.schedule.length
+    // totalBeats 吸附到小节网格:乐谱总拍数应是 bpb 整数倍,但末音 endBeat
+    // 因 tuplet 累加可能含 ~1e-16 误差(如 3.9999... 而非 4.0),会让 tickLoop
+    // 的 beat>=totalBeats 判定提前/延后、noteIndexAtBeat 在末音 endBeat 处落空。
+    const bpb = beatsPerBar(piece.time);
+    const rawTotal = this.schedule.length
       ? this.schedule[this.schedule.length - 1].endBeat
       : 0;
+    this.totalBeats = snapBeat(rawTotal, bpb);
     this.playFrom(0);
   }
 

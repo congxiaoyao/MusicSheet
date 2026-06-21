@@ -43,15 +43,35 @@ export function remainingBeats(piece: Piece): number {
   return Math.max(0, capacityBeats(piece) - totalBeats(piece));
 }
 
-/** 拍位 → 所在小节序号(0-based)。浮点鲁棒:接近小节右边界(误差内)时吸附归位到该小节。
- *  tuplet(三连音 0.1666... 拍)等非 2 的幂时值累加会产生 ~1e-16 浮点误差,
- *  裸 Math.floor(beat/bpb) 会把「恰填满小节 3.9999... 拍」误判成第 3 拍(仍在原小节末尾),
- *  导致后续「下一小节剩余容量」算成 ~4e-16 → 编辑锁死。
- *  EPS 取 1e-6:够吸收累加误差,又远小于最小时值粒度(三十二分=0.125 拍)。 */
-const BEAT_EPS = 1e-6;
+// ── 浮点鲁棒工具 ──────────────────────────────────────────
+// tuplet(三连音 0.1666... 拍)、附点等非 2 的幂时值累加会产生 ~1e-16 浮点误差,
+// 让「恰填满小节/拍边界」的拍位(如 3.9999... 而非 4.0)在 floor/%/比较时误判,
+// 连锁导致:连梁分组错、编辑锁死、播放末音高亮丢失、小节号显示错位等。
+// EPS 取 1e-6:够吸收累加误差,又远小于最小时值粒度(三十二分=0.125 拍)。
+export const BEAT_EPS = 1e-6;
+
+/** 把接近网格点(beat 整数倍于 grid)的拍位吸附到精确网格值。
+ *  如 snapBeat(3.9999999, 4) → 4.0;snapBeat(0.9999999, 1) → 1.0。
+ *  用于消除累加误差后再做严格比较/边界判定。 */
+export function snapBeat(beat: number, grid: number): number {
+  const k = Math.round(beat / grid);
+  return Math.abs(beat - k * grid) < BEAT_EPS ? k * grid : beat;
+}
+
+/** 拍位 → 所在小节序号(0-based)。浮点鲁棒:接近小节右边界(误差内)时吸附归位。
+ *  裸 Math.floor(beat/bpb) 会把「恰填满小节 3.9999... 拍」误判成仍在原小节末尾,
+ *  导致「下一小节剩余容量」算成 ~4e-16 → 编辑锁死。 */
 export function measureOfBeat(beat: number, bpb: number): number {
-  const snapped = beat + BEAT_EPS;            // 推过边界即归入下一小节
-  return Math.floor(snapped / bpb);
+  return Math.floor(snapBeat(beat, bpb) / bpb);
+}
+
+/** 拍位 → 所属拍组(beatGroup)序号。beatGroup=每组的八分音符数(4/4→2,6/8→3)。
+ *  浮点鲁棒:三连音累加让 startBeat=0.9999... 时裸 floor 会误判成拍组0而非1,
+ *  导致连梁跨拍误并组(如「八分+三连音」末音被并入前拍组)。 */
+export function beatGroupIndexOf(beat: number, beatGroup: number): number {
+  // 拍组宽度 = beatGroup/2 拍(每组 beatGroup 个八分位)
+  const groupWidth = beatGroup / 2;
+  return Math.floor(snapBeat(beat, groupWidth) / groupWidth);
 }
 
 /** 下一个待写音符所在小节还能容纳多少拍。

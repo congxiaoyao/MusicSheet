@@ -5,7 +5,7 @@
 // Issue 带 kind 字段，便于按类型处理/过滤。noteIdx/barIdx 为 -1 表示非特定音符/小节。
 
 import { Piece, beatsPerBar, durationBeats } from '../core/types';
-import { noteStartBeats, totalBeats, capacityBeats, isChordTail } from '../core/model';
+import { noteStartBeats, totalBeats, capacityBeats, isChordTail, measureOfBeat } from '../core/model';
 
 /** 问题类型 */
 export type IssueKind = 'overfill' | 'capacity' | 'keysig' | 'pitch' | 'timesig';
@@ -105,7 +105,8 @@ export function diagnoseOverfill(piece: Piece): Issue[] {
     const startBeat = starts[i];
     const dur = durationBeats(piece.notes[i]);
     const endBeat = startBeat + dur;
-    const barIdx = Math.floor(startBeat / bpb);
+    // measureOfBeat 浮点鲁棒:tuplet 累加误差下裸 floor 会算错小节序号
+    const barIdx = measureOfBeat(startBeat, bpb);
     const barEnd = (barIdx + 1) * bpb;
     if (endBeat > barEnd + 1e-6) {
       issues.push({ kind: 'overfill', noteIdx: i, barIdx,
