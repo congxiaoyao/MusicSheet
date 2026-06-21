@@ -11,7 +11,7 @@
 
 import { Piece, DurationValue, durationBeats, noteValueBeats } from '../core/types';
 import { beatsPerBar } from '../core/types';
-import { noteStartBeats, capacityBeats } from '../core/model';
+import { noteStartBeats, capacityBeats, measureOfBeat } from '../core/model';
 
 export interface Layout {
   width: number;
@@ -117,7 +117,9 @@ export function computeLayout(piece: Piece, containerWidth: number, currentDurat
   const noteSlotW: number[] = [];
   for (let i = 0; i < piece.notes.length; i++) {
     const startBeat = starts[i];
-    const barIdx = Math.min(Math.floor(startBeat / bpb), measures - 1);
+    // measureOfBeat 浮点鲁棒:三连音等非 2 的幂时值累加有 ~1e-16 误差,
+    // 裸 floor 会让「恰填满小节」的音漂到下一小节视觉区。
+    const barIdx = Math.min(measureOfBeat(startBeat, bpb), measures - 1);
     const { x, slotW } = positionInBar(piece.notes, startBeat, barIdx, barWidth, bpb, i, barLines);
     noteX.push(x);
     noteSlotW.push(slotW);
@@ -131,8 +133,11 @@ export function computeLayout(piece: Piece, containerWidth: number, currentDurat
     nextBeat = starts[last] + durationBeats(piece.notes[last]);
   }
   const isFull = nextBeat >= capBeats - 1e-6;
-  const nextBarIdx = Math.min(Math.floor(Math.min(nextBeat, capBeats - 0.001) / bpb), measures - 1);
-  const nextBeatInBar = Math.min(nextBeat, capBeats - 0.001) - nextBarIdx * bpb;
+  // measureOfBeat 浮点鲁棒:三连音填满小节时 nextBeat≈3.9999...,裸 floor 会把
+  // 待输入格子算进原小节末尾(余量~4e-16)而非下一小节起点 → 指示框压在小节线上。
+  const clampedBeat = Math.min(nextBeat, capBeats - 0.001);
+  const nextBarIdx = Math.min(measureOfBeat(clampedBeat, bpb), measures - 1);
+  const nextBeatInBar = clampedBeat - nextBarIdx * bpb;
   const nextDur = nextBeat < capBeats ? currentDuration : 'quarter';
   const nextSlotW = isFull ? 0 : slotWidthFor(nextDur, bpb, barWidth);
   const nextSlotX = barLines[nextBarIdx] + nextBeatInBar / bpb * barWidth + nextSlotW / 2;

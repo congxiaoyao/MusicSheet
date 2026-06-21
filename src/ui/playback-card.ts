@@ -9,7 +9,7 @@
 
 import { Piece, beatsPerBar, KeySig, Note } from '../core/types';
 import { noteToJianpu } from '../core/theory';
-import { noteStartBeats } from '../core/model';
+import { noteStartBeats, measureOfBeat } from '../core/model';
 
 export type Fingering = 'cfixed' | 'follow';
 export interface ShowFlags { name: boolean; solfege: boolean; octave: boolean; }
@@ -398,7 +398,9 @@ export function buildPlaybackCard(
     // 小节标注
     const bpb = beatsPerBar(v.piece.time);
     const measures = Math.max(1, v.piece.measureCount);
-    const curM = Math.min(Math.floor(beat / bpb) + 1, measures);
+    // measureOfBeat 浮点鲁棒:tuplet 边界 beat=4.0 因累加误差成 3.9999... 时,
+    // 裸 floor 会显示「小节1」而非「小节2」
+    const curM = Math.min(measureOfBeat(beat, bpb) + 1, measures);
     barLabel.textContent = `小节 ${curM}/${measures}`;
     // 音符点 played 态随推进更新
     const starts = noteStartBeats(v.piece);
