@@ -779,12 +779,15 @@ export function renderStaffSVG(input: RenderInput): string {
   const beamIdx = new Set<number>(ctxByIdx.keys());
   const { svg: chordStemSvg, handled: chordHandled } = renderChordStems(piece, layout, beamIdx);
   s += chordStemSvg;
+  // 播放高亮:playingIndex 是当前时间位首音。若它在和弦组里,整组声部都高亮(和弦多符头同亮)。
+  const playingChordId = (playingIndex >= 0 && playingIndex < piece.notes.length) ? piece.notes[playingIndex].chordId : undefined;
   for (let i = 0; i < piece.notes.length; i++) {
     const note = piece.notes[i];
     const prev = i > 0 ? piece.notes[i - 1] : null;
     const isChordTail = !!(note.chordId && prev?.chordId === note.chordId);
     const chordStemHandled = chordHandled.has(i);
-    s += renderNote(note, layout.noteX[i], piece, layout, i === playingIndex, ctxByIdx.get(i), isChordTail, chordStemHandled);
+    const highlight = playingChordId ? (note.chordId === playingChordId) : (i === playingIndex);
+    s += renderNote(note, layout.noteX[i], piece, layout, highlight, ctxByIdx.get(i), isChordTail, chordStemHandled);
   }
   // 连音线(tie)：弧线画在符头之上，所以放在音符循环之后
   s += renderTies(piece, layout);

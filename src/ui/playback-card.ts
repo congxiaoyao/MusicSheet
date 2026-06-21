@@ -303,12 +303,22 @@ export function buildPlaybackCard(
     const whites = whiteKeyRange(v.piece);
     const whiteCount = whites.length;
 
-    // 当前应高亮的 midi 集合（单声部 = 至多 1 个）
+    // 当前应高亮的 midi 集合。playingIndex 是当前时间位首音;
+    // 若它在和弦组里,整组声部都高亮(和弦多键同亮)。
     const activeSet = new Set<number>();
     if (v.playingIndex >= 0 && v.playingIndex < v.piece.notes.length) {
-      const n = v.piece.notes[v.playingIndex];
-      const hm = highlightMidi(n, v.piece.key, v.fingering);
-      if (hm !== null) activeSet.add(hm);
+      const head = v.piece.notes[v.playingIndex];
+      if (head.chordId) {
+        // 和弦:收集同组所有声部的 midi
+        for (const n of v.piece.notes) {
+          if (n.chordId !== head.chordId || n.midi === null) continue;
+          const hm = highlightMidi(n, v.piece.key, v.fingering);
+          if (hm !== null) activeSet.add(hm);
+        }
+      } else {
+        const hm = highlightMidi(head, v.piece.key, v.fingering);
+        if (hm !== null) activeSet.add(hm);
+      }
     }
 
     const blackKeys: { el: HTMLElement; leftWhiteIdx: number }[] = [];
