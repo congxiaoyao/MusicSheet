@@ -36,45 +36,50 @@ export interface RenderInput {
 }
 
 // ── SVG 基元 ────────────────────────────────────────────────
+// 所有基元支持 dataIdx:输出 data-idx 属性,供播放高亮运行时按音符索引定位元素。
 
-function text(content: string, x: number, y: number, fontSize: number, opts: { anchor?: string; fill?: string; family?: string; class?: string } = {}): string {
+function dataAttr(opts: { dataIdx?: number }): string {
+  return opts.dataIdx !== undefined ? ` data-idx="${opts.dataIdx}"` : '';
+}
+
+function text(content: string, x: number, y: number, fontSize: number, opts: { anchor?: string; fill?: string; family?: string; class?: string; dataIdx?: number } = {}): string {
   const anchor = opts.anchor ?? 'middle';
   const fill = opts.fill ?? '#1f2430';
   const family = opts.family ?? 'Bravura';
   const cls = opts.class ? ` class="${opts.class}"` : '';
-  return `<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" font-family="${family}" font-size="${fontSize}" text-anchor="${anchor}" dominant-baseline="alphabetic" fill="${fill}"${cls}>${content}</text>`;
+  return `<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" font-family="${family}" font-size="${fontSize}" text-anchor="${anchor}" dominant-baseline="alphabetic" fill="${fill}"${cls}${dataAttr(opts)}>${content}</text>`;
 }
 
-function line(x1: number, y1: number, x2: number, y2: number, stroke = '#475569', width = 1.3, opts: { class?: string } = {}): string {
+function line(x1: number, y1: number, x2: number, y2: number, stroke = '#475569', width = 1.3, opts: { class?: string; dataIdx?: number } = {}): string {
   const cls = opts.class ? ` class="${opts.class}"` : '';
-  return `<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="${stroke}" stroke-width="${width}"${cls}/>`;
+  return `<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="${stroke}" stroke-width="${width}"${cls}${dataAttr(opts)}/>`;
 }
 
-function rect(x: number, y: number, w: number, h: number, opts: { fill?: string; fillOpacity?: number; stroke?: string; sw?: number; rx?: number; class?: string; opacity?: number } = {}): string {
+function rect(x: number, y: number, w: number, h: number, opts: { fill?: string; fillOpacity?: number; stroke?: string; sw?: number; rx?: number; class?: string; opacity?: number; dataIdx?: number } = {}): string {
   const fill = opts.fill ?? 'none';
   const fillOp = opts.fillOpacity !== undefined ? ` fill-opacity="${opts.fillOpacity}"` : '';
   const stroke = opts.stroke ? ` stroke="${opts.stroke}" stroke-width="${opts.sw ?? 1}"` : '';
   const rx = opts.rx ? ` rx="${opts.rx}" ry="${opts.rx}"` : '';
   const cls = opts.class ? ` class="${opts.class}"` : '';
   const op = opts.opacity !== undefined ? ` opacity="${opts.opacity}"` : '';
-  return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" fill="${fill}"${fillOp}${stroke}${rx}${cls}${op}/>`;
+  return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" fill="${fill}"${fillOp}${stroke}${rx}${cls}${op}${dataAttr(opts)}/>`;
 }
 
 /** 多边形：连梁横梁用，画平行四边形使两端切口平直。points 为 [x,y][]。 */
-function polygon(points: [number, number][], opts: { fill?: string; class?: string } = {}): string {
+function polygon(points: [number, number][], opts: { fill?: string; class?: string; dataIdx?: number } = {}): string {
   const fill = opts.fill ?? '#1f2430';
   const cls = opts.class ? ` class="${opts.class}"` : '';
   const pts = points.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
-  return `<polygon points="${pts}" fill="${fill}"${cls}/>`;
+  return `<polygon points="${pts}" fill="${fill}"${cls}${dataAttr(opts)}/>`;
 }
 
 /** SVG 路径：连音线(tie)弧线等用。d 为 path data 字符串。 */
-function path(d: string, opts: { fill?: string; stroke?: string; sw?: number; class?: string } = {}): string {
+function path(d: string, opts: { fill?: string; stroke?: string; sw?: number; class?: string; dataIdx?: number } = {}): string {
   const fill = opts.fill ?? 'none';
   const stroke = opts.stroke ? ` stroke="${opts.stroke}"` : '';
   const sw = opts.sw !== undefined ? ` stroke-width="${opts.sw}"` : '';
   const cls = opts.class ? ` class="${opts.class}"` : '';
-  return `<path d="${d}" fill="${fill}"${stroke}${sw}${cls}/>`;
+  return `<path d="${d}" fill="${fill}"${stroke}${sw}${cls}${dataAttr(opts)}/>`;
 }
 
 /** step（0=最下线，每步 1 个自然音级 = 半个线距）→ y 坐标。
@@ -226,8 +231,11 @@ function computeStem(step: number, x: number, headHalfW: number, layout: Layout,
  *  - beam 非空时：符干对齐组端点，且不画 flag（flag 由连梁代替）。
  *  - isChordTail=true 时：和弦尾音只画符头,不画符干/flag(符干由组首音贯穿全组承担)。
  *  - chordStemHandled=true 时(和弦首音且不在连梁里)：符干由 renderChordStems 统一画,这里跳过。
- *    和弦首音在连梁里时,符干由 renderBeams 按代表 step 处理,chordStemHandled=false,正常走 stemCtx。 */
-function renderNote(note: Note, x: number, piece: Piece, layout: Layout, highlight: boolean, beam: BeamCtx | undefined, isChordTail: boolean, chordStemHandled: boolean): string {
+ *    和弦首音在连梁里时,符干由 renderBeams 按代表 step 处理,chordStemHandled=false,正常走 stemCtx。
+ *  - 播放高亮改由运行时 CSS class 控制(.note-elem.playing),渲染时不再传 highlight。
+ *    所有需随符头高亮变色的元素(符头/符干/符尾/附点)带 class="note-elem" + data-idx,
+ *    fill 用 currentColor,默认色与高亮色由 style.css 的 .note-elem / .note-elem.playing 决定。 */
+function renderNote(note: Note, x: number, piece: Piece, layout: Layout, noteIdx: number, beam: BeamCtx | undefined, isChordTail: boolean, chordStemHandled: boolean): string {
   const fs = layout.fontSize;
   const ss = layout.staffSpace;
   let s = '';
@@ -249,16 +257,20 @@ function renderNote(note: Note, x: number, piece: Piece, layout: Layout, highlig
       : note.duration === 'half' ? line4Y + ss * 0.5
       : note.duration === 'quarter' ? midY
       : midY + ss * 0.3;   // 八分及以下字形 baseline 偏上,下移让视觉居中
-    s += text(glyph, x, baseline, fs);
+    // 休止符也参与播放高亮(随停顿移动),带 note-elem + data-idx
+    s += text(glyph, x, baseline, fs, { fill: 'currentColor', class: 'note-elem', dataIdx: noteIdx });
     return s;
   }
 
   const pitch = resolvePitch(note.midi, piece.clef, piece.key, note.accidental);
   const step = pitch.step;
   const y = stepToY(step, layout);
-  const fill = highlight ? '#4f46e5' : '#1f2430';
+  // fill 不再依赖 highlight:统一 currentColor,由 CSS .note-elem / .note-elem.playing 控制
+  const fill = 'currentColor';
+  // 高亮元素统一的 opts(符头/符干/符尾/附点)
+  const elemOpts = { fill, class: 'note-elem', dataIdx: noteIdx };
 
-  // 加线（超出五线谱范围）
+  // 加线（超出五线谱范围）— 加线不参与高亮(保持黑色)
   if (step > 8) {
     for (let st = 10; st <= step; st += 2) {
       const ly = stepToY(st, layout);
@@ -274,7 +286,7 @@ function renderNote(note: Note, x: number, piece: Piece, layout: Layout, highlig
   // 符头墨迹半宽（用 SMuFL advance 的一半）：noteheadBlack/Half ≈ 1.18ss
   const headHalfW = (note.duration === 'whole' ? advanceSS('noteheadWhole') : advanceSS('noteheadBlack')) / 2 * ss;
 
-  // 临时记号（符头左侧）
+  // 临时记号（符头左侧）— 临时记号不参与高亮(保持黑色)
   const accHalfW = (pitch.accidental === 'sharp' ? advanceSS('accidentalSharp')
     : pitch.accidental === 'flat' ? advanceSS('accidentalFlat')
     : advanceSS('accidentalNatural')) / 2 * ss;
@@ -287,7 +299,7 @@ function renderNote(note: Note, x: number, piece: Piece, layout: Layout, highlig
   const headGlyph = note.duration === 'whole' ? G.noteheadWhole
     : note.duration === 'half' ? G.noteheadHalf
     : G.noteheadBlack;
-  s += text(headGlyph, x, y, fs, { fill });
+  s += text(headGlyph, x, y, fs, elemOpts);
 
   // 符干 + 符尾（whole 无符干；和弦尾音无符干——由组首音贯穿全组；
   //  和弦首音非连梁时也无符干——由 renderChordStems 统一画贯穿全组的符干。
@@ -297,7 +309,7 @@ function renderNote(note: Note, x: number, piece: Piece, layout: Layout, highlig
     && !(chordStemHandled);            // 和弦首音非连梁:符干由 renderChordStems 画
   if (drawStem) {
     const { stemUp, stemW, stemX, stemTop, stemBot } = computeStem(step, x, headHalfW, layout, beam);
-    s += rect(stemX, stemTop, stemW, stemBot - stemTop, { fill });
+    s += rect(stemX, stemTop, stemW, stemBot - stemTop, elemOpts);
     // 符尾：只有未连梁、且非和弦尾音的八分/十六分/三十二分才画 flag
     // (和弦首音若不连梁且是八分及下面,flag 由 renderChordStems 画)
     if (!beam && (note.duration === 'eighth' || note.duration === 'sixteenth' || note.duration === 'thirtysecond')) {
@@ -307,13 +319,13 @@ function renderNote(note: Note, x: number, piece: Piece, layout: Layout, highlig
         ? (stemUp ? G.flag16thUp : G.flag16thDown)
         : (stemUp ? G.flag32ndUp : G.flag32ndDown);
       const flagY = stemUp ? stemTop : stemBot;
-      s += text(flagGlyph, stemX + stemW / 2, flagY, fs, { fill, anchor: 'start' });
+      s += text(flagGlyph, stemX + stemW / 2, flagY, fs, { ...elemOpts, anchor: 'start' });
     }
   }
 
   // 附点
   if (note.dotted) {
-    s += text(G.augmentationDot, x + ss * 1.7, y, fs, { fill });  // 全字号(0.4ss直径),x偏移1.7ss(符头右侧)
+    s += text(G.augmentationDot, x + ss * 1.7, y, fs, elemOpts);  // 全字号(0.4ss直径),x偏移1.7ss(符头右侧)
   }
 
   return s;
@@ -700,8 +712,10 @@ function renderTuplets(piece: Piece, layout: Layout, ctxByIdx: Map<number, BeamC
  *  - 符干 x 取组首音 noteX ± headHalfW(全组同 x)
  *  - 八分及以下时值,在符干端点画 flag(整组和弦共用一根 flag)
  *  返回 { svg, handled }:handled 为「符干已由此处处理的音符索引集」(= 组内所有非全音符音,无论是否在连梁里,
- *  连梁组的首/尾音代表 step 由 renderBeams 负责,这里不重复)。 */
-function renderChordStems(piece: Piece, layout: Layout, beamIdx: Set<number>, playingChordId: string | undefined): { svg: string; handled: Set<number> } {
+ *  连梁组的首/尾音代表 step 由 renderBeams 负责,这里不重复)。
+ *  播放高亮:符干/flag 带 class="note-elem" + data-idx(组首音 idx),fill=currentColor。
+ *  和弦高亮时 updateHighlight 会给组内所有 idx 加 .playing,首音 idx 必在集合内 → 符干命中。 */
+function renderChordStems(piece: Piece, layout: Layout, beamIdx: Set<number>): { svg: string; handled: Set<number> } {
   const ss = layout.staffSpace;
   const fs = layout.fontSize;
   const groups = chordGroups(piece);
@@ -727,8 +741,9 @@ function renderChordStems(piece: Piece, layout: Layout, beamIdx: Set<number>, pl
     // 任一成员在连梁里 → 整组符干由 renderBeams 按代表 step 处理,跳过
     if (idxs.some(i => beamIdx.has(i))) continue;
 
-    // 该组和弦正在播放 → 符干/符尾用高亮色,否则黑色
-    const fill = (playingChordId && piece.notes[idxs[0]].chordId === playingChordId) ? '#4f46e5' : '#1f2430';
+    // 高亮元素:符干/flag 挂在组首音 idx,fill=currentColor 由 CSS 控制
+    const headIdx = idxs[0];
+    const elemOpts = { fill: 'currentColor', class: 'note-elem', dataIdx: headIdx };
     const avgStep = steps.reduce((a, b) => a + b, 0) / steps.length;
     const stemUp = avgStep <= 6;
     const x = layout.noteX[idxs[0]];
@@ -741,7 +756,7 @@ function renderChordStems(piece: Piece, layout: Layout, beamIdx: Set<number>, pl
     const minY = stepToY(Math.max(...steps), layout);   // 最高音 y 最小(最靠上)
     const stemTop = stemUp ? minY - stemLen : minY;
     const stemBot = stemUp ? maxY : maxY + stemLen;
-    svg += rect(stemX, stemTop, stemW, stemBot - stemTop, { fill });
+    svg += rect(stemX, stemTop, stemW, stemBot - stemTop, elemOpts);
 
     // flag:整组和弦共用一根(取首音时值,组内一致)
     const dur = piece.notes[idxs[0]].duration;
@@ -752,7 +767,7 @@ function renderChordStems(piece: Piece, layout: Layout, beamIdx: Set<number>, pl
         ? (stemUp ? G.flag16thUp : G.flag16thDown)
         : (stemUp ? G.flag32ndUp : G.flag32ndDown);
       const flagY = stemUp ? stemTop : stemBot;
-      svg += text(flagGlyph, stemX + stemW / 2, flagY, fs, { fill, anchor: 'start' });
+      svg += text(flagGlyph, stemX + stemW / 2, flagY, fs, { ...elemOpts, anchor: 'start' });
     }
     // 标记组内所有音为「符干已处理」:首音(在主循环里 chordStemHandled=true),
     // 尾音在主循环里本就 isChordTail=true。这里把首音加入 handled(主循环查它)。
@@ -761,9 +776,11 @@ function renderChordStems(piece: Piece, layout: Layout, beamIdx: Set<number>, pl
   return { svg, handled };
 }
 
-/** 主渲染：返回 SVG 内部内容（不含 <svg> 标签） */
+/** 主渲染：返回 SVG 内部内容（不含 <svg> 标签）。
+ *  playingIndex 不再驱动高亮(改由运行时 CSS class .note-elem.playing 控制)。
+ *  保留 RenderInput.playingIndex 字段仅为兼容,渲染时忽略。 */
 export function renderStaffSVG(input: RenderInput): string {
-  const { piece, layout, playingIndex } = input;
+  const { piece, layout } = input;
   let s = '';
   s += renderStaffLines(layout);
   s += renderClef(piece, layout);
@@ -777,19 +794,16 @@ export function renderStaffSVG(input: RenderInput): string {
   // 与梁重叠，视觉上符干接入梁。
   const { svg: beamSvg, ctxByIdx } = renderBeams(computeBeams(piece), piece, layout);
   s += beamSvg;
-  // 播放高亮:playingIndex 是当前时间位首音。若它在和弦组里,整组声部(符头+符干+符尾)都高亮。
-  const playingChordId = (playingIndex >= 0 && playingIndex < piece.notes.length) ? piece.notes[playingIndex].chordId : undefined;
   // 和弦符干:连梁之后画(不和连梁和弦冲突),音符符头之前画(符头会盖住符干端)
   const beamIdx = new Set<number>(ctxByIdx.keys());
-  const { svg: chordStemSvg, handled: chordHandled } = renderChordStems(piece, layout, beamIdx, playingChordId);
+  const { svg: chordStemSvg, handled: chordHandled } = renderChordStems(piece, layout, beamIdx);
   s += chordStemSvg;
   for (let i = 0; i < piece.notes.length; i++) {
     const note = piece.notes[i];
     const prev = i > 0 ? piece.notes[i - 1] : null;
     const isChordTail = !!(note.chordId && prev?.chordId === note.chordId);
     const chordStemHandled = chordHandled.has(i);
-    const highlight = playingChordId ? (note.chordId === playingChordId) : (i === playingIndex);
-    s += renderNote(note, layout.noteX[i], piece, layout, highlight, ctxByIdx.get(i), isChordTail, chordStemHandled);
+    s += renderNote(note, layout.noteX[i], piece, layout, i, ctxByIdx.get(i), isChordTail, chordStemHandled);
   }
   // 连音线(tie)：弧线画在符头之上，所以放在音符循环之后
   s += renderTies(piece, layout);

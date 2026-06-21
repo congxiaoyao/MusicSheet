@@ -240,6 +240,7 @@ html, body {
   box-shadow: var(--shadow-md);
 }
 .svg-host {
+  position: relative;   /* 播放头覆盖层 absolute 定位的参照 */
   width: 100%;
   background: #fcfcfd;
   border-radius: var(--radius-sm);
@@ -251,6 +252,13 @@ html, body {
   -webkit-user-select: none;
 }
 .svg-host svg { display: block; user-select: none; -webkit-user-select: none; }
+/* 播放头覆盖层:覆盖整个 svgHost(含 padding),内部 .pb-playhead 按百分比定位 */
+.playhead-layer {
+  position: absolute;
+  inset: 0;            /* 覆盖 svgHost padding box */
+  pointer-events: none;
+  overflow: hidden;
+}
 
 .status {
   margin-top: 12px;
@@ -408,7 +416,21 @@ html, body {
   box-shadow: var(--shadow-md);
 }
 .pb-demo-stage .svg-host { background: #fcfcfd; }
-.pb-playhead { fill: rgba(79, 70, 229, 0.1); stroke: none; }
+/* 播放头:DOM 覆盖层(app.ts playheadLayer)。旧的 SVG <rect.pb-playhead> 已弃用 */
+.pb-playhead {
+  position: absolute;
+  background: rgba(79, 70, 229, 0.1);
+  border-radius: 3px;
+  pointer-events: none;
+  will-change: left, width;
+}
+
+/* 符头/符干/符尾/附点高亮:运行时由 updateHighlight 切换 .playing class */
+.note-elem { color: #1f2430; }
+.note-elem.playing { color: #4f46e5; }
+/* 简谱数字/八度点/下划线/短横高亮 */
+.jp-elem { color: #1f2430; }
+.jp-elem.playing { color: #4f46e5; }
 
 /* 卡片本体（无标题，顶部直接是 seek 行） */
 .playback-card {

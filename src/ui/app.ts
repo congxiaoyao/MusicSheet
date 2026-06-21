@@ -1,9 +1,9 @@
 // 应用装配：工具栏 ↔ 画布 ↔ 简谱 ↔ 播放 ↔ 导出 ↔ 快捷键
 // 录入模型：追加式（短信验证码）—— 只能往末尾加，只能从末尾删。
 
-import { Note, Piece, DurationValue, durationBeats } from '../core/types';
+import { Note, Piece, DurationValue } from '../core/types';
 import { KEYS } from '../core/theory';
-import { createPiece, appendNote, popNote, remainingBeats, remainingBeatsInCurrentBar, capacityBeats, totalBeats, noteStartBeats } from '../core/model';
+import { createPiece, appendNote, popNote, remainingBeats, remainingBeatsInCurrentBar, capacityBeats, totalBeats } from '../core/model';
 import { computeLayout } from '../render/layout';
 import { buildSVG, exportPNG } from '../render/export';
 import { ensureFontLoaded } from '../render/glyphs';
@@ -29,6 +29,8 @@ export class App {
   private chordIdCounter = 0;
   private root: HTMLElement;
   private svgHost!: HTMLElement;
+  /** 播放头覆盖层:独立 DOM div,叠在 svgHost 上,由 currentBeat 驱动定位(onTick 时更新) */
+  private playheadLayer!: HTMLElement;
   private statusEl!: HTMLElement;
   private bpm = 100;
   private playingIndex = -1;
@@ -49,15 +51,30 @@ export class App {
     this.fingering = loadFingering();
     this.show = loadShow();
     this.player = new Player({
-      onNote: (i) => { this.playingIndex = i; this.render(); },
-      onTick: (beat) => { this.currentBeat = beat; (this.playbackCard as any)._setProgress?.(beat); },
+      // onNote 不再驱动高亮(改由 onTick 统一更新,避免数据源不一致导致「落后一个音符」)。
+      // 保留回调供未来用途(如 MIDI 输出),当前空实现。
+      onNote: () => {},
+      // onTick:单一数据源 currentBeat → 同时更新进度条 + 编辑区播放头 + 符头高亮。
+      // 这保证三者完全同步,不再出现「播放头滞后/暂停才刷新」。
+      onTick: (beat) => {
+        this.currentBeat = beat;
+        (this.playbackCard as any)._setProgress?.(beat);
+        this.updatePlayheadAndHighlight();
+      },
       onStateChange: (s) => {
         this.playState = s;
         if (s === 'stopped') { this.playingIndex = -1; this.currentBeat = 0; }
         (this.playbackCard as any)._refresh?.();
+        // 状态切换后同步播放头/高亮显隐(playing/paused 显,stopped 隐+清高亮)
+        this.updatePlayheadAndHighlight();
         this.render();
       },
-      onEnd: () => { this.playingIndex = -1; this.currentBeat = 0; this.render(); },
+      onEnd: () => {
+        this.playingIndex = -1;
+        this.currentBeat = 0;
+        this.updatePlayheadAndHighlight();
+        this.render();
+      },
     });
     this.buildDOM();
     void ensureFontLoaded().then(() => this.render());
@@ -86,6 +103,12 @@ export class App {
     this.svgHost = document.createElement('div');
     this.svgHost.className = 'svg-host';
     stageWrap.appendChild(this.svgHost);
+    // 播放头覆盖层:叠在 svgHost 内,absolute 定位,pointer-events:none 不阻挡点击。
+    // 由 currentBeat 驱动(onTick 时更新 left/width),不再画进 SVG 字符串。
+    this.playheadLayer = document.createElement('div');
+    this.playheadLayer.className = 'playhead-layer';
+    this.playheadLayer.style.display = 'none';   // 默认隐藏,播放/暂停态才显示
+    this.svgHost.appendChild(this.playheadLayer);
 
     this.statusEl = document.createElement('div');
     this.statusEl.className = 'status';
@@ -576,19 +599,22 @@ export class App {
     this.render();
   }
 
-  /** seek：播放中→从该 beat 继续；暂停/停止→定位但保持原态（按播放才从该处响） */
+  /** seek:播放中→从该 beat 继续(重调度);暂停→定位保持暂停(不发声,但编辑区播放头/高亮同步);
+   *  停止→记录 currentBeat 供下次播放参考(停止态不显示播放头,但记录位置)。
+   *  关键:播放/暂停态都调 updatePlayheadAndHighlight,确保编辑区播放头+高亮同步(修复「暂停态 seek 不同步」)。 */
   private seek(beat: number): void {
     this.currentBeat = beat;
     if (this.playState === 'playing') {
       this.player.setBpm(this.bpm);
       this.player.seek(beat, true);
+      // playing 态:onTick 会持续驱动,但 seek 瞬间补一次即时定位(避免等下一帧)
+      this.updatePlayheadAndHighlight();
     } else if (this.playState === 'paused') {
       this.player.seek(beat, false);
-      // 暂停态：只更新进度显示，不发声
       (this.playbackCard as any)._setProgress?.(beat);
+      this.updatePlayheadAndHighlight();
     } else {
-      // 停止态：定位到 beat，按播放时从这里开始（记录到 currentBeat，play() 会从头）
-      // 停止态不支持中途起播 —— 直接从头播更直观
+      // 停止态:记录位置,不显示播放头(停止语义)。进度条同步显示位置。
       (this.playbackCard as any)._setProgress?.(beat);
     }
   }
@@ -606,13 +632,14 @@ export class App {
 
   /** 构造给卡片的视图快照 */
   private playbackView(): PlaybackView {
-    const totalBeats = this.piece.notes.reduce((s, n) => s + durationBeats(n), 0);
+    // 用 totalBeats()(跳过和弦尾音),与 player 的 schedule 一致。
+    // 旧实现 reduce(durationBeats) 没跳尾音,含和弦的乐谱进度比例会偏大。
     return {
       piece: this.piece,
       playState: this.playState,
       bpm: this.bpm,
       currentBeat: this.playState === 'stopped' ? 0 : this.currentBeat,
-      totalBeats,
+      totalBeats: totalBeats(this.piece),
       playingIndex: this.playingIndex,
       fingering: this.fingering,
       show: this.show,
@@ -672,13 +699,12 @@ export class App {
     const width = Math.min(1200, Math.max(640, this.svgHost.clientWidth || 940));
     this.layout = computeLayout(this.piece, width, this.tool.duration);
     const svg = buildSVG(this.piece, this.layout, this.playingIndex, { hover: this.hover });
-    // 播放/暂停态：注入播放头竖线（贯穿五线谱+简谱），停止态不显示
-    const withHead = this.playState !== 'stopped'
-      ? this.injectPlayhead(svg)
-      : svg;
-    this.svgHost.innerHTML = withHead;
+    // SVG 内不再画播放头(改由独立 DOM 覆盖层 playheadLayer 驱动)。
+    // 注意:innerHTML 会清空 svgHost 所有子元素(含 playheadLayer),需重新 append 回去。
+    this.svgHost.innerHTML = svg;
     const svgEl = this.svgHost.querySelector('svg');
     if (svgEl) svgEl.setAttribute('width', '100%');
+    this.svgHost.appendChild(this.playheadLayer);
     // 状态
     const rem = remainingBeats(this.piece);
     const pct = Math.round((totalBeats(this.piece) / capacityBeats(this.piece)) * 100);
@@ -687,28 +713,78 @@ export class App {
     (this.toolbar as any)._refreshCapacity?.(remainingBeatsInCurrentBar(this.piece), rem);
     // 卡片随 render 刷新（音域/高亮/状态可能变）
     this.refreshCard();
+    // render 后用当前 currentBeat 同步播放头/高亮(SVG 刚重建,.playing class 需重打)
+    this.updatePlayheadAndHighlight();
   }
 
-  /** 在五线谱 SVG 上叠加播放头：半透明紫色矩形条（20% 紫），宽度覆盖当前音符的 slot 宽度。 */
-  private injectPlayhead(svg: string): string {
+  /** 单一数据源同步:由 currentBeat → 算当前音 idx → 更新播放头位置 + 符头/简谱高亮。
+   *  在 onTick(每帧)、onStateChange、onEnd、seek、render 后调用,保证播放头/高亮/进度条三者同步。
+   *  - 停止态:隐藏播放头,清除所有 .playing 高亮
+   *  - 播放/暂停态:显示播放头,定位到 currentBeat 对应音,高亮该音(和弦组全部声部) */
+  private updatePlayheadAndHighlight(): void {
     const lay = this.layout;
     const notes = this.piece.notes;
-    if (notes.length === 0 || lay.noteX.length === 0) return svg;
-    const starts = noteStartBeats(this.piece);
-    // 找 currentBeat 落在哪个音区间，取该音的中心 x + slot 宽度
-    let idx = 0;
-    for (let i = 0; i < notes.length; i++) {
-      const startBeat = starts[i];
-      const endBeat = startBeat + durationBeats(notes[i]);
-      if (this.currentBeat >= startBeat && this.currentBeat <= endBeat + 1e-6) { idx = i; break; }
-      if (this.currentBeat > endBeat) idx = Math.min(i, notes.length - 1);
+    const playing = this.playState !== 'stopped';
+
+    // 1. 高亮:先清除所有 .playing,再给当前音(含和弦组)加上
+    this.svgHost.querySelectorAll('.note-elem.playing, .jp-elem.playing').forEach(el => el.classList.remove('playing'));
+    if (playing && notes.length > 0) {
+      const idx = this.player.noteIndexAtBeat(this.currentBeat);
+      if (idx >= 0) {
+        this.playingIndex = idx;
+        // 收集需高亮的 idx:和弦组 = 同 chordId 所有声部;单音 = 仅 idx
+        const chordId = notes[idx].chordId;
+        const hiliteIdxs: number[] = [];
+        if (chordId) {
+          for (let i = 0; i < notes.length; i++) if (notes[i].chordId === chordId) hiliteIdxs.push(i);
+        } else {
+          hiliteIdxs.push(idx);
+        }
+        const idxSet = new Set(hiliteIdxs);
+        // 五线谱:每个 idx 的 note-elem;简谱:jp-elem data-idx 是首音,首音必在 idxSet 内
+        this.svgHost.querySelectorAll<SVGElement>('[data-idx]').forEach(el => {
+          const di = parseInt(el.getAttribute('data-idx') || '-1', 10);
+          if (idxSet.has(di)) el.classList.add('playing');
+        });
+      }
+    } else {
+      this.playingIndex = -1;
     }
+
+    // 2. 播放头定位(播放/暂停态)
+    if (!playing || notes.length === 0 || lay.noteX.length === 0 || !lay) {
+      this.playheadLayer.style.display = 'none';
+      this.playheadLayer.innerHTML = '';
+      return;
+    }
+    const idx = this.player.noteIndexAtBeat(this.currentBeat);
+    if (idx < 0) { this.playheadLayer.style.display = 'none'; this.playheadLayer.innerHTML = ''; return; }
+    this.playheadLayer.style.display = '';
     const x0 = lay.noteX[idx];
     const w = lay.noteSlotW[idx] || 24;
-    const y1 = lay.staffTop - 8;
-    const y2 = lay.jianpuBottom + 8;
-    const rect = `<rect class="pb-playhead" x="${x0 - w / 2}" y="${y1}" width="${w}" height="${y2 - y1}" rx="3"/>`;
-    return svg.replace('</svg>', `${rect}</svg>`);
+    // SVG 在 svgHost 的 padding(8px 4px)内,playheadLayer 覆盖 padding box(inset:0)。
+    // 播放头百分比相对 layout.width(SVG viewBox 宽),需把 SVG 的 padding 偏移算进去。
+    // SVG width=100%(填 content box),content box 宽 = svgHost clientWidth - 左右 padding。
+    // 简化:用 SVG 元素相对 svgHost 的偏移 + 尺寸定位播放头,精确对齐。
+    const svgEl = this.svgHost.querySelector('svg');
+    if (svgEl) {
+      const hostRect = this.svgHost.getBoundingClientRect();
+      const svgRect = svgEl.getBoundingClientRect();
+      // SVG 相对 svgHost 的左/上偏移(px)与宽高,转成百分比供 .pb-playhead 使用
+      const offsetX = ((svgRect.left - hostRect.left) / hostRect.width) * 100;
+      const offsetY = ((svgRect.top - hostRect.top) / hostRect.height) * 100;
+      const svgWPct = (svgRect.width / hostRect.width) * 100;
+      const svgHPct = (svgRect.height / hostRect.height) * 100;
+      // 播放头 left% = SVG偏移 + (noteX/viewBox宽)*SVG宽%
+      const leftPct = offsetX + (x0 - w / 2) / lay.width * svgWPct;
+      const widthPct = w / lay.width * svgWPct;
+      // top/height:覆盖五线谱顶到简谱底(y1=staffTop-8 → y2=jianpuBottom+8)
+      const y1 = lay.staffTop - 8;
+      const y2 = lay.jianpuBottom + 8;
+      const topPct = offsetY + y1 / lay.height * svgHPct;
+      const heightPct = (y2 - y1) / lay.height * svgHPct;
+      this.playheadLayer.innerHTML = `<div class="pb-playhead" style="left:${leftPct.toFixed(2)}%;top:${topPct.toFixed(2)}%;width:${widthPct.toFixed(2)}%;height:${heightPct.toFixed(2)}%"></div>`;
+    }
   }
 }
 
