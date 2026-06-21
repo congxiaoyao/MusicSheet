@@ -1,15 +1,16 @@
 // 应用装配：工具栏 ↔ 画布 ↔ 简谱 ↔ 播放 ↔ 导出 ↔ 快捷键
 // 录入模型：追加式（短信验证码）—— 只能往末尾加，只能从末尾删。
 
-import { Note, Piece, DurationValue } from '../core/types';
+import { Note, Piece, DurationValue, durationBeats } from '../core/types';
 import { KEYS } from '../core/theory';
-import { createPiece, appendNote, popNote, remainingBeats, remainingBeatsInCurrentBar, capacityBeats, totalBeats } from '../core/model';
+import { createPiece, appendNote, popNote, remainingBeats, remainingBeatsInCurrentBar, capacityBeats, totalBeats, noteStartBeats } from '../core/model';
 import { computeLayout } from '../render/layout';
 import { buildSVG, exportPNG } from '../render/export';
 import { ensureFontLoaded } from '../render/glyphs';
 import { clickYToMidi } from '../render/staff';
 import { buildToolbar, defaultTool, ToolState, TUPLET_CONFIG, TupletMode } from './toolbar';
-import { Player } from '../audio/player';
+import { Player, PlayState } from '../audio/player';
+import { buildPlaybackCard, loadFingering, loadShow, saveFingering, saveShow, Fingering, ShowFlags, PlaybackView } from './playback-card';
 import { twinkleExample } from './examples';
 
 interface HoverState { midi: number; x: number; }
@@ -30,8 +31,13 @@ export class App {
   private statusEl!: HTMLElement;
   private bpm = 100;
   private playingIndex = -1;
+  private currentBeat = 0;
+  private playState: PlayState = 'stopped';
+  private fingering: Fingering;
+  private show: ShowFlags;
   private player: Player;
   private toolbar!: HTMLElement;
+  private playbackCard!: HTMLElement;
   private hover: HoverState | null = null;
   private layout!: ReturnType<typeof computeLayout>;
 
@@ -39,9 +45,18 @@ export class App {
     this.root = root;
     this.piece = createPiece();
     this.tool = defaultTool();
+    this.fingering = loadFingering();
+    this.show = loadShow();
     this.player = new Player({
       onNote: (i) => { this.playingIndex = i; this.render(); },
-      onEnd: () => { this.playingIndex = -1; this.render(); },
+      onTick: (beat) => { this.currentBeat = beat; (this.playbackCard as any)._setProgress?.(beat); },
+      onStateChange: (s) => {
+        this.playState = s;
+        if (s === 'stopped') { this.playingIndex = -1; this.currentBeat = 0; }
+        (this.playbackCard as any)._refresh?.();
+        this.render();
+      },
+      onEnd: () => { this.playingIndex = -1; this.currentBeat = 0; this.render(); },
     });
     this.buildDOM();
     void ensureFontLoaded().then(() => this.render());
@@ -77,35 +92,26 @@ export class App {
 
     this.root.appendChild(stageWrap);
 
-    // 底栏
-    const bottom = document.createElement('div');
-    bottom.className = 'bottom-bar';
-
-    const playBtn = mkBtn('▶ 播放', 'primary', () => this.togglePlay());
-    const stopBtn = mkBtn('⏹', 'ghost', () => { this.player.stop(); this.playingIndex = -1; this.render(); }, 'icon');
-
-    const bpmWrap = document.createElement('label');
-    bpmWrap.className = 'bpm';
-    const bpmLabel = document.createElement('span');
-    bpmLabel.textContent = '速度';
-    const bpmInput = document.createElement('input');
-    bpmInput.type = 'range';
-    bpmInput.min = '40'; bpmInput.max = '200'; bpmInput.value = String(this.bpm);
-    const bpmVal = document.createElement('span');
-    bpmVal.className = 'bpm-val'; bpmVal.textContent = `${this.bpm} BPM`;
-    bpmInput.addEventListener('input', () => {
-      this.bpm = parseInt(bpmInput.value);
-      this.player.setBpm(this.bpm);
-      bpmVal.textContent = `${this.bpm} BPM`;
+    // 放音功能区卡片（替换原播放底栏）
+    this.playbackCard = buildPlaybackCard(() => this.playbackView(), {
+      onTogglePlay: () => this.togglePlay(),
+      onStop: () => { this.player.stop(); this.playingIndex = -1; this.currentBeat = 0; this.render(); },
+      onRestart: () => this.restart(),
+      onSeek: (beat) => this.seek(beat),
+      onBpm: (b) => this.changeBpm(b),
+      onFingering: (f) => { this.fingering = f; saveFingering(f); this.refreshCard(); },
+      onShow: (key, on) => { this.show = { ...this.show, [key]: on }; saveShow(this.show); this.refreshCard(); },
     });
-    bpmWrap.append(bpmLabel, bpmInput, bpmVal);
+    this.root.appendChild(this.playbackCard);
 
+    // 编辑操作栏（示例/清空/导出）—— 次要操作，放卡片下一行
+    const editBar = document.createElement('div');
+    editBar.className = 'edit-bar';
     const exampleBtn = mkBtn('示例：小星星', 'ghost', () => this.loadExample());
     const clearBtn = mkBtn('清空', 'ghost', () => this.clear());
     const exportBtn = mkBtn('⬇ 导出 PNG', 'accent', () => this.doExport());
-
-    bottom.append(playBtn, stopBtn, bpmWrap, spacer(), exampleBtn, clearBtn, exportBtn);
-    this.root.appendChild(bottom);
+    editBar.append(spacer(), exampleBtn, clearBtn, exportBtn);
+    this.root.appendChild(editBar);
 
     this.bindCanvas();
     this.bindKeys();
@@ -401,12 +407,73 @@ export class App {
   }
 
   private togglePlay(): void {
-    if (this.player.isPlaying()) {
-      this.player.stop(); this.playingIndex = -1; this.render();
+    if (this.piece.notes.length === 0) return;       // 空乐谱不播
+    const s = this.playState;
+    if (s === 'playing') {
+      this.player.pause();
+    } else if (s === 'paused') {
+      this.player.resume();
     } else {
       this.player.setBpm(this.bpm);
       this.player.play(this.piece);
     }
+  }
+
+  /** ⏮ 回到起点：播放中→从头播；暂停/停止→归零并停在停止态 */
+  private restart(): void {
+    this.player.stop();
+    this.playingIndex = -1;
+    this.currentBeat = 0;
+    this.playState = 'stopped';
+    this.refreshCard();
+    this.render();
+  }
+
+  /** seek：播放中→从该 beat 继续；暂停/停止→定位但保持原态（按播放才从该处响） */
+  private seek(beat: number): void {
+    this.currentBeat = beat;
+    if (this.playState === 'playing') {
+      this.player.setBpm(this.bpm);
+      this.player.seek(beat, true);
+    } else if (this.playState === 'paused') {
+      this.player.seek(beat, false);
+      // 暂停态：只更新进度显示，不发声
+      (this.playbackCard as any)._setProgress?.(beat);
+    } else {
+      // 停止态：定位到 beat，按播放时从这里开始（记录到 currentBeat，play() 会从头）
+      // 停止态不支持中途起播 —— 直接从头播更直观
+      (this.playbackCard as any)._setProgress?.(beat);
+    }
+  }
+
+  /** BPM 变化：更新值，播放中无缝变速（重调度） */
+  private changeBpm(bpm: number): void {
+    this.bpm = bpm;
+    this.player.setBpm(bpm);
+    if (this.playState === 'playing') {
+      const beat = this.player.getCurrentBeat();
+      this.player.seek(beat, true);
+    }
+    this.refreshCard();
+  }
+
+  /** 构造给卡片的视图快照 */
+  private playbackView(): PlaybackView {
+    const totalBeats = this.piece.notes.reduce((s, n) => s + durationBeats(n), 0);
+    return {
+      piece: this.piece,
+      playState: this.playState,
+      bpm: this.bpm,
+      currentBeat: this.playState === 'stopped' ? 0 : this.currentBeat,
+      totalBeats,
+      playingIndex: this.playingIndex,
+      fingering: this.fingering,
+      show: this.show,
+    };
+  }
+
+  private refreshCard(): void {
+    (this.playbackCard as any)._refresh?.();
   }
 
   private clear(): void {
@@ -458,7 +525,11 @@ export class App {
     const width = Math.min(1200, Math.max(640, this.svgHost.clientWidth || 940));
     this.layout = computeLayout(this.piece, width, this.tool.duration);
     const svg = buildSVG(this.piece, this.layout, this.playingIndex, { hover: this.hover });
-    this.svgHost.innerHTML = svg;
+    // 播放/暂停态：注入播放头竖线（贯穿五线谱+简谱），停止态不显示
+    const withHead = this.playState !== 'stopped'
+      ? this.injectPlayhead(svg)
+      : svg;
+    this.svgHost.innerHTML = withHead;
     const svgEl = this.svgHost.querySelector('svg');
     if (svgEl) svgEl.setAttribute('width', '100%');
     // 状态
@@ -467,6 +538,30 @@ export class App {
     this.statusEl.textContent = `${this.piece.notes.length} 个音符 · 已用 ${pct}% · 还能再写约 ${rem.toFixed(1)} 拍`;
     // 工具栏容量联动：disable 放不下的时值/附点按钮
     (this.toolbar as any)._refreshCapacity?.(remainingBeatsInCurrentBar(this.piece), rem);
+    // 卡片随 render 刷新（音域/高亮/状态可能变）
+    this.refreshCard();
+  }
+
+  /** 在五线谱 SVG 上叠加播放头：半透明紫色矩形条（20% 紫），宽度覆盖当前音符的 slot 宽度。 */
+  private injectPlayhead(svg: string): string {
+    const lay = this.layout;
+    const notes = this.piece.notes;
+    if (notes.length === 0 || lay.noteX.length === 0) return svg;
+    const starts = noteStartBeats(this.piece);
+    // 找 currentBeat 落在哪个音区间，取该音的中心 x + slot 宽度
+    let idx = 0;
+    for (let i = 0; i < notes.length; i++) {
+      const startBeat = starts[i];
+      const endBeat = startBeat + durationBeats(notes[i]);
+      if (this.currentBeat >= startBeat && this.currentBeat <= endBeat + 1e-6) { idx = i; break; }
+      if (this.currentBeat > endBeat) idx = Math.min(i, notes.length - 1);
+    }
+    const x0 = lay.noteX[idx];
+    const w = lay.noteSlotW[idx] || 24;
+    const y1 = lay.staffTop - 8;
+    const y2 = lay.jianpuBottom + 8;
+    const rect = `<rect class="pb-playhead" x="${x0 - w / 2}" y="${y1}" width="${w}" height="${y2 - y1}" rx="3"/>`;
+    return svg.replace('</svg>', `${rect}</svg>`);
   }
 }
 

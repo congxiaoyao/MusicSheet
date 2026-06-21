@@ -287,6 +287,14 @@ html, body {
 }
 .spacer { flex: 1; }
 
+/* 编辑操作栏（示例/清空/导出）—— 放音卡片下方一行，次要操作低调右对齐 */
+.edit-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+}
+
 .btn {
   font: inherit;
   font-size: 13.5px;
@@ -350,4 +358,390 @@ html, body {
   .toolbar { gap: 10px; padding: 12px; }
   .tb-group + .tb-group { padding-left: 0; }
   .app-header h1 { font-size: 20px; }
+}
+
+/* ════════════════════════════════════════════════════════════
+   放音功能区卡片（.playback-card）—— 播放控制 + seek + 键位
+   ════════════════════════════════════════════════════════════ */
+
+/* 放音区专用强调色：回归紫色（与符头色同源 #4f46e5），但用高透明度稀释，尽量淡 */
+:root {
+  --pb-accent-rgb: 79, 70, 229;                          /* #4f46e5 的 rgb 分量 */
+  --pb-accent: rgba(var(--pb-accent-rgb), 0.5);          /* 主淡紫：填充/进度等大面积 */
+  --pb-accent-hi: rgba(var(--pb-accent-rgb), 0.72);      /* 略浓：键面高亮/主按钮（需承白字）*/
+  --pb-accent-2: rgba(var(--pb-accent-rgb), 0.85);       /* hover / 黑键高亮（黑底需更浓）*/
+  --pb-accent-soft: rgba(var(--pb-accent-rgb), 0.1);     /* 浅紫底 */
+  --pb-accent-ring: rgba(var(--pb-accent-rgb), 0.22);
+  --pb-accent-ink: rgb(var(--pb-accent-rgb));            /* 实色：文字/描边/竖线 */
+  /* seek 行专用柔和黑：带蓝灰调，比纯黑柔和，比 --ink-2 更深 */
+  --pb-ink: #2a2f3a;
+  --pb-ink-soft: #6b7280;                                /* 未播放态：比 --muted 略深的灰 */
+}
+
+/* 演示页容器 */
+.pb-demo {
+  max-width: 1260px;
+  margin: 0 auto;
+  padding: 28px 24px 48px;
+}
+.pb-demo-header { margin-bottom: 18px; }
+.pb-demo-header h1 {
+  font-size: 22px;
+  font-weight: 650;
+  margin: 0 0 6px;
+  letter-spacing: -0.02em;
+}
+.pb-demo-header h1 em { font-style: normal; color: var(--accent); font-weight: 600; }
+.pb-demo-header .hint {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* 演示页顶部：五线谱舞台 */
+.pb-demo-stage {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 16px;
+  margin-bottom: 16px;
+  box-shadow: var(--shadow-md);
+}
+.pb-demo-stage .svg-host { background: #fcfcfd; }
+.pb-playhead { fill: rgba(79, 70, 229, 0.2); stroke: none; }
+
+/* 卡片本体（无标题，顶部直接是 seek 行） */
+.playback-card {
+  position: relative;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-md);
+  padding: 20px 20px 22px;
+  margin-top: 18px;
+}
+
+/* 设置入口齿轮（卡片右上角） */
+.pb-settings-btn {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line);
+  background: #fff;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  color: var(--muted);
+  transition: all 0.14s ease;
+  z-index: 6;
+}
+.pb-settings-btn:hover { color: var(--ink); border-color: #cbd5e1; background: #f8fafc; }
+.pb-settings-btn.active { color: var(--pb-accent-ink); border-color: var(--pb-accent); background: var(--pb-accent-soft); }
+
+/* 二级设置面板（浮层） */
+.pb-settings {
+  position: absolute;
+  top: 46px;
+  right: 14px;
+  z-index: 50;
+  width: 280px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 28px rgba(16, 24, 40, 0.14), 0 2px 6px rgba(16, 24, 40, 0.06);
+  padding: 14px 16px;
+  display: none;
+  animation: dropIn 0.14s ease;
+}
+.pb-settings.open { display: block; }
+.pb-settings h4 {
+  margin: 0 0 10px;
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.pb-set-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line-2);
+}
+.pb-set-row:last-child { border-bottom: none; }
+.pb-set-row > .pb-set-label { font-size: 13px; color: var(--ink-2); font-weight: 500; }
+/* 设置面板里的多选 chip 行 */
+.pb-set-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+
+/* ── 播放行：控制按钮 + 进度条 整合在一条 ── */
+.pb-play-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding-right: 40px;   /* 给右上角齿轮按钮留出空间，避免盖住小节文案 */
+}
+.pb-transport {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+}
+.pb-tbtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  color: var(--pb-ink-soft);
+  border-radius: 50%;
+  transition: background 0.14s cubic-bezier(.4,0,.2,1),
+              color 0.14s cubic-bezier(.4,0,.2,1),
+              transform 0.08s ease;
+}
+.pb-tbtn:hover { background: rgba(42, 47, 58, 0.08); color: var(--pb-ink); }
+.pb-tbtn:active { transform: scale(0.94); }
+.pb-tbtn.sm { width: 34px; height: 34px; font-size: 14px; }
+.pb-tbtn.main {
+  width: 40px; height: 40px;
+  background: var(--pb-ink);
+  color: #fff;
+  font-size: 16px;
+  box-shadow: 0 1px 3px rgba(42, 47, 58, 0.3), 0 3px 10px rgba(42, 47, 58, 0.18);
+}
+.pb-tbtn.main:hover { background: #1f242e; }
+
+/* 进度条区（含时间/刻度/小节号） */
+.pb-seek { flex: 1; min-width: 0; }
+.pb-seek-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.pb-time {
+  font-size: 12px;
+  color: var(--pb-ink-soft);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  min-width: 38px;
+  text-align: center;
+}
+.pb-time.now { color: var(--pb-ink); }
+
+.pb-track-wrap {
+  position: relative;
+  flex: 1;
+  height: 28px;
+  display: flex;
+  align-items: center;
+}
+.pb-track {
+  position: relative;
+  width: 100%;
+  height: 6px;
+  background: var(--line);
+  border-radius: 3px;
+  cursor: pointer;
+}
+.pb-fill {
+  position: absolute;
+  top: 0; left: 0;
+  height: 100%;
+  background: var(--pb-ink);
+  border-radius: 3px;
+  transition: width 0.12s linear;
+}
+.pb-thumb {
+  position: absolute;
+  top: 50%;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--pb-ink);
+  border: 2px solid var(--pb-ink);
+  box-shadow: 0 1px 4px rgba(42, 47, 58, 0.35);
+  transform: translate(-50%, -50%);
+  transition: left 0.12s linear;
+  cursor: grab;
+}
+.pb-tick {
+  position: absolute;
+  top: 50%;
+  width: 1px;
+  height: 10px;
+  background: var(--pb-ink-soft);
+  opacity: 0.5;
+  transform: translate(-50%, 4px);
+  pointer-events: none;
+}
+.pb-tick-label {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, 12px);
+  font-size: 10px;
+  color: var(--pb-ink-soft);
+  font-weight: 600;
+  pointer-events: none;
+  white-space: nowrap;
+}
+.pb-note-dot {
+  position: absolute;
+  top: 50%;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--pb-ink-soft);
+  opacity: 0.55;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+.pb-note-dot.played { background: #fff; opacity: 1; box-shadow: 0 0 0 1px rgba(42, 47, 58, 0.2); }
+.pb-bar-label {
+  font-size: 11px;
+  color: var(--pb-ink-soft);
+  font-weight: 600;
+  min-width: 52px;
+  text-align: right;
+}
+
+/* ── 键位区 ── */
+.pb-keys {
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line-2);
+}
+
+/* 钢琴键 */
+.pb-keyboard {
+  position: relative;
+  display: flex;
+  height: 164px;
+  background: var(--line-2);
+  border-radius: var(--radius-sm);
+  padding: 6px;
+  box-shadow: inset 0 1px 3px rgba(16, 24, 40, 0.06);
+  overflow: hidden;
+}
+/* 中央 C 标记线：键盘正中的参考线 */
+.pb-center-mark {
+  position: absolute;
+  top: 0; bottom: 0;
+  left: 50%;
+  width: 0;
+  border-left: 1px dashed rgba(var(--pb-accent-rgb), 0.35);
+  z-index: 0;
+  pointer-events: none;
+}
+.pb-key {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  border-radius: 0 0 5px 5px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 6px 2px 8px;
+  user-select: none;
+  cursor: pointer;
+  transition: background 0.14s cubic-bezier(.4,0,.2,1),
+              color 0.14s cubic-bezier(.4,0,.2,1),
+              box-shadow 0.14s cubic-bezier(.4,0,.2,1),
+              transform 0.08s ease;
+}
+.pb-key.white {
+  background: #ffffff;
+  border: 1px solid var(--line);
+  box-shadow: inset 0 -3px 0 rgba(16, 24, 40, 0.05);
+  z-index: 1;
+  margin: 0 1px;
+}
+.pb-key.white:hover { background: #f8fafc; }
+.pb-key.black {
+  position: absolute;
+  top: 6px;
+  height: 64%;
+  background: #1f2430;
+  color: #c7ccd6;
+  border: none;
+  border-radius: 0 0 4px 4px;
+  box-shadow: inset 0 -3px 0 rgba(0, 0, 0, 0.4), 0 2px 4px rgba(0, 0, 0, 0.25);
+  z-index: 3;
+  transform: translateX(-50%);
+  padding: 4px 2px 6px;
+  flex: none;
+}
+.pb-key.black:hover { background: #2c333f; }
+.pb-key.active {
+  background: linear-gradient(
+    to bottom,
+    rgba(225, 29, 72, 0.5) 0%,
+    rgba(225, 29, 72, 0.42) 50%,
+    rgba(225, 29, 72, 0.3) 100%
+  );
+  /* 高亮键的文字在底部（红区），用暗红字保证可读 */
+  box-shadow: 0 0 0 2px var(--pb-accent-ring), inset 0 -3px 0 rgba(0, 0, 0, 0.12);
+  transform: translateY(1px);
+}
+.pb-key.black.active {
+  background: linear-gradient(
+    to bottom,
+    rgba(225, 29, 72, 0.58) 0%,
+    rgba(225, 29, 72, 0.5) 50%,
+    rgba(225, 29, 72, 0.42) 100%
+  );
+  box-shadow: 0 0 0 2px var(--pb-accent-ring), inset 0 -3px 0 rgba(0, 0, 0, 0.3);
+}
+/* 高亮键底部标注：红区用暗红字（白键）/ 白字（黑键） */
+.pb-key.white.active .pb-key-label,
+.pb-key.white.active .pb-key-solfege { color: #9f1239; opacity: 1; }
+.pb-key.white.active .pb-key-octave { color: #9f1239; }
+.pb-key.black.active .pb-key-label,
+.pb-key.black.active .pb-key-solfege { color: #fff; opacity: 1; }
+
+/* 键面标注 */
+.pb-key-label {
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+.pb-key-solfege {
+  font-size: 10px;
+  font-weight: 500;
+  margin-top: 5px;
+  opacity: 0.85;
+  line-height: 1;
+  letter-spacing: -0.01em;
+}
+.pb-key-octave {
+  position: absolute;
+  top: 6px;
+  font-size: 9px;
+  font-weight: 600;
+  opacity: 0.5;
+}
+.pb-key.white .pb-key-octave { color: var(--muted); }
+/* 高亮键文字色由 .pb-key.{white|black}.active 分别处理（顶部紫灯渐变，底部需对比） */
+/* 中央 C：描边强调 */
+.pb-key.center-c {
+  box-shadow: inset 0 -3px 0 rgba(16, 24, 40, 0.05), inset 0 0 0 2px var(--pb-accent-soft);
+}
+
+@media (max-width: 720px) {
+  .pb-demo { padding: 18px 14px 28px; }
+  .pb-play-row { gap: 8px; }
+  .pb-tbtn.sm { width: 30px; height: 30px; }
+  .pb-tbtn.main { width: 36px; height: 36px; }
+  .pb-keyboard { height: 124px; }
+  .pb-key-label { font-size: 10px; }
+  .pb-key-solfege { font-size: 9px; }
+  .pb-settings { width: calc(100% - 28px); right: 14px; }
 }
