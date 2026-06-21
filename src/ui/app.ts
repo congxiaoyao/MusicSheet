@@ -11,6 +11,7 @@ import { clickYToMidi } from '../render/staff';
 import { buildToolbar, defaultTool, ToolState, TUPLET_CONFIG, TupletMode } from './toolbar';
 import { Player, PlayState } from '../audio/player';
 import { buildPlaybackCard, loadFingering, loadShow, saveFingering, saveShow, Fingering, ShowFlags, PlaybackView } from './playback-card';
+import { serialize, deserialize, sheetFileName, SHEET_EXTENSION } from '../core/serialize';
 import { twinkleExample } from './examples';
 
 interface HoverState { midi: number; x: number; }
@@ -104,18 +105,164 @@ export class App {
     });
     this.root.appendChild(this.playbackCard);
 
-    // 编辑操作栏（示例/清空/导出）—— 次要操作，放卡片下一行
+    // 编辑操作栏（示例/清空 + 导出/导入下拉）—— 次要操作，放卡片下一行
     const editBar = document.createElement('div');
     editBar.className = 'edit-bar';
     const exampleBtn = mkBtn('示例：小星星', 'ghost', () => this.loadExample());
     const clearBtn = mkBtn('清空', 'ghost', () => this.clear());
-    const exportBtn = mkBtn('⬇ 导出 PNG', 'accent', () => this.doExport());
-    editBar.append(spacer(), exampleBtn, clearBtn, exportBtn);
+    editBar.append(spacer(), exampleBtn, clearBtn, this.buildExportImportMenu());
     this.root.appendChild(editBar);
 
     this.bindCanvas();
     this.bindKeys();
+    this.bindDragDrop();
     this.render();
+  }
+
+  /** 构建「导出/导入」下拉按钮组：导出 PNG / 导出乐谱 / 导入乐谱 */
+  private buildExportImportMenu(): HTMLElement {
+    const wrap = document.createElement('div');
+    wrap.className = 'dropdown';
+
+    const trigger = document.createElement('button');
+    trigger.className = 'btn btn-accent export-trigger';
+    trigger.type = 'button';
+    trigger.innerHTML = '⬇ 导出/导入 <span class="caret"></span>';
+
+    const menu = document.createElement('div');
+    menu.className = 'dropdown-menu anchored';
+
+    const pngItem = document.createElement('button');
+    pngItem.className = 'dropdown-item';
+    pngItem.type = 'button';
+    pngItem.textContent = '导出 PNG（图片）';
+    pngItem.addEventListener('click', (e) => { e.stopPropagation(); menu.classList.remove('open'); trigger.classList.remove('is-open'); void this.doExport(); });
+
+    const sheetItem = document.createElement('button');
+    sheetItem.className = 'dropdown-item';
+    sheetItem.type = 'button';
+    sheetItem.textContent = '导出乐谱（.msheet）';
+    sheetItem.addEventListener('click', (e) => { e.stopPropagation(); menu.classList.remove('open'); trigger.classList.remove('is-open'); this.doExportSheet(); });
+
+    const importItem = document.createElement('button');
+    importItem.className = 'dropdown-item';
+    importItem.type = 'button';
+    importItem.textContent = '导入乐谱…（也可拖拽文件）';
+    importItem.addEventListener('click', (e) => { e.stopPropagation(); menu.classList.remove('open'); trigger.classList.remove('is-open'); this.openImportPicker(); });
+
+    menu.append(pngItem, sheetItem, importItem);
+    // 菜单挂 body 下，fixed 定位脱离工具栏流避免被裁切
+    document.body.appendChild(menu);
+
+    trigger.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const open = menu.classList.toggle('open');
+      trigger.classList.toggle('is-open', open);
+      if (open) {
+        const r = trigger.getBoundingClientRect();
+        // 右对齐：菜单右边贴按钮右边
+        menu.style.left = `${r.right - 200}px`;
+        menu.style.top = `${r.bottom + 6}px`;
+        menu.style.minWidth = '200px';
+      }
+    });
+    // 点外部关闭
+    document.addEventListener('click', () => { menu.classList.remove('open'); trigger.classList.remove('is-open'); });
+
+    wrap.append(trigger, menu);
+    return wrap;
+  }
+
+  /** 导出乐谱为 .msheet 文件 */
+  private doExportSheet(): void {
+    if (this.piece.notes.length === 0) { this.flash('乐谱为空，无内容可导出'); return; }
+    try {
+      const text = serialize(this.piece);
+      const blob = new Blob([text], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = sheetFileName();
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      this.flash(`已导出 ${this.piece.notes.length} 个音符`);
+    } catch (err) {
+      this.flash('导出失败：' + (err as Error).message);
+    }
+  }
+
+  /** 打开文件选择器导入乐谱 */
+  private openImportPicker(): void {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = SHEET_EXTENSION + ',application/json';
+    input.addEventListener('change', () => {
+      const f = input.files?.[0];
+      if (f) void this.doImportSheet(f);
+    });
+    input.click();
+  }
+
+  /** 读取文件并导入：校验 + 覆盖确认 + 替换 piece */
+  private async doImportSheet(file: File): Promise<void> {
+    if (this.piece.notes.length > 0) {
+      if (!confirm('当前乐谱已有内容，导入将覆盖。确定继续吗？')) return;
+    }
+    try {
+      const text = await file.text();
+      const piece = deserialize(text);
+      this.applyImportedPiece(piece);
+      this.flash(`已导入 ${piece.notes.length} 个音符`);
+    } catch (err) {
+      this.flash('导入失败：' + (err as Error).message);
+    }
+  }
+
+  /** 应用导入的 piece：同步 tool 状态 + 重建工具栏 + 重置播放 + render */
+  private applyImportedPiece(piece: Piece): void {
+    this.piece = piece;
+    // 同步工具栏选项到导入的乐谱
+    this.tool.clef = piece.clef;
+    this.tool.key = piece.key.name;
+    this.tool.time = { ...piece.time };
+    this.tool.measureCount = piece.measureCount;
+    // 重置播放/输入状态
+    this.player.stop();
+    this.playingIndex = -1;
+    this.currentBeat = 0;
+    this.playState = 'stopped';
+    this.hover = null;
+    this.currentChordId = null;
+    this.tupletProgress = null;
+    this.rebuildToolbar();
+    this.render();
+  }
+
+  /** 拖拽导入：整个 app 容器接收文件拖放 */
+  private bindDragDrop(): void {
+    let dragCounter = 0;
+    this.root.addEventListener('dragenter', (e) => {
+      if (!e.dataTransfer?.types.includes('Files')) return;
+      e.preventDefault();
+      dragCounter++;
+      this.root.classList.add('drag-over');
+    });
+    this.root.addEventListener('dragover', (e) => {
+      if (e.dataTransfer?.types.includes('Files')) e.preventDefault();
+    });
+    this.root.addEventListener('dragleave', () => {
+      dragCounter--;
+      if (dragCounter <= 0) { dragCounter = 0; this.root.classList.remove('drag-over'); }
+    });
+    this.root.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dragCounter = 0;
+      this.root.classList.remove('drag-over');
+      const file = e.dataTransfer?.files?.[0];
+      if (file) void this.doImportSheet(file);
+    });
   }
 
   private isMouseDown = false;
