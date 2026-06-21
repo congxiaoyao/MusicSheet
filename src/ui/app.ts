@@ -183,10 +183,18 @@ export class App {
       trigger.classList.toggle('is-open', open);
       if (open) {
         const r = trigger.getBoundingClientRect();
-        // 右对齐：菜单右边贴按钮右边
-        menu.style.left = `${r.right - 200}px`;
+        // 边界感知定位:默认右对齐(菜单右边贴按钮右边),若左侧空间不足则左对齐
+        const menuW = 200;
+        const margin = 8;
+        let left: number;
+        if (r.right - menuW >= margin) {
+          left = r.right - menuW;            // 左侧够:右对齐
+        } else {
+          left = margin;                      // 左侧不够:贴左边
+        }
+        menu.style.left = `${left}px`;
         menu.style.top = `${r.bottom + 6}px`;
-        menu.style.minWidth = '200px';
+        menu.style.minWidth = `${menuW}px`;
       }
     });
     // 点外部关闭
