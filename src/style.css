@@ -745,3 +745,48 @@ html, body {
   .pb-key-solfege { font-size: 9px; }
   .pb-settings { width: calc(100% - 28px); right: 14px; }
 }
+
+/* ════════════════════════════════════════════════════════════
+   导出/导入 UI
+   ════════════════════════════════════════════════════════════ */
+
+/* 导出/导入下拉触发按钮 */
+.export-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.export-trigger .caret {
+  display: inline-block;
+  width: 0; height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid currentColor;
+  opacity: 0.7;
+  transition: transform 0.18s ease;
+}
+.export-trigger.is-open .caret { transform: rotate(180deg); }
+/* 菜单用 fixed 定位（由 JS 算坐标），脱离工具栏流避免被裁切 */
+.dropdown-menu.anchored { position: fixed; }
+
+/* 拖拽导入高亮态 */
+.app.drag-over {
+  outline: 2px dashed var(--pb-accent);
+  outline-offset: -8px;
+  position: relative;
+}
+.app.drag-over::after {
+  content: '松开导入乐谱（.msheet）';
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(79, 70, 229, 0.06);
+  color: var(--pb-accent-ink);
+  font-size: 18px;
+  font-weight: 600;
+  pointer-events: none;
+  z-index: 100;
+  border-radius: var(--radius);
+}
