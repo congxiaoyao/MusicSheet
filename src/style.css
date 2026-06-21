@@ -650,6 +650,7 @@ html, body {
   padding: 6px;
   box-shadow: inset 0 1px 3px rgba(16, 24, 40, 0.06);
   overflow: hidden;
+  box-sizing: border-box;
 }
 /* 中央 C 标记线：键盘正中的参考线 */
 .pb-center-mark {
@@ -665,6 +666,8 @@ html, body {
   position: relative;
   flex: 1 1 0;
   min-width: 0;
+  /* border-box:让 border 计入 flex 宽度,保证白键严格等宽(黑键按等分理论定位才准确) */
+  box-sizing: border-box;
   border-radius: 0 0 5px 5px;
   display: flex;
   flex-direction: column;
@@ -683,7 +686,7 @@ html, body {
   border: 1px solid var(--line);
   box-shadow: inset 0 -3px 0 rgba(16, 24, 40, 0.05);
   z-index: 1;
-  margin: 0 1px;
+  /* 无 margin:border-box + flex 等分,白键严格等宽,黑键理论定位才准 */
 }
 .pb-key.white:hover { background: #f8fafc; }
 .pb-key.black {
