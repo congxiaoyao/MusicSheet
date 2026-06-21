@@ -701,7 +701,7 @@ function renderTuplets(piece: Piece, layout: Layout, ctxByIdx: Map<number, BeamC
  *  - 八分及以下时值,在符干端点画 flag(整组和弦共用一根 flag)
  *  返回 { svg, handled }:handled 为「符干已由此处处理的音符索引集」(= 组内所有非全音符音,无论是否在连梁里,
  *  连梁组的首/尾音代表 step 由 renderBeams 负责,这里不重复)。 */
-function renderChordStems(piece: Piece, layout: Layout, beamIdx: Set<number>): { svg: string; handled: Set<number> } {
+function renderChordStems(piece: Piece, layout: Layout, beamIdx: Set<number>, playingChordId: string | undefined): { svg: string; handled: Set<number> } {
   const ss = layout.staffSpace;
   const fs = layout.fontSize;
   const groups = chordGroups(piece);
@@ -727,6 +727,8 @@ function renderChordStems(piece: Piece, layout: Layout, beamIdx: Set<number>): {
     // 任一成员在连梁里 → 整组符干由 renderBeams 按代表 step 处理,跳过
     if (idxs.some(i => beamIdx.has(i))) continue;
 
+    // 该组和弦正在播放 → 符干/符尾用高亮色,否则黑色
+    const fill = (playingChordId && piece.notes[idxs[0]].chordId === playingChordId) ? '#4f46e5' : '#1f2430';
     const avgStep = steps.reduce((a, b) => a + b, 0) / steps.length;
     const stemUp = avgStep <= 6;
     const x = layout.noteX[idxs[0]];
@@ -739,7 +741,7 @@ function renderChordStems(piece: Piece, layout: Layout, beamIdx: Set<number>): {
     const minY = stepToY(Math.max(...steps), layout);   // 最高音 y 最小(最靠上)
     const stemTop = stemUp ? minY - stemLen : minY;
     const stemBot = stemUp ? maxY : maxY + stemLen;
-    svg += rect(stemX, stemTop, stemW, stemBot - stemTop, { fill: '#1f2430' });
+    svg += rect(stemX, stemTop, stemW, stemBot - stemTop, { fill });
 
     // flag:整组和弦共用一根(取首音时值,组内一致)
     const dur = piece.notes[idxs[0]].duration;
@@ -750,7 +752,7 @@ function renderChordStems(piece: Piece, layout: Layout, beamIdx: Set<number>): {
         ? (stemUp ? G.flag16thUp : G.flag16thDown)
         : (stemUp ? G.flag32ndUp : G.flag32ndDown);
       const flagY = stemUp ? stemTop : stemBot;
-      svg += text(flagGlyph, stemX + stemW / 2, flagY, fs, { fill: '#1f2430', anchor: 'start' });
+      svg += text(flagGlyph, stemX + stemW / 2, flagY, fs, { fill, anchor: 'start' });
     }
     // 标记组内所有音为「符干已处理」:首音(在主循环里 chordStemHandled=true),
     // 尾音在主循环里本就 isChordTail=true。这里把首音加入 handled(主循环查它)。
@@ -775,12 +777,12 @@ export function renderStaffSVG(input: RenderInput): string {
   // 与梁重叠，视觉上符干接入梁。
   const { svg: beamSvg, ctxByIdx } = renderBeams(computeBeams(piece), piece, layout);
   s += beamSvg;
+  // 播放高亮:playingIndex 是当前时间位首音。若它在和弦组里,整组声部(符头+符干+符尾)都高亮。
+  const playingChordId = (playingIndex >= 0 && playingIndex < piece.notes.length) ? piece.notes[playingIndex].chordId : undefined;
   // 和弦符干:连梁之后画(不和连梁和弦冲突),音符符头之前画(符头会盖住符干端)
   const beamIdx = new Set<number>(ctxByIdx.keys());
-  const { svg: chordStemSvg, handled: chordHandled } = renderChordStems(piece, layout, beamIdx);
+  const { svg: chordStemSvg, handled: chordHandled } = renderChordStems(piece, layout, beamIdx, playingChordId);
   s += chordStemSvg;
-  // 播放高亮:playingIndex 是当前时间位首音。若它在和弦组里,整组声部都高亮(和弦多符头同亮)。
-  const playingChordId = (playingIndex >= 0 && playingIndex < piece.notes.length) ? piece.notes[playingIndex].chordId : undefined;
   for (let i = 0; i < piece.notes.length; i++) {
     const note = piece.notes[i];
     const prev = i > 0 ? piece.notes[i - 1] : null;
