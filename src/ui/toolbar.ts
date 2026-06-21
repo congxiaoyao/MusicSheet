@@ -13,6 +13,14 @@ export const TUPLET_CONFIG: Record<Exclude<TupletMode, 'off'>, { actual: number;
   sextuplet: { actual: 6, normal: 4, label: '六连音' },
 };
 
+/** 反查:actual 音数 → 对应 TupletMode。删除连音时用于从残留音的 tuplet.actual 恢复模式。 */
+export function tupletModeForActual(actual: number): Exclude<TupletMode, 'off'> | null {
+  for (const k of Object.keys(TUPLET_CONFIG) as Exclude<TupletMode, 'off'>[]) {
+    if (TUPLET_CONFIG[k].actual === actual) return k;
+  }
+  return null;
+}
+
 /** 用户当前的「输入笔」状态 */
 export interface ToolState {
   duration: DurationValue;

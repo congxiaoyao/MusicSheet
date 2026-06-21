@@ -8,7 +8,7 @@ import { computeLayout } from '../render/layout';
 import { buildSVG, exportPNG } from '../render/export';
 import { ensureFontLoaded } from '../render/glyphs';
 import { clickYToMidi } from '../render/staff';
-import { buildToolbar, defaultTool, ToolState, TUPLET_CONFIG, TupletMode } from './toolbar';
+import { buildToolbar, defaultTool, ToolState, TUPLET_CONFIG, TupletMode, tupletModeForActual } from './toolbar';
 import { Player, PlayState } from '../audio/player';
 import { buildPlaybackCard, loadFingering, loadShow, saveFingering, saveShow, Fingering, ShowFlags, PlaybackView } from './playback-card';
 import { serialize, deserialize, sheetFileName, SHEET_EXTENSION } from '../core/serialize';
@@ -548,7 +548,7 @@ export class App {
         case 'f': this.toggleTupletMode('quintuplet'); break;
         case 'x': this.toggleTupletMode('sextuplet'); break;
         case '0': this.appendRest(); break;
-        case 'Backspace': popNote(this.piece); this.afterBackspace(); e.preventDefault(); break;
+        case 'Backspace': this.deleteLastNote(); e.preventDefault(); break;
         case ' ': this.togglePlay(); e.preventDefault(); break;
       }
     });
@@ -567,10 +567,49 @@ export class App {
     this.onToggleChord();
   }
 
-  /** backspace 后:若删到和弦组只剩首音,无需特殊处理(单音和弦正常画)。
-   *  但若 currentChordId 已不在末尾,清掉它避免误复用。 */
-  private afterBackspace(): void {
-    const last = this.piece.notes[this.piece.notes.length - 1];
+  /** 删除末尾音符(短信验证码式 backspace),并修正 tuplet/chord 状态。
+   *  tuplet 修复(两个场景):
+   *  - 输入中删除:回退 tupletProgress.count,让用户继续补齐该组
+   *  - 完成后删除:组变残缺,重新进入该组输入模式(恢复 tupletProgress + toolbar 高亮),
+   *    让用户补齐;若组删空则关闭模式
+   *  chord:currentChordId 不在末尾时清掉避免误复用 */
+  private deleteLastNote(): void {
+    const notes = this.piece.notes;
+    if (notes.length === 0) return;
+    // 抓删除前的末音(判断是否属于 tuplet 组)
+    const removed = notes[notes.length - 1];
+    const removedTup = removed.tuplet;
+    popNote(this.piece);
+
+    // tuplet 状态修正
+    if (removedTup) {
+      const gid = removedTup.groupId;
+      // 组内剩余音数(同 groupId 且仍带 tuplet 标记)
+      const remainInGroup = notes.filter(n => n.tuplet?.groupId === gid);
+
+      if (remainInGroup.length === 0) {
+        // 组删空:清模式 + 进度,toolbar 复位
+        this.tupletProgress = null;
+        this.tool.tupletMode = 'off';
+        (this.toolbar as any)._setTupletMode?.('off');
+      } else {
+        // 组还有残音:恢复/回退 tupletProgress,让用户继续补齐
+        const mode = tupletModeForActual(removedTup.actual);
+        if (mode) {
+          this.tool.tupletMode = mode;
+          this.tupletProgress = {
+            groupId: gid,
+            count: remainInGroup.length,   // 已输入 = 剩余音数
+            actual: removedTup.actual,
+            normal: removedTup.normal,
+          };
+          (this.toolbar as any)._setTupletMode?.(mode);
+        }
+      }
+    }
+
+    // chord 状态:currentChordId 不在末尾时清掉
+    const last = notes[notes.length - 1];
     if (this.currentChordId && (!last || last.chordId !== this.currentChordId)) {
       this.currentChordId = null;
     }
