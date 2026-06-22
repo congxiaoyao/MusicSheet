@@ -803,7 +803,7 @@ export class App {
         chordAnchorDur = notes[firstIdx].duration;
       }
     }
-    this.layout = computeLayout(this.piece, width, this.tool.duration, chordAnchor, chordAnchorDur);
+    this.layout = computeLayout(this.piece, width, this.tool.duration, chordAnchor, chordAnchorDur, this.hover?.midi);
     const svg = buildSVG(this.piece, this.layout, this.playingIndex, { hover: this.hover });
     // SVG 内不再画播放头(改由独立 DOM 覆盖层 playheadLayer 驱动)。
     // 注意:innerHTML 会清空 svgHost 所有子元素(含 playheadLayer),需重新 append 回去。
