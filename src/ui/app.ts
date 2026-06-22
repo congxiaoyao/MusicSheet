@@ -817,12 +817,11 @@ export class App {
     this.svgHost.innerHTML = svg;
     const svgEl = this.svgHost.querySelector('svg');
     if (svgEl) svgEl.setAttribute('width', '100%');
-    // ── 高度动画:svgHost transform 抵消五线谱下移,.stage overflow visible 容纳上移 ──
-    // 顶部扩展(offset+):viewBox y起点变负,staffTop 映射物理位置下移 offset。
-    // svgHost transform = -offset 上移抵消,五线谱屏位恒定。
-    // svgHost 上移后顶部溢出 .stage padding 区(白色),.stage overflow visible 让其可见(不裁)。
-    // 不用 padding/margin 撑开卡片:那些会引入额外 offset 无法抵消。transform-only 最干净。
-    this.svgHost.style.transform = `translateY(${-this.layout.viewBoxYOffset}px)`;
+    // ── 高度动画:svgHost 在卡片内自然扩展 ──
+    // svgHost height 增加(含顶部高音扩展空间),在 .stage 内从顶部锚定,自然撑高卡片。
+    // SVG viewBox 负 y 容纳高音加线。顶部不动,底部随高度增加自然下移(平滑 120ms)。
+    // 不用 transform/margin 抵消:那些会让 svgHost 溢出卡片压到 toolbar。
+    // 五线谱随顶部扩展平滑下移(给上方加线让位),但简谱区相对五线谱位置不变,卡片不溢出。
     this.svgHost.style.height = `${this.layout.height + 16}px`;
     this.svgHost.appendChild(this.playheadLayer);
     // 状态

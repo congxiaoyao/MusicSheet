@@ -238,7 +238,6 @@ html, body {
   border-radius: var(--radius);
   padding: 20px 16px 16px;
   box-shadow: var(--shadow-md);
-  overflow: visible;   /* svgHost transform 上移后顶部溢出 padding 区,需可见(容纳高音扩展) */
 }
 .svg-host {
   position: relative;   /* 播放头覆盖层 absolute 定位的参照 */
@@ -251,11 +250,10 @@ html, body {
   /* 防止双击/拖拽选中五线谱上的文字与音符 */
   user-select: none;
   -webkit-user-select: none;
-  /* 高度动画:svgHost transform 抵消五线谱下移,overflow hidden 裁掉 SVG 内超出部分。
-     transform + height transition 120ms。 */
+  /* 高度动画:svgHost 在卡片内自然扩展,height 平滑变化(120ms)。
+     顶部不动,底部随高度增加下移,卡片自然撑高。不溢出卡片、不压 toolbar。 */
   overflow: hidden;
-  transition: height 120ms cubic-bezier(.4, 0, .2, 1),
-              transform 120ms cubic-bezier(.4, 0, .2, 1);
+  transition: height 120ms cubic-bezier(.4, 0, .2, 1);
 }
 .svg-host svg { display: block; user-select: none; -webkit-user-select: none; }
 /* 播放头覆盖层:覆盖整个 svgHost(含 padding),内部 .pb-playhead 按百分比定位 */
