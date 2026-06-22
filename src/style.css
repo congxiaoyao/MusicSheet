@@ -250,6 +250,11 @@ html, body {
   /* 防止双击/拖拽选中五线谱上的文字与音符 */
   user-select: none;
   -webkit-user-select: none;
+  /* 高度动画:极端音高导致高度变化时,容器 height 平滑过渡(120ms)。
+     内容(SVG)瞬间切到新布局(transform 补偿让五线谱物理位置不动),
+     容器 height 过渡期间 overflow:hidden 裁掉溢出,视觉上顶部/底部边缘平滑移动。 */
+  overflow: hidden;
+  transition: height 120ms cubic-bezier(.4, 0, .2, 1);
 }
 .svg-host svg { display: block; user-select: none; -webkit-user-select: none; }
 /* 播放头覆盖层:覆盖整个 svgHost(含 padding),内部 .pb-playhead 按百分比定位 */
