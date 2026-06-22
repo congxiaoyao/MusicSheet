@@ -717,15 +717,16 @@ html, body {
   transform: translateY(1px);
 }
 .pb-key.black.active {
-  /* 不透明红色背景,色值=原半透明红(rgba 0.58)叠在不透明黑上的视觉等效色。
-    用不透明色而非半透明 rgba:黑键默认是不透明黑,active 用半透明红会透出底层,
-    移除 active 时半透明→不透明的透明度跳变视觉上「闪」。等效不透明色消除跳变,
-    同时保持与原半透明效果一致的视觉颜色。 */
+  /* 不透明红色背景,色值 = 原半透明红(rgba 0.58/0.5/0.42)透出底层白色 的视觉等效色。
+    关键:active 的 background 替换了黑键默认的 #1f2430(不透明黑),半透明红透出的
+    是黑键背后的白键(白),而非黑色。故等效色 = 红×alpha + 白×(1-alpha) = 浅粉红。
+    用不透明色而非半透明 rgba:消除 active↔默认 的透明度跳变(闪),
+    同时保持与原半透明效果一致的视觉颜色(浅粉红,非暗红)。 */
   background: linear-gradient(
     to bottom,
-    #9c2c54 0%,
-    #8a244a 50%,
-    #781d40 100%
+    #ee7c95 0%,
+    #f08ea4 50%,
+    #f2a0b2 100%
   );
   box-shadow: 0 0 0 2px var(--pb-accent-ring), inset 0 -3px 0 rgba(0, 0, 0, 0.3);
 }
