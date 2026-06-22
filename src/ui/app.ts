@@ -31,6 +31,9 @@ export class App {
   private svgHost!: HTMLElement;
   /** 播放头覆盖层:独立 DOM div,叠在 svgHost 上,由 currentBeat 驱动定位(onTick 时更新) */
   private playheadLayer!: HTMLElement;
+  /** 五线谱屏幕锚点:staffY 应固定的屏幕 y(首次锁定)。高度动画用 scrollY 补偿让 staffY 屏幕恒定。 */
+  private staffAnchorScreen: number | null = null;
+  private heightAnimFrame: number | null = null;
   private statusEl!: HTMLElement;
   private bpm = 100;
   private playingIndex = -1;
@@ -817,12 +820,24 @@ export class App {
     this.svgHost.innerHTML = svg;
     const svgEl = this.svgHost.querySelector('svg');
     if (svgEl) svgEl.setAttribute('width', '100%');
-    // ── 高度动画:svgHost 在卡片内自然扩展 ──
-    // svgHost height 增加(含顶部高音扩展空间),在 .stage 内从顶部锚定,自然撑高卡片。
-    // SVG viewBox 负 y 容纳高音加线。顶部不动,底部随高度增加自然下移(平滑 120ms)。
-    // 不用 transform/margin 抵消:那些会让 svgHost 溢出卡片压到 toolbar。
-    // 五线谱随顶部扩展平滑下移(给上方加线让位),但简谱区相对五线谱位置不变,卡片不溢出。
-    this.svgHost.style.height = `${this.layout.height + 16}px`;
+    // ── 高度动画:SVG 居底 + JS rAF 动画 + scrollY 补偿 ──
+    // SVG absolute bottom:0 居底,svgHost overflow hidden 裁溢出。
+    // 五线谱物理位置 = svgHost顶 + curH - svgH + 121 + off(居底几何)。
+    // JS rAF 动画:svgHost height 从旧→新(120ms),同步 scrollY = hostTopDoc + curH - svgH + 121 + off - target。
+    // staffY 屏幕 = 物理 - scrollY = 恒定(推导见 height-anim-test 验证)。
+    const endH = this.layout.height + 16;
+    if (this.staffAnchorScreen === null) {
+      this.svgHost.style.height = `${endH}px`;
+      this.staffAnchorScreen = this.measureStaffYScreen();
+    }
+    const startH = parseFloat(this.svgHost.style.height) || endH;
+    const hostTopDoc = this.svgHost.getBoundingClientRect().top + window.scrollY;
+    const off = this.layout.viewBoxYOffset;
+    if (this.heightAnimFrame) cancelAnimationFrame(this.heightAnimFrame);
+    const startT = performance.now();
+    this.heightAnimFrame = requestAnimationFrame((now: number) => {
+      this.heightTick(now, startT, startH, endH, hostTopDoc, this.layout.height, off);
+    });
     this.svgHost.appendChild(this.playheadLayer);
     // 状态
     const rem = remainingBeats(this.piece);
@@ -840,6 +855,33 @@ export class App {
    *  在 onTick(每帧)、onStateChange、onEnd、seek、render 后调用,保证播放头/高亮/进度条三者同步。
    *  - 停止态:隐藏播放头,清除所有 .playing 高亮
    *  - 播放/暂停态:显示播放头,定位到 currentBeat 对应音,高亮该音(和弦组全部声部) */
+  /** 测量五线谱 bottomLineY 当前的屏幕 y（用于高度动画锚定） */
+  private measureStaffYScreen(): number {
+    const svg = this.svgHost.querySelector('svg');
+    if (!svg) return 0;
+    const sr = svg.getBoundingClientRect();
+    const vb = (svg as SVGSVGElement).viewBox.baseVal;
+    return Math.round(sr.top + (121 - vb.y) * sr.height / vb.height);
+  }
+
+  /** 高度动画单帧:插值 svgHost height + 同步 scrollY 补偿 */
+  private heightTick(now: number, startT: number, startH: number, endH: number, hostTopDoc: number, svgH: number, off: number): void {
+    const t = Math.min(1, (now - startT) / 120);
+    const eased = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+    const curH = startH + (endH - startH) * eased;
+    this.svgHost.style.height = `${curH}px`;
+    // scrollY = hostTopDoc + curH - svgH + 121 + off - target(居底几何推导)
+    if (this.staffAnchorScreen !== null) {
+      const scy = hostTopDoc + curH - svgH + 121 + off - this.staffAnchorScreen;
+      window.scrollTo(0, Math.max(0, scy));
+    }
+    if (t < 1) {
+      this.heightAnimFrame = requestAnimationFrame((n: number) => this.heightTick(n, startT, startH, endH, hostTopDoc, svgH, off));
+    } else {
+      this.heightAnimFrame = null;
+    }
+  }
+
   private updatePlayheadAndHighlight(): void {
     const lay = this.layout;
     const notes = this.piece.notes;
