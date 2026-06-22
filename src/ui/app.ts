@@ -817,13 +817,13 @@ export class App {
     this.svgHost.innerHTML = svg;
     const svgEl = this.svgHost.querySelector('svg');
     if (svgEl) svgEl.setAttribute('width', '100%');
-    // ── 高度动画:transform 方案让五线谱物理位置恒定 ──
-    // 顶部扩展(offset+)会让五线谱下移。用 svgHost transform translateY=-offset 上移抵消:
-    //   五线谱屏位 = (原顶-offset) + 8 + 121 + offset = 常数(恒定)✓
-    //   底部 = (原顶-offset) + height = 原顶 + (height-offset) = baseHeight(恒定)✓
-    // 用 transform 而非 margin-top:不影响布局流,不挤压下方。overflow visible 让顶部溢出可见。
+    // ── 高度动画:svgHost transform 抵消五线谱下移,.stage overflow visible 容纳上移 ──
+    // 顶部扩展(offset+):viewBox y起点变负,staffTop 映射物理位置下移 offset。
+    // svgHost transform = -offset 上移抵消,五线谱屏位恒定。
+    // svgHost 上移后顶部溢出 .stage padding 区(白色),.stage overflow visible 让其可见(不裁)。
+    // 不用 padding/margin 撑开卡片:那些会引入额外 offset 无法抵消。transform-only 最干净。
     this.svgHost.style.transform = `translateY(${-this.layout.viewBoxYOffset}px)`;
-    this.svgHost.style.height = `${this.layout.height + 16}px`;   // +padding 8*2
+    this.svgHost.style.height = `${this.layout.height + 16}px`;
     this.svgHost.appendChild(this.playheadLayer);
     // 状态
     const rem = remainingBeats(this.piece);
