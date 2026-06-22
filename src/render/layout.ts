@@ -80,7 +80,7 @@ const SLOT_MIN: Record<DurationValue, number> = {
   thirtysecond: 2.6,
 };
 
-export function computeLayout(piece: Piece, containerWidth: number, currentDuration: DurationValue = 'quarter', chordAnchorBeat?: number): Layout {
+export function computeLayout(piece: Piece, containerWidth: number, currentDuration: DurationValue = 'quarter', chordAnchorBeat?: number, chordAnchorDuration?: DurationValue): Layout {
   const fontSize = FONT;
   const staffSpace = SS;
   const width = Math.max(containerWidth, 620);
@@ -139,7 +139,11 @@ export function computeLayout(piece: Piece, containerWidth: number, currentDurat
   const clampedBeat = Math.min(nextBeat, capBeats - 0.001);
   const nextBarIdx = Math.min(measureOfBeat(clampedBeat, bpb), measures - 1);
   const nextBeatInBar = clampedBeat - nextBarIdx * bpb;
-  const nextDur = nextBeat < capBeats ? currentDuration : 'quarter';
+  // nextDur:和弦输入中(anchor 生效)用和弦首音时值,否则用工具栏当前时值。
+  // 删除到和音位置时,slot 宽度应跟随和音时值(而非工具栏可能已切换的时值)。
+  const nextDur = nextBeat < capBeats
+    ? (chordAnchorBeat !== undefined && chordAnchorDuration ? chordAnchorDuration : currentDuration)
+    : 'quarter';
   const nextSlotW = isFull ? 0 : slotWidthFor(nextDur, bpb, barWidth);
   const nextSlotX = barLines[nextBarIdx] + nextBeatInBar / bpb * barWidth + nextSlotW / 2;
 

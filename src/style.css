@@ -717,13 +717,15 @@ html, body {
   transform: translateY(1px);
 }
 .pb-key.black.active {
-  /* 不透明红色背景(而非半透明 rgba):黑键默认是不透明黑,active 若用半透明红会透出底层,
-     移除 active 时半透明→不透明的切换视觉上「闪」。用不透明红消除透明度跳变。 */
+  /* 不透明红色背景,色值=原半透明红(rgba 0.58)叠在不透明黑上的视觉等效色。
+    用不透明色而非半透明 rgba:黑键默认是不透明黑,active 用半透明红会透出底层,
+    移除 active 时半透明→不透明的透明度跳变视觉上「闪」。等效不透明色消除跳变,
+    同时保持与原半透明效果一致的视觉颜色。 */
   background: linear-gradient(
     to bottom,
-    #be1d45 0%,
-    #a8183c 50%,
-    #921434 100%
+    #9c2c54 0%,
+    #8a244a 50%,
+    #781d40 100%
   );
   box-shadow: 0 0 0 2px var(--pb-accent-ring), inset 0 -3px 0 rgba(0, 0, 0, 0.3);
 }
