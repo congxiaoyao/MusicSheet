@@ -486,6 +486,43 @@ function renderBeams(groups: BeamGroup[], piece: Piece, layout: Layout): { svg: 
       const outerY = Math.max(beamY1, beamY2);
       if (outerY > beamMaxY) { const shift = outerY - beamMaxY; beamY1 -= shift; beamY2 -= shift; }
     }
+    // 次梁不穿符头约束(Gould Behind Bars):大跨度时,最内次梁(朝符头方向)可能穿过
+    // 中间或两端符头。计算最内次梁在每音 x 处的「近符头边」y(中心 ± 半厚),
+    // 若进入符头区域(符头 y ± halfHeight),整体外移 primary。
+    const innerLevels = maxCount - 1;
+    if (innerLevels > 0) {
+      const innerBeamTotalH = innerLevels * BEAM_GAP * ss;   // primary 中心到最内次梁中心
+      const beamHalfThick = BEAM_THICKNESS / 2 * ss;          // 梁半厚
+      const headHalf = advanceSS('noteheadBlack') / 2 * ss;  // 符头半高
+      const clearance = headHalf + ss * 0.5;                  // 符头 + 0.5ss 间隙
+      // 最内次梁在 x 处的中心 y = primary 在该 x 处中心 + innerBeamTotalH(朝内)
+      const primaryAt = (x: number) => {
+        const x1l = stemXs[0], x2l = stemXs[n - 1] + stemW;
+        return beamY1 + dy * (x - x1l) / (x2l - x1l);
+      };
+      let needShift = 0;
+      for (let k = 0; k < n; k++) {
+        const innerCenter = primaryAt(stemXs[k]) + (stemDir === 'up' ? innerBeamTotalH : -innerBeamTotalH);
+        // 次梁近符头边:up 时次梁在 primary 下方,近符头边=底边(center+halfThick);
+        //               down 时次梁在 primary 上方,近符头边=顶边(center-halfThick)
+        const innerEdge = stemDir === 'up' ? innerCenter + beamHalfThick : innerCenter - beamHalfThick;
+        const hy = headYs[k];
+        if (stemDir === 'up') {
+          // up:次梁底边不应低于符头顶(hy - clearance)。innerEdge > hy-clearance 即穿过
+          const limit = hy - clearance;
+          if (innerEdge > limit) needShift = Math.max(needShift, innerEdge - limit);
+        } else {
+          const limit = hy + clearance;
+          if (innerEdge < limit) needShift = Math.max(needShift, limit - innerEdge);
+        }
+      }
+      if (needShift > 0) {
+        // 外移方向:up 时 primary 往上(y 减,sgn=-1);down 时 primary 往下(y 加,sgn=+1)
+        const sgn = stemDir === 'up' ? -1 : 1;
+        beamY1 += sgn * needShift;
+        beamY2 += sgn * needShift;
+      }
+    }
     dy = beamY2 - beamY1;
 
     // primary 在某音符（组内序号 k）处的 y：沿首尾连线线性插值
@@ -692,17 +729,27 @@ function renderTuplets(piece: Piece, layout: Layout, ctxByIdx: Map<number, BeamC
       s += text(String(g.actual), mx, markY - ss * 0.4, fs, { fill: '#1f2430', anchor: 'middle' });
     } else {
       // 有连梁:只画数字,贴在 primary 梁外侧(朝上=梁上方,朝下=梁下方)。
-      // 数字 baseline 偏移 = 梁半厚(0.25ss) + 数字字高(约 0.7*fs≈1.3ss) + 间隙,
-      // 共约 1.6ss,确保不与梁重叠(原 0.4ss 太小,符干朝上时数字压在梁上)。
-      // ctxByIdx 只对时间位首音设置;tuplet 组内首音必在 ctxByIdx(它是连梁组首)。
+      // 偏移自适应梁层数:16分(2根梁)需比8分(1根)更大的偏移,否则数字压次梁。
+      // 偏移 = primary 半厚 + (层数-1)*梁间距 + 数字字高一半 + 间隙。
+      // ctxByIdx 只对时间位首音设置;tuplet 组内首音必在 ctxByIdx。
       // 末音若不在(如和弦尾音),退用首音的 ctx(梁贯穿整组,首音 stemEndY 足够代表)。
       const firstBeam = ctxByIdx.get(g.startIdx);
       const lastBeam = ctxByIdx.get(g.endIdx) ?? firstBeam;
       if (firstBeam && lastBeam) {
         const beamMidY = (firstBeam.stemEndY + lastBeam.stemEndY) / 2;
         const stemDir = firstBeam.stemDir;
+        // 梁层数:从组内时值推算(16分=2, 32分=3, 8分=1)
+        const headDur = piece.notes[g.startIdx].duration;
+        const beamLevels = headDur === 'thirtysecond' ? 3 : headDur === 'sixteenth' ? 2 : 1;
+        // 偏移 = primary 半厚(BEAM_THICKNESS/2=0.25ss) + 次梁总高((levels-1)*BEAM_GAP=0.6ss/层)
+        //        + 数字字高一半(0.7*fs/2≈0.66ss) + 间隙(0.5ss)
+        const beamHalf = BEAM_THICKNESS / 2 * ss;
+        const secondaryH = (beamLevels - 1) * BEAM_GAP * ss;
+        const numHalfH = fs * 0.42;
+        const gap = ss * 0.6;
+        const offset = beamHalf + secondaryH + numHalfH + gap;
         // 朝上:梁在上方(y小),数字在梁更上方 → 减偏移;朝下:梁在下方(y大),数字在梁更下方 → 加偏移
-        const numY = stemDir === 'up' ? beamMidY - ss * 1.6 : beamMidY + ss * 1.6;
+        const numY = stemDir === 'up' ? beamMidY - offset : beamMidY + offset;
         s += text(String(g.actual), mx, numY, fs, { fill: '#1f2430', anchor: 'middle' });
       }
     }

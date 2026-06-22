@@ -54,12 +54,13 @@ export class App {
       // onNote 不再驱动高亮(改由 onTick 统一更新,避免数据源不一致导致「落后一个音符」)。
       // 保留回调供未来用途(如 MIDI 输出),当前空实现。
       onNote: () => {},
-      // onTick:单一数据源 currentBeat → 同时更新进度条 + 编辑区播放头 + 符头高亮。
-      // 这保证三者完全同步,不再出现「播放头滞后/暂停才刷新」。
+      // onTick:单一数据源 currentBeat → 同时更新进度条 + 编辑区播放头 + 符头高亮 + 键盘高亮。
+      // 这保证四者完全同步,不再出现「播放头滞后/键盘高亮不跟随」。
       onTick: (beat) => {
         this.currentBeat = beat;
         (this.playbackCard as any)._setProgress?.(beat);
         this.updatePlayheadAndHighlight();
+        (this.playbackCard as any)._updateHighlight?.();   // 键盘高亮(只切 class,不重建)
       },
       onStateChange: (s) => {
         this.playState = s;
