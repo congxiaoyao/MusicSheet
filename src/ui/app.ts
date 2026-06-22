@@ -31,9 +31,6 @@ export class App {
   private svgHost!: HTMLElement;
   /** 播放头覆盖层:独立 DOM div,叠在 svgHost 上,由 currentBeat 驱动定位(onTick 时更新) */
   private playheadLayer!: HTMLElement;
-  /** 五线谱锚点:bottomLineY 应固定的物理 y(相对 svgHost 顶部,含 padding)。
-   *  高度动画时用 transform 补偿让五线谱物理位置恒等于此值,首次渲染时确定。 */
-  private staffAnchor: number | null = null;
   private statusEl!: HTMLElement;
   private bpm = 100;
   private playingIndex = -1;
@@ -371,7 +368,10 @@ export class App {
     if (!svg) return { x: 0, y: 0, ok: false };
     const rect = svg.getBoundingClientRect();
     const x = ((e.clientX - rect.left) / rect.width) * this.layout.width;
-    const y = ((e.clientY - rect.top) / rect.height) * this.layout.height;
+    // y 映射要考虑 viewBox 的 y 起点(-viewBoxYOffset):SVG 物理顶对应 viewBox y=-offset,
+    // 故内部 y = (距物理顶比例) * viewBox高 + viewBoxY起点。margin-top 上移不影响(rect 已反映真实位置)。
+    const vbY0 = -this.layout.viewBoxYOffset;
+    const y = ((e.clientY - rect.top) / rect.height) * this.layout.height + vbY0;
     return { x, y, ok: true };
   }
 
@@ -817,16 +817,12 @@ export class App {
     this.svgHost.innerHTML = svg;
     const svgEl = this.svgHost.querySelector('svg');
     if (svgEl) svgEl.setAttribute('width', '100%');
-    // ── 高度动画:transform 补偿让五线谱物理位置恒定 ──
-    // 五线谱 bottomLineY(内部坐标 121)无补偿时物理 y = padding(8) + 121 + viewBoxYOffset。
-    // 顶部扩展(offset+)会下移五线谱,用 transform translateY 补偿抵消,让它物理位置恒定。
-    // 内容瞬间切到新布局(transform 无 transition),容器 height 120ms 过渡,overflow:hidden 裁溢出。
-    const PAD_TOP = 8;
-    const BOTTOM_LINE_Y = 121;
-    const uncompY = PAD_TOP + BOTTOM_LINE_Y + this.layout.viewBoxYOffset;
-    if (this.staffAnchor === null) this.staffAnchor = uncompY;   // 首次锁定
-    const comp = this.staffAnchor - uncompY;
-    if (svgEl) svgEl.style.transform = `translateY(${comp}px)`;
+    // ── 高度动画:transform 方案让五线谱物理位置恒定 ──
+    // 顶部扩展(offset+)会让五线谱下移。用 svgHost transform translateY=-offset 上移抵消:
+    //   五线谱屏位 = (原顶-offset) + 8 + 121 + offset = 常数(恒定)✓
+    //   底部 = (原顶-offset) + height = 原顶 + (height-offset) = baseHeight(恒定)✓
+    // 用 transform 而非 margin-top:不影响布局流,不挤压下方。overflow visible 让顶部溢出可见。
+    this.svgHost.style.transform = `translateY(${-this.layout.viewBoxYOffset}px)`;
     this.svgHost.style.height = `${this.layout.height + 16}px`;   // +padding 8*2
     this.svgHost.appendChild(this.playheadLayer);
     // 状态
