@@ -5,7 +5,10 @@ import { Note } from '../core/types';
 import { RenderInput } from './staff';
 import { tupletGroups } from '../core/model';
 
-const NUMBER_FONT = '"Bravura", "Times New Roman", serif';
+// 简谱数字用普通衬线字体(非 Bravura)。Bravura 是 SMuFL 音乐符号字体,字符槽位是
+// 音符头/谱号等符号,普通数字(0-9)在其码位要么是别的符号要么 fallback,导致渲染异常、
+// 各数字字形不一致视觉上高低不齐。简谱数字必须用常规字体。
+const NUMBER_FONT = '"Times New Roman", "Cambria", serif';
 const DIGIT_FS = 26;
 // 临时记号相对数字中心的左偏移：随音符格子宽度变化——
 // 四分及以上音符格子宽，用 ACCIDENTAL_BASE；八分/十六分格子窄，
