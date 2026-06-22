@@ -647,9 +647,15 @@ export class App {
         (this.toolbar as any)._setChordMode?.(true);
       }
     } else {
-      // 删的是普通音(非和弦):currentChordId 不在末尾时清掉避免误复用
+      // 删的是普通音(非和弦)。若删除后新末音属于某个和弦组,恢复该组模式
+      // (让 nextSlot 回到和弦位置且宽度跟随和弦时值,符合「删回到和弦位置继续编辑」直觉)。
       const last = notes[notes.length - 1];
-      if (this.currentChordId && (!last || last.chordId !== this.currentChordId)) {
+      if (last && last.chordId) {
+        this.currentChordId = last.chordId;
+        this.tool.chordMode = true;
+        (this.toolbar as any)._setChordMode?.(true);
+      } else {
+        // 新末音非和弦:清掉 currentChordId 避免误复用
         this.currentChordId = null;
       }
     }
@@ -785,17 +791,19 @@ export class App {
   private render(): void {
     const width = Math.min(1200, Math.max(640, this.svgHost.clientWidth || 940));
     // 和弦输入中:nextSlot 锁定在当前和弦组首音起点,让用户知道「还在这个位置加声部」,
+    // 且 slot 宽度跟随和弦首音时值(删除到和音位置时不沿用工具栏可能已切换的时值)。
     // 关和弦后不传 anchor,nextSlot 才跳到 totalBeats(首音结束处)。
     let chordAnchor: number | undefined;
+    let chordAnchorDur: DurationValue | undefined;
     if (this.tool.chordMode && this.currentChordId) {
       const notes = this.piece.notes;
-      // 找当前和弦组的首音 startBeat
       const firstIdx = notes.findIndex(n => n.chordId === this.currentChordId);
       if (firstIdx >= 0) {
         chordAnchor = noteStartBeats(this.piece)[firstIdx];
+        chordAnchorDur = notes[firstIdx].duration;
       }
     }
-    this.layout = computeLayout(this.piece, width, this.tool.duration, chordAnchor);
+    this.layout = computeLayout(this.piece, width, this.tool.duration, chordAnchor, chordAnchorDur);
     const svg = buildSVG(this.piece, this.layout, this.playingIndex, { hover: this.hover });
     // SVG 内不再画播放头(改由独立 DOM 覆盖层 playheadLayer 驱动)。
     // 注意:innerHTML 会清空 svgHost 所有子元素(含 playheadLayer),需重新 append 回去。
