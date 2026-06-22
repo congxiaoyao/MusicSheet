@@ -250,12 +250,10 @@ html, body {
   /* 防止双击/拖拽选中五线谱上的文字与音符 */
   user-select: none;
   -webkit-user-select: none;
-  /* 高度动画:svgHost 在卡片内自然扩展,height 平滑变化(120ms)。
-     顶部不动,底部随高度增加下移,卡片自然撑高。不溢出卡片、不压 toolbar。 */
+  /* 高度动画:overflow hidden 裁掉 SVG 居底后顶部溢出。height 由 JS rAF 控制(不用 CSS transition)。 */
   overflow: hidden;
-  transition: height 120ms cubic-bezier(.4, 0, .2, 1);
 }
-.svg-host svg { display: block; user-select: none; -webkit-user-select: none; }
+.svg-host svg { display: block; user-select: none; -webkit-user-select: none; position: absolute; bottom: 0; left: 0; width: 100%; }
 /* 播放头覆盖层:覆盖整个 svgHost(含 padding),内部 .pb-playhead 按百分比定位 */
 .playhead-layer {
   position: absolute;
