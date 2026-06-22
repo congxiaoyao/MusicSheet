@@ -803,7 +803,11 @@ export class App {
         chordAnchorDur = notes[firstIdx].duration;
       }
     }
-    this.layout = computeLayout(this.piece, width, this.tool.duration, chordAnchor, chordAnchorDur, this.hover?.midi);
+    // 布局高度只由实际 notes 决定,不含 hoverMidi。
+    // 之前传 hoverMidi 导致鼠标上下移动时 hover 预览音高变化 → layout 高度随鼠标 y 实时跳变(乱跳)。
+    // hover 预览符头若超出当前布局范围,接受可能的边缘裁切(预览是临时的,鼠标移走即恢复),
+    // 不应为临时预览而频繁改变整个编辑区高度。
+    this.layout = computeLayout(this.piece, width, this.tool.duration, chordAnchor, chordAnchorDur);
     const svg = buildSVG(this.piece, this.layout, this.playingIndex, { hover: this.hover });
     // SVG 内不再画播放头(改由独立 DOM 覆盖层 playheadLayer 驱动)。
     // 注意:innerHTML 会清空 svgHost 所有子元素(含 playheadLayer),需重新 append 回去。
