@@ -12,6 +12,8 @@
 import { Piece, DurationValue, durationBeats, noteValueBeats } from '../core/types';
 import { beatsPerBar } from '../core/types';
 import { noteStartBeats, capacityBeats, measureOfBeat, totalBeats } from '../core/model';
+import { resolvePitch } from '../core/theory';
+import { advanceSS } from './glyphs';
 
 export interface Layout {
   width: number;
@@ -22,6 +24,9 @@ export interface Layout {
   staffTop: number;
   staffBottom: number;
   bottomLineY: number;
+  /** SVG viewBox 的 y 起点(0 或负值):极端高音时顶部向上扩展,viewBox 从负 y 起。
+   *  staffTop/bottomLineY 是内部坐标(不变),viewBoxYOffset 让 viewBox 包含更高的符头。 */
+  viewBoxYOffset: number;
 
   prefixRight: number;
   contentLeft: number;
@@ -80,7 +85,7 @@ const SLOT_MIN: Record<DurationValue, number> = {
   thirtysecond: 2.6,
 };
 
-export function computeLayout(piece: Piece, containerWidth: number, currentDuration: DurationValue = 'quarter', chordAnchorBeat?: number, chordAnchorDuration?: DurationValue): Layout {
+export function computeLayout(piece: Piece, containerWidth: number, currentDuration: DurationValue = 'quarter', chordAnchorBeat?: number, chordAnchorDuration?: DurationValue, hoverMidi?: number): Layout {
   const fontSize = FONT;
   const staffSpace = SS;
   const width = Math.max(containerWidth, 620);
@@ -148,19 +153,49 @@ export function computeLayout(piece: Piece, containerWidth: number, currentDurat
   const nextSlotX = barLines[nextBarIdx] + nextBeatInBar / bpb * barWidth + nextSlotW / 2;
 
   const jianpuTop = staffBottom + JIANPU_GAP;
-  const jianpuBaseline = jianpuTop + 36;
-  const jianpuBottom = jianpuTop + JIANPU_HEIGHT;
-  const height = jianpuBottom + 20;
+  const baseHeight = jianpuTop + JIANPU_HEIGHT + 20;
+
+  // ── 动态高度:按实际音域扩展顶部(容纳高音加线)+ 底部(低音加线让简谱下移)──
+  // 扫描所有音符 + hover 预览音的 step,算最高/最低音,据此调整 viewBox 顶部偏移和 jianpuTop。
+  // 五线谱/简谱内部坐标(staffTop/bottomLineY/jianpuBaseline)不变,只动 viewBox 范围和简谱整体下移。
+  const headHalf = advanceSS('noteheadBlack') / 2 * staffSpace;  // 符头半高(近似方形)
+  const PAD = 2 * staffSpace;  // 符头/加线到 viewBox 边界的留白
+  // 收集所有需要布局容纳的 step(notes + hover)
+  const steps: number[] = [];
+  for (const n of piece.notes) if (n.midi !== null) steps.push(resolvePitch(n.midi, piece.clef, piece.key, n.accidental).step);
+  if (hoverMidi !== undefined && hoverMidi !== null) steps.push(resolvePitch(hoverMidi, piece.clef, piece.key, null).step);
+  const maxStep = steps.length ? Math.max(...steps) : 8;   // 默认五线谱顶线
+  const minStep = steps.length ? Math.min(...steps) : 0;   // 默认五线谱底线
+  // 顶部:最高音符头 y(若超出 staffTop 留白,viewBox 顶部向上扩展)
+  const topNoteY = bottomLineY - maxStep * staffSpace / 2;   // stepToY(maxStep)
+  // 默认顶部留白 = staffTop(75),已含朝上符干空间。高音符头 y < PAD 时需扩展
+  let viewBoxYOffset = 0;
+  if (topNoteY - headHalf - PAD < 0) {
+    viewBoxYOffset = Math.ceil(PAD + headHalf - topNoteY);   // 顶部多出的空间
+  }
+  // 底部:最低音向下取偶 step 的加线 y(低音加线只画 step < 0 的偶数)
+  // minStep >= 0(在五线谱内)无下加线,不触发底部扩展
+  const lowLedgerStep = minStep < 0 ? (minStep % 2 === 0 ? minStep : minStep - 1) : null;
+  const lowLedgerY = lowLedgerStep !== null ? bottomLineY - lowLedgerStep * staffSpace / 2 : staffBottom;
+  // 默认 jianpuTop = staffBottom + JIANPU_GAP。低音加线 y > staffBottom 时,简谱下移避开
+  let dynamicJianpuTop = jianpuTop;
+  if (lowLedgerStep !== null && lowLedgerY + PAD > staffBottom) {
+    dynamicJianpuTop = lowLedgerY + PAD;
+  }
+  const dynamicJianpuBaseline = dynamicJianpuTop + 36;
+  const dynamicJianpuBottom = dynamicJianpuTop + JIANPU_HEIGHT;
+  const height = baseHeight + viewBoxYOffset + (dynamicJianpuTop - jianpuTop);
 
   return {
     width, height, fontSize, staffSpace,
     staffTop, staffBottom, bottomLineY,
+    viewBoxYOffset,   // SVG viewBox 的 y 起点(负值或0),供 buildSVG 用
     prefixRight, contentLeft, contentRight, contentWidth, staffLeftX: PAD_LEFT,
     clefX, keyStartX, timeSigX, hasKey: keyCount > 0,
     barLines,
     noteX, noteSlotW,
     nextSlotX, nextSlotW, isFull,
-    jianpuTop, jianpuBaseline, jianpuBottom,
+    jianpuTop: dynamicJianpuTop, jianpuBaseline: dynamicJianpuBaseline, jianpuBottom: dynamicJianpuBottom,
   };
 }
 

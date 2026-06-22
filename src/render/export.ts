@@ -27,11 +27,12 @@ export function buildSVG(piece: Piece, layout: Layout, playingIndex: number, opt
   const input: RenderInput = { piece, layout, playingIndex, hover: opts.exportMode ? null : (opts.hover ?? null) };
   const staff = renderStaffSVG(input);
   const jianpu = renderJianpuSVG(input);
-  const bg = opts.exportMode ? `<rect x="0" y="0" width="${layout.width}" height="${layout.height}" fill="#ffffff"/>` : '';
+  const vby = -layout.viewBoxYOffset;   // viewBox y 起点(0 或负值):viewBoxYOffset 是顶部扩展量(正),起点取负
+  const bg = opts.exportMode ? `<rect x="0" y="${vby}" width="${layout.width}" height="${layout.height}" fill="#ffffff"/>` : '';
   const title = opts.exportMode
-    ? `<text x="${layout.contentLeft}" y="18" font-family='system-ui,sans-serif' font-size="13" fill="#64748b">五线谱 — 简谱对照</text>`
+    ? `<text x="${layout.contentLeft}" y="${vby + 18}" font-family='system-ui,sans-serif' font-size="13" fill="#64748b">五线谱 — 简谱对照</text>`
     : '';
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${layout.width}" height="${layout.height}" viewBox="0 0 ${layout.width} ${layout.height}">${bg}${title}${staff}${jianpu}</svg>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${layout.width}" height="${layout.height}" viewBox="0 ${vby} ${layout.width} ${layout.height}">${bg}${title}${staff}${jianpu}</svg>`;
   // 渲染完成(已 clamp 兜底)后，抛 issues 回调。diagnose 读 piece 原始数据，不受 clamp 影响。
   const issues = diagnoseAll(piece);
   if (issues.length) {
