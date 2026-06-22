@@ -214,8 +214,9 @@ export class Player {
   /** 找 beat 落在哪个音区间内（返回 notes 下标；休止符区间也返回，让符头高亮随停顿移动）。
    *  区间比较带 BEAT_EPS 容忍:tuplet 累加让 endBeat 含 ~1e-16 误差,严格 < 会令
    *  beat=末音endBeat 时落空返回 -1(末音高亮丢失)。右边界用 < endBeat - EPS,
-   *  与 tickLoop 的 beat>=totalBeats(snapBeat 后) 配合,末音区间能覆盖到结束。 */
-  private noteIndexAtBeat(beat: number): number {
+   *  与 tickLoop 的 beat>=totalBeats(snapBeat 后) 配合,末音区间能覆盖到结束。
+   *  public:供 App 在 onTick/seek 时算当前音高亮(单一数据源 currentBeat)。 */
+  noteIndexAtBeat(beat: number): number {
     for (const e of this.schedule) {
       if (beat >= e.startBeat - BEAT_EPS && beat < e.endBeat - BEAT_EPS) return e.index;
     }

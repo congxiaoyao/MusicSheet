@@ -20,21 +20,26 @@ const ACCIDENTAL_LIFT = 10;
 // 升号 ♯ 字形重心比降号 ♭ 略低，需额外上抬一点对齐视觉中心。
 const SHARP_EXTRA_LIFT = 2;
 
-function text(content: string, x: number, y: number, fs: number, opts: { anchor?: string; fill?: string; family?: string; weight?: string; class?: string } = {}): string {
+function text(content: string, x: number, y: number, fs: number, opts: { anchor?: string; fill?: string; family?: string; weight?: string; class?: string; dataIdx?: number } = {}): string {
   const anchor = opts.anchor ?? 'middle';
   const fill = opts.fill ?? '#1f2430';
   const family = opts.family ?? NUMBER_FONT;
   const weight = opts.weight ? ` font-weight="${opts.weight}"` : '';
   const cls = opts.class ? ` class="${opts.class}"` : '';
-  return `<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" font-family='${family}' font-size="${fs}" text-anchor="${anchor}" dominant-baseline="alphabetic" fill="${fill}"${weight}${cls}>${content}</text>`;
+  const data = opts.dataIdx !== undefined ? ` data-idx="${opts.dataIdx}"` : '';
+  return `<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" font-family='${family}' font-size="${fs}" text-anchor="${anchor}" dominant-baseline="alphabetic" fill="${fill}"${weight}${cls}${data}>${content}</text>`;
 }
 
-function line(x1: number, y1: number, x2: number, y2: number, stroke: string, width: number): string {
-  return `<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="${stroke}" stroke-width="${width}"/>`;
+function line(x1: number, y1: number, x2: number, y2: number, stroke: string, width: number, opts: { dataIdx?: number; class?: string } = {}): string {
+  const cls = opts.class ? ` class="${opts.class}"` : '';
+  const data = opts.dataIdx !== undefined ? ` data-idx="${opts.dataIdx}"` : '';
+  return `<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="${stroke}" stroke-width="${width}"${cls}${data}/>`;
 }
 
-function circle(cx: number, cy: number, r: number, fill: string): string {
-  return `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${r}" fill="${fill}"/>`;
+function circle(cx: number, cy: number, r: number, fill: string, opts: { dataIdx?: number; class?: string } = {}): string {
+  const cls = opts.class ? ` class="${opts.class}"` : '';
+  const data = opts.dataIdx !== undefined ? ` data-idx="${opts.dataIdx}"` : '';
+  return `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${r}" fill="${fill}"${cls}${data}/>`;
 }
 
 /** SVG 路径：简谱连音线(tie)弧线用。 */
@@ -67,7 +72,7 @@ function dashCount(duration: string, dotted: boolean): number {
 
 /** 渲染简谱行（SVG 内容） */
 export function renderJianpuSVG(input: RenderInput): string {
-  const { piece, layout, playingIndex } = input;
+  const { piece, layout } = input;
   const baseY = layout.jianpuBaseline;
   let s = '';
 
@@ -96,8 +101,11 @@ export function renderJianpuSVG(input: RenderInput): string {
   for (const [s0, s1] of slots) {
     const head = piece.notes[s0];           // 首音(时值/附点/tuplet 以它为准)
     const x = layout.noteX[s0];
-    const highlight = s0 <= playingIndex && playingIndex <= s1;
-    const fill = highlight ? '#4f46e5' : '#1f2430';
+    // 高亮改由运行时 CSS class 控制(.jp-elem.playing),渲染时统一 currentColor。
+    // 简谱整组高亮,所有元素 data-idx 用首音 s0(updateHighlight 对和弦组会加首音 .playing)。
+    const fill = 'currentColor';
+    const jpOpts = { fill, class: 'jp-elem', dataIdx: s0 };
+    const jpLineOpts = { class: 'jp-elem', dataIdx: s0 };
     // 组内各声部(含单音):休止过滤
     const members: { idx: number; note: Note; jp: NonNullable<ReturnType<typeof noteToJianpu>> }[] = [];
     for (let k = s0; k <= s1; k++) {
@@ -127,38 +135,47 @@ export function renderJianpuSVG(input: RenderInput): string {
       const yRow = baseY + (offsets.get(m.idx) ?? 0);
       const jp = m.jp;
       // 临时记号
-      if (jp.accidental === 'sharp') s += text('♯', x - accOffset, accYBase + (offsets.get(m.idx) ?? 0) - SHARP_EXTRA_LIFT, DIGIT_FS * 0.7, { fill });
-      else if (jp.accidental === 'flat') s += text('♭', x - accOffset, accYBase + (offsets.get(m.idx) ?? 0), DIGIT_FS * 0.7, { fill });
+      if (jp.accidental === 'sharp') s += text('♯', x - accOffset, accYBase + (offsets.get(m.idx) ?? 0) - SHARP_EXTRA_LIFT, DIGIT_FS * 0.7, jpOpts);
+      else if (jp.accidental === 'flat') s += text('♭', x - accOffset, accYBase + (offsets.get(m.idx) ?? 0), DIGIT_FS * 0.7, jpOpts);
       // 数字(休止用 0)
       const digitStr = jp.digit === 0 ? '0' : String(jp.digit);
-      s += text(digitStr, x, yRow, DIGIT_FS, { fill, weight: '500' });
-      // 八度点(各声部独立,基于该声部 yRow)
+      s += text(digitStr, x, yRow, DIGIT_FS, { ...jpOpts, weight: '500' });
+      // 八度点(各声部独立,基于该声部 yRow):移到数字 bbox 之外避免重叠。
+      // 数字字号 26,alphabetic baseline=yRow,数字顶约 yRow-18、底约 yRow+6。
+      // 高音点画在数字顶上方(yRow-22 起),低音点画在数字底下方(yRow+10 起)。
+      // 旧实现 yRow-15 / yRow+10 落在数字内部 → 与数字重叠 4-5px。
       const dotR = 2.2;
+      const DOT_GAP = 6;   // 点间距
       if (jp.octaveDots > 0) {
-        for (let d = 0; d < jp.octaveDots; d++) s += circle(x, yRow - 15 - d * 7, dotR, fill);
+        for (let d = 0; d < jp.octaveDots; d++) s += circle(x, yRow - 22 - d * DOT_GAP, dotR, fill, jpOpts);
       } else if (jp.octaveDots < 0) {
-        for (let d = 0; d < -jp.octaveDots; d++) s += circle(x, yRow + 10 + d * 7, dotR, fill);
+        for (let d = 0; d < -jp.octaveDots; d++) s += circle(x, yRow + 12 + d * DOT_GAP, dotR, fill, jpOpts);
       }
     }
 
-    // 附点:整组画一次(用首音),位置在数字右侧
+    // 时值修饰(附点/下划线/短横)整组画一次,画在「整组最低声部」下方而非固定 baseY。
+    // 和弦纵排时,下划线画在 baseY 会与中间声部数字挤;画在最低声部下方则与所有数字分离。
+    // 单音时 lowestYRow = baseY(offset=0),行为与旧实现一致。
+    const lowestYRow = baseY + (offsets.get(sorted[nM - 1].idx) ?? 0);
+
+    // 附点:整组画一次(用首音),位置在数字右侧,垂直居中于整组中线
     if (head.dotted) {
-      s += circle(x + 11, baseY - 6, 2.2, fill);
+      s += circle(x + 11, lowestYRow - 6, 2.2, fill, jpOpts);
     }
 
-    // 下划线(时值<四分):整组画一次(用首音时值),位置在 baseY 下方
+    // 下划线(时值<四分):整组画一次(用首音时值),位置在最低声部下方
     const ucount = underlineCount(head.duration, head.dotted);
     const numHalfW = 7;
     for (let u = 0; u < ucount; u++) {
-      const uy = baseY + 4 + u * 5;
-      s += line(x - numHalfW, uy, x + numHalfW, uy, fill, 1.4);
+      const uy = lowestYRow + 8 + u * 5;
+      s += line(x - numHalfW, uy, x + numHalfW, uy, fill, 1.4, jpLineOpts);
     }
 
-    // 短横(时值>四分):整组画一次
+    // 短横(时值>四分):整组画一次,画在最低声部中线
     const dcount = dashCount(head.duration, head.dotted);
     for (let d = 0; d < dcount; d++) {
       const dx = x + 16 + d * 14;
-      s += line(dx - 6, baseY - 4, dx + 6, baseY - 4, fill, 1.8);
+      s += line(dx - 6, lowestYRow - 4, dx + 6, lowestYRow - 4, fill, 1.8, jpLineOpts);
     }
   }
 

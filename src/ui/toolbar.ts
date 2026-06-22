@@ -13,6 +13,14 @@ export const TUPLET_CONFIG: Record<Exclude<TupletMode, 'off'>, { actual: number;
   sextuplet: { actual: 6, normal: 4, label: '六连音' },
 };
 
+/** 反查:actual 音数 → 对应 TupletMode。删除连音时用于从残留音的 tuplet.actual 恢复模式。 */
+export function tupletModeForActual(actual: number): Exclude<TupletMode, 'off'> | null {
+  for (const k of Object.keys(TUPLET_CONFIG) as Exclude<TupletMode, 'off'>[]) {
+    if (TUPLET_CONFIG[k].actual === actual) return k;
+  }
+  return null;
+}
+
 /** 用户当前的「输入笔」状态 */
 export interface ToolState {
   duration: DurationValue;
@@ -174,7 +182,7 @@ export function buildToolbar(state: ToolState, cb: ToolbarCallbacks): HTMLElemen
   // 连音组(tuplet):单个按钮,左键 toggle 三连音(高频),右键弹菜单选五/六连音。
   // 键盘 r/f/x 全保留(r=三连音、f=五连音、x=六连音)。
   const tupletMenu = document.createElement('div');
-  tupletMenu.className = 'dropdown-menu';
+  tupletMenu.className = 'dropdown-menu anchored';   // anchored:fixed 定位,脱离工具栏流不被裁切
   function tupletBtnLabel(): string {
     if (state.tupletMode === 'triplet') return '3连';
     if (state.tupletMode === 'quintuplet') return '5连';
@@ -202,11 +210,21 @@ export function buildToolbar(state: ToolState, cb: ToolbarCallbacks): HTMLElemen
     e.preventDefault();
     const open = tupletMenu.classList.toggle('open');
     syncTupletUI();
-    // 定位菜单到按钮下方
+    // 定位菜单:左对齐按钮,但若右侧空间不足则改右对齐(避免被视口右边缘遮挡)
     if (open) {
       const r = tupletBtn.getBoundingClientRect();
-      tupletMenu.style.left = r.left + 'px';
-      tupletMenu.style.top = r.bottom + 'px';
+      const menuW = 220;   // 菜单宽度(适配「五连音(5个音占4个普通音位)」等长文本)
+      const margin = 8;
+      const spaceRight = window.innerWidth - r.left;
+      let left: number;
+      if (spaceRight >= menuW + margin) {
+        left = r.left;                       // 右侧够:左对齐按钮
+      } else {
+        left = Math.max(margin, r.right - menuW);  // 右侧不够:右对齐,不顶到视口边
+      }
+      tupletMenu.style.left = `${left}px`;
+      tupletMenu.style.top = `${r.bottom + 4}px`;
+      tupletMenu.style.minWidth = `${menuW}px`;
     }
   });
   for (const mode of ['triplet', 'quintuplet', 'sextuplet'] as const) {

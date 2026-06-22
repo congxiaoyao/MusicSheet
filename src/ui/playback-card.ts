@@ -301,7 +301,6 @@ export function buildPlaybackCard(
     kb.appendChild(h('div', 'pb-center-mark'));
 
     const whites = whiteKeyRange(v.piece);
-    const whiteCount = whites.length;
 
     // 当前应高亮的 midi 集合。playingIndex 是当前时间位首音;
     // 若它在和弦组里,整组声部都高亮(和弦多键同亮)。
@@ -322,6 +321,7 @@ export function buildPlaybackCard(
     }
 
     const blackKeys: { el: HTMLElement; leftWhiteIdx: number }[] = [];
+    const whiteEls: HTMLElement[] = [];   // 白键 DOM 引用,供黑键精确定位(读取真实 offsetLeft/offsetWidth)
     whites.forEach((wmidi, wi) => {
       const el = h('div', 'pb-key white');
       if (activeSet.has(wmidi)) el.classList.add('active');
@@ -330,6 +330,7 @@ export function buildPlaybackCard(
       if (v.show.name) { const nm = midiName(wmidi); el.appendChild(h('div', 'pb-key-label', `${nm.name}${nm.octave}`)); }
       if (v.show.solfege) { const sf = midiSolfege(wmidi, v.piece.key); if (sf) el.appendChild(h('div', 'pb-key-solfege', sf)); }
       kb.appendChild(el);
+      whiteEls.push(el);
 
       const pc = ((wmidi % 12) + 12) % 12;
       if (![4, 11].includes(pc)) {
@@ -341,11 +342,28 @@ export function buildPlaybackCard(
         blackKeys.push({ el: bEl, leftWhiteIdx: wi });
       }
     });
-    for (const { el, leftWhiteIdx } of blackKeys) {
-      el.style.left = `${(leftWhiteIdx + 1) / whiteCount * 100}%`;
-      el.style.width = `${1 / whiteCount * 100 * 0.6}%`;
+    for (const { el } of blackKeys) {
       kb.appendChild(el);
     }
+    // 黑键精确定位:挂载后读取左侧白键的真实右边界位置(px),黑键中心对齐该边界。
+    // 旧实现用 (leftWhiteIdx+1)/whiteCount 理论等分,但 keyboard padding/border 让白键
+    // 实际起始偏移,理论值与真实边界有偏差,越往两端累积越大 →「越往两端越偏」。
+    // 用真实 DOM 位置彻底消除偏差;translateX(-50%) 让黑键中心(非左边缘)对齐边界。
+    requestAnimationFrame(() => {
+      const kbRect = kb.getBoundingClientRect();
+      for (const { el, leftWhiteIdx } of blackKeys) {
+        const wEl = whiteEls[leftWhiteIdx];
+        if (!wEl) continue;
+        const wRect = wEl.getBoundingClientRect();
+        // 黑键宽度 = 白键真实宽度的 60%
+        const bw = wRect.width * 0.6;
+        // 黑键中心 = 左侧白键的右边界(px),转成相对 kb 的百分比
+        const centerX = wRect.right - kbRect.left;
+        el.style.width = `${bw}px`;
+        el.style.left = `${(centerX / kbRect.width) * 100}%`;
+        el.style.transform = 'translateX(-50%)';   // 中心对齐边界
+      }
+    });
     box.appendChild(kb);
     return box;
   }
