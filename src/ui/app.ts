@@ -31,6 +31,9 @@ export class App {
   private svgHost!: HTMLElement;
   /** 播放头覆盖层:独立 DOM div,叠在 svgHost 上,由 currentBeat 驱动定位(onTick 时更新) */
   private playheadLayer!: HTMLElement;
+  /** 五线谱锚点:bottomLineY 应固定的物理 y(相对 svgHost 顶部,含 padding)。
+   *  高度动画时用 transform 补偿让五线谱物理位置恒等于此值,首次渲染时确定。 */
+  private staffAnchor: number | null = null;
   private statusEl!: HTMLElement;
   private bpm = 100;
   private playingIndex = -1;
@@ -814,6 +817,17 @@ export class App {
     this.svgHost.innerHTML = svg;
     const svgEl = this.svgHost.querySelector('svg');
     if (svgEl) svgEl.setAttribute('width', '100%');
+    // ── 高度动画:transform 补偿让五线谱物理位置恒定 ──
+    // 五线谱 bottomLineY(内部坐标 121)无补偿时物理 y = padding(8) + 121 + viewBoxYOffset。
+    // 顶部扩展(offset+)会下移五线谱,用 transform translateY 补偿抵消,让它物理位置恒定。
+    // 内容瞬间切到新布局(transform 无 transition),容器 height 120ms 过渡,overflow:hidden 裁溢出。
+    const PAD_TOP = 8;
+    const BOTTOM_LINE_Y = 121;
+    const uncompY = PAD_TOP + BOTTOM_LINE_Y + this.layout.viewBoxYOffset;
+    if (this.staffAnchor === null) this.staffAnchor = uncompY;   // 首次锁定
+    const comp = this.staffAnchor - uncompY;
+    if (svgEl) svgEl.style.transform = `translateY(${comp}px)`;
+    this.svgHost.style.height = `${this.layout.height + 16}px`;   // +padding 8*2
     this.svgHost.appendChild(this.playheadLayer);
     // 状态
     const rem = remainingBeats(this.piece);
