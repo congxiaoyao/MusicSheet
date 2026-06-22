@@ -140,33 +140,42 @@ export function renderJianpuSVG(input: RenderInput): string {
       // 数字(休止用 0)
       const digitStr = jp.digit === 0 ? '0' : String(jp.digit);
       s += text(digitStr, x, yRow, DIGIT_FS, { ...jpOpts, weight: '500' });
-      // 八度点(各声部独立,基于该声部 yRow)
+      // 八度点(各声部独立,基于该声部 yRow):移到数字 bbox 之外避免重叠。
+      // 数字字号 26,alphabetic baseline=yRow,数字顶约 yRow-18、底约 yRow+6。
+      // 高音点画在数字顶上方(yRow-22 起),低音点画在数字底下方(yRow+10 起)。
+      // 旧实现 yRow-15 / yRow+10 落在数字内部 → 与数字重叠 4-5px。
       const dotR = 2.2;
+      const DOT_GAP = 6;   // 点间距
       if (jp.octaveDots > 0) {
-        for (let d = 0; d < jp.octaveDots; d++) s += circle(x, yRow - 15 - d * 7, dotR, fill, jpOpts);
+        for (let d = 0; d < jp.octaveDots; d++) s += circle(x, yRow - 22 - d * DOT_GAP, dotR, fill, jpOpts);
       } else if (jp.octaveDots < 0) {
-        for (let d = 0; d < -jp.octaveDots; d++) s += circle(x, yRow + 10 + d * 7, dotR, fill, jpOpts);
+        for (let d = 0; d < -jp.octaveDots; d++) s += circle(x, yRow + 12 + d * DOT_GAP, dotR, fill, jpOpts);
       }
     }
 
-    // 附点:整组画一次(用首音),位置在数字右侧
+    // 时值修饰(附点/下划线/短横)整组画一次,画在「整组最低声部」下方而非固定 baseY。
+    // 和弦纵排时,下划线画在 baseY 会与中间声部数字挤;画在最低声部下方则与所有数字分离。
+    // 单音时 lowestYRow = baseY(offset=0),行为与旧实现一致。
+    const lowestYRow = baseY + (offsets.get(sorted[nM - 1].idx) ?? 0);
+
+    // 附点:整组画一次(用首音),位置在数字右侧,垂直居中于整组中线
     if (head.dotted) {
-      s += circle(x + 11, baseY - 6, 2.2, fill, jpOpts);
+      s += circle(x + 11, lowestYRow - 6, 2.2, fill, jpOpts);
     }
 
-    // 下划线(时值<四分):整组画一次(用首音时值),位置在 baseY 下方
+    // 下划线(时值<四分):整组画一次(用首音时值),位置在最低声部下方
     const ucount = underlineCount(head.duration, head.dotted);
     const numHalfW = 7;
     for (let u = 0; u < ucount; u++) {
-      const uy = baseY + 4 + u * 5;
+      const uy = lowestYRow + 8 + u * 5;
       s += line(x - numHalfW, uy, x + numHalfW, uy, fill, 1.4, jpLineOpts);
     }
 
-    // 短横(时值>四分):整组画一次
+    // 短横(时值>四分):整组画一次,画在最低声部中线
     const dcount = dashCount(head.duration, head.dotted);
     for (let d = 0; d < dcount; d++) {
       const dx = x + 16 + d * 14;
-      s += line(dx - 6, baseY - 4, dx + 6, baseY - 4, fill, 1.8, jpLineOpts);
+      s += line(dx - 6, lowestYRow - 4, dx + 6, lowestYRow - 4, fill, 1.8, jpLineOpts);
     }
   }
 
