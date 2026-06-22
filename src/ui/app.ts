@@ -847,15 +847,17 @@ export class App {
       this.updatePlayheadAndHighlight();
       return;
     }
-    // height 变化:用首次锁定的 staffAnchorScreen(永不更新),保证累积不漂移
-    if (this.staffAnchorScreen === null) this.staffAnchorScreen = prevStaffYScreen;
+    // height 变化:innerHTML 后新 SVG 已替换旧 SVG(svgHost height 还在 startH)。
+    // target = prevStaffYScreen(用户看到的旧 SVG staffY 屏幕)。
+    // 新 SVG 在 startH 居底的 staffY 屏幕 ≠ 旧 SVG(因 viewBox 变了),用 scrollY 补偿消除差值。
+    this.staffAnchorScreen = prevStaffYScreen;
+    this.svgHost.style.height = `${startH}px`;
     if (this.heightAnimFrame) cancelAnimationFrame(this.heightAnimFrame);
-    // innerHTML 已替换新 SVG,svgHost height 还在 startH(旧)。
-    // 直接读当前 staffY 屏幕位置,算 scrollY 调整量让它 = target(动画起点无跳变)。
+    // 同步补偿:让新 SVG 的 staffY 屏幕 = prevStaffYScreen(用户看到的位置)
     {
       const curScreen = this.measureStaffYScreen();
-      const adjust = curScreen - (this.staffAnchorScreen ?? curScreen);
-      window.scrollTo(0, Math.max(0, window.scrollY + adjust));
+      const adjust = curScreen - this.staffAnchorScreen;
+      if (adjust !== 0) window.scrollTo(0, Math.max(0, window.scrollY + adjust));
     }
     const startT = performance.now();
     this.heightAnimFrame = requestAnimationFrame((now: number) => {
