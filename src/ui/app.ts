@@ -629,25 +629,19 @@ export class App {
       }
     }
 
-    // chord 状态修正(对齐 tuplet 逻辑):
-    // 删除的和弦尾音,若组还有残音 → 恢复 currentChordId + 开和弦模式,让用户继续补;
-    // 若组删到只剩1音 → 清掉它的 chordId(单音不该带和弦标记);若删空 → 关模式。
+    // chord 状态修正(用户习惯:1残音也能补,都删干净才关模式):
+    // 删除的和弦尾音,若组还有残音(哪怕只剩1个)→ 保留 currentChordId + 和弦模式,可继续补;
+    // 组全删空 → 才关模式。剩1音时保留 chordId(它是和弦首音,继续补会成为完整和弦)。
     const removedChord = removed.chordId;
     if (removedChord) {
       const remainInChord = notes.filter(n => n.chordId === removedChord);
       if (remainInChord.length === 0) {
-        // 组删空
-        this.currentChordId = null;
-        this.tool.chordMode = false;
-        (this.toolbar as any)._setChordMode?.(false);
-      } else if (remainInChord.length === 1) {
-        // 只剩1音:清掉 chordId 变普通单音(单音不该是和弦)
-        remainInChord[0].chordId = undefined;
+        // 组删空:才关模式
         this.currentChordId = null;
         this.tool.chordMode = false;
         (this.toolbar as any)._setChordMode?.(false);
       } else {
-        // 还有2+残音:恢复 currentChordId + 开和弦模式,让用户继续补声部
+        // 还有残音(含只剩1个):恢复 currentChordId + 开和弦模式,可继续补声部
         this.currentChordId = removedChord;
         this.tool.chordMode = true;
         (this.toolbar as any)._setChordMode?.(true);

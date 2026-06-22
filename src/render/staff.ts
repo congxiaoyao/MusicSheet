@@ -728,26 +728,19 @@ function renderTuplets(piece: Piece, layout: Layout, ctxByIdx: Map<number, BeamC
       s += line(x2, markY, x2, markY + bracketH, '#1f2430', lw);
       s += text(String(g.actual), mx, markY - ss * 0.4, fs, { fill: '#1f2430', anchor: 'middle' });
     } else {
-      // 有连梁:只画数字,贴在 primary 梁外侧(朝上=梁上方,朝下=梁下方)。
-      // 偏移自适应梁层数:16分(2根梁)需比8分(1根)更大的偏移,否则数字压次梁。
-      // 偏移 = primary 半厚 + (层数-1)*梁间距 + 数字字高一半 + 间隙。
-      // ctxByIdx 只对时间位首音设置;tuplet 组内首音必在 ctxByIdx。
-      // 末音若不在(如和弦尾音),退用首音的 ctx(梁贯穿整组,首音 stemEndY 足够代表)。
+      // 有连梁:只画数字,贴在 primary(最外侧梁)外侧。
+      // primary 已是最外梁,次梁在 primary 内侧(朝符头),与数字(在 primary 外侧)不同侧,
+      // 故数字只需避开 primary 本身。偏移 = primary 半厚 + 数字字高一半 + 间隙。
+      // (旧实现误加了次梁总高 secondaryH,导致符干朝下时间距过大。)
       const firstBeam = ctxByIdx.get(g.startIdx);
       const lastBeam = ctxByIdx.get(g.endIdx) ?? firstBeam;
       if (firstBeam && lastBeam) {
         const beamMidY = (firstBeam.stemEndY + lastBeam.stemEndY) / 2;
         const stemDir = firstBeam.stemDir;
-        // 梁层数:从组内时值推算(16分=2, 32分=3, 8分=1)
-        const headDur = piece.notes[g.startIdx].duration;
-        const beamLevels = headDur === 'thirtysecond' ? 3 : headDur === 'sixteenth' ? 2 : 1;
-        // 偏移 = primary 半厚(BEAM_THICKNESS/2=0.25ss) + 次梁总高((levels-1)*BEAM_GAP=0.6ss/层)
-        //        + 数字字高一半(0.7*fs/2≈0.66ss) + 间隙(0.5ss)
         const beamHalf = BEAM_THICKNESS / 2 * ss;
-        const secondaryH = (beamLevels - 1) * BEAM_GAP * ss;
         const numHalfH = fs * 0.42;
         const gap = ss * 0.6;
-        const offset = beamHalf + secondaryH + numHalfH + gap;
+        const offset = beamHalf + numHalfH + gap;
         // 朝上:梁在上方(y小),数字在梁更上方 → 减偏移;朝下:梁在下方(y大),数字在梁更下方 → 加偏移
         const numY = stemDir === 'up' ? beamMidY - offset : beamMidY + offset;
         s += text(String(g.actual), mx, numY, fs, { fill: '#1f2430', anchor: 'middle' });

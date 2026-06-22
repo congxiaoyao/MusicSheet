@@ -19,10 +19,8 @@ function deleteLast(piece, st) {
     const remainInChord = notes.filter(n => n.chordId === removedChord);
     if (remainInChord.length === 0) {
       st.currentChordId = null; st.chordMode = false;
-    } else if (remainInChord.length === 1) {
-      remainInChord[0].chordId = undefined;
-      st.currentChordId = null; st.chordMode = false;
     } else {
+      // 还有残音(含1个):保留模式可补
       st.currentChordId = removedChord; st.chordMode = true;
     }
   } else {
@@ -48,17 +46,21 @@ appendNote(pA, { midi: 67, duration: 'quarter', dotted: false, accidental: null,
 check('补G4后 notes=3', pA.notes.length, 3);
 check('补G4后 组3音', new Set(pA.notes.map(n=>n.chordId)).size, 1);
 
-console.log('\n═══ 场景B:删到只剩1音 → 清chordId变单音 ═══');
+console.log('\n═══ 场景B:删到只剩1音 → 保留模式可补(用户习惯) ═══');
 const pB = createPiece(); pB.measureCount = 2;
 const cidB = 'cB';
 appendNote(pB, { midi: 60, duration: 'quarter', dotted: false, accidental: null, chordId: cidB });
 appendNote(pB, { midi: 64, duration: 'quarter', dotted: false, accidental: null, chordId: cidB });
 const stB = { currentChordId: null, chordMode: false };
-deleteLast(pB, stB);  // 删E4 → 剩C4
+deleteLast(pB, stB);  // 删E4 → 剩C4(1音)
 check('删E4后 notes=1', pB.notes.length, 1);
-check('删E4后 C4的chordId清掉', pB.notes[0].chordId, undefined);
-check('删E4后 currentChordId=null', stB.currentChordId, null);
-check('删E4后 chordMode=false', stB.chordMode, false);
+check('删E4后 C4保留chordId(可继续补)', pB.notes[0].chordId, cidB);
+check('删E4后 保留currentChordId', stB.currentChordId, cidB);
+check('删E4后 保留chordMode=true', stB.chordMode, true);
+// 继续补 E4
+appendNote(pB, { midi: 64, duration: 'quarter', dotted: false, accidental: null, chordId: cidB });
+check('补E4后 notes=2', pB.notes.length, 2);
+check('补E4后 组2音', pB.notes.filter(n=>n.chordId===cidB).length, 2);
 
 console.log('\n═══ 场景C:2和弦全删 → 模式关 ═══');
 const pC = createPiece(); pC.measureCount = 2;

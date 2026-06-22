@@ -147,20 +147,31 @@ export function renderJianpuSVG(input: RenderInput): string {
     };
     const slotHeights = sorted.map(m => upExtent(m) + dnExtent(m));
     const totalH = slotHeights.reduce((a, b) => a + b, 0) + GAP * (nM - 1);
-    // 各声部 baseline(相对组中心):从顶部往下累计。
-    // 第 r 声部顶部 = acc;r 声部 baseline = acc + upExtent(其上方点+字形高);
-    // 然后 acc += 字形下伸 + 下方点 + GAP,到下一声部顶部。
+    // 各声部 baseline(相对组中心 baseY):
+    // 单音(nM===1):offset=0,数字 baseline 永远在 baseY(整行纵向对齐,八度点挂在外侧不挪数字)。
+    // 和弦(nM>=2):按动态行高分配,各声部叠放居中。
     const offsets = new Map<number, number>();
-    let topAcc = -totalH / 2;   // 第一个声部顶部,相对组中心(baseY)
-    for (let r = 0; r < nM; r++) {
-      const m = sorted[r];
-      offsets.set(m.idx, topAcc + upExtent(m));   // baseline = 顶部 + 上方占高
-      topAcc += upExtent(m) + dnExtent(m) + GAP;   // 移到下一声部顶部
+    if (nM === 1) {
+      offsets.set(sorted[0].idx, 0);
+    } else {
+      let topAcc = -totalH / 2;
+      for (let r = 0; r < nM; r++) {
+        const m = sorted[r];
+        offsets.set(m.idx, topAcc + upExtent(m));
+        topAcc += upExtent(m) + dnExtent(m) + GAP;
+      }
     }
 
     const slotW = layout.noteSlotW[s0];
     const accOffset = Math.max(ACCIDENTAL_MIN, ACCIDENTAL_BASE - Math.max(0, (ACCIDENTAL_NARROW_SLOT - slotW)) * 0.35);
     const accYBase = baseY - ACCIDENTAL_LIFT;
+
+    // 预算减时线位置(供低音点避开):减时线 y 固定 = lowestYRow+8,整行纵向对齐。
+    const lowestMember = sorted[nM - 1];
+    const lowestYRow = baseY + (offsets.get(lowestMember.idx) ?? 0);
+    const ucount = underlineCount(head.duration, head.dotted);
+    const underlineBaseY = lowestYRow + 8;
+    const underlineBottomY = ucount > 0 ? underlineBaseY + (ucount - 1) * 5 : -Infinity;
 
     // 逐声部画数字 + 八度点 + 临时记号(各声部独立);时值修饰(下划线/短横/附点)整组画一次
     for (const m of members) {
@@ -172,35 +183,26 @@ export function renderJianpuSVG(input: RenderInput): string {
       // 数字(休止用 0)
       const digitStr = jp.digit === 0 ? '0' : String(jp.digit);
       s += text(digitStr, x, yRow, DIGIT_FS, { ...jpOpts, weight: '500' });
-      // 八度点(各声部独立,基于该声部 yRow):画在字形外,偏移与上方动态行高分配一致。
-      // 高音点 y = baseline - dotUpFromBase(n);低音点 y = baseline + dotDnFromBase(n)。
+      // 八度点:高音点在数字上方(yRow-dotUpFromBase);低音点在数字下方,但若有减时线则
+      // 画在减时线下方避开(低音点与减时线都在数字下方,减时线固定位置,低音点让位)。
       if (jp.octaveDots > 0) {
         for (let d = 0; d < jp.octaveDots; d++) s += circle(x, yRow - dotUpFromBase(d + 1), DOT_R, fill, jpOpts);
       } else if (jp.octaveDots < 0) {
-        for (let d = 0; d < -jp.octaveDots; d++) s += circle(x, yRow + dotDnFromBase(d + 1), DOT_R, fill, jpOpts);
+        // 低音点起始 y:默认 yRow+dotDnFromBase(1);若有减时线,从减时线下方开始
+        const dotStartY = underlineBottomY > -Infinity
+          ? underlineBottomY + DOT_R + 3   // 减时线下方 + 间隙
+          : yRow + dotDnFromBase(1);
+        for (let d = 0; d < -jp.octaveDots; d++) s += circle(x, dotStartY + d * DOT_GAP, DOT_R, fill, jpOpts);
       }
     }
 
-    // 时值修饰(附点/下划线/短横)整组画一次,画在「整组最低声部」下方而非固定 baseY。
-    // 和弦纵排时,下划线画在 baseY 会与中间声部数字挤;画在最低声部下方则与所有数字分离。
-    // 单音时 lowestYRow = baseY(offset=0),行为与旧实现一致。
-    const lowestMember = sorted[nM - 1];
-    const lowestYRow = baseY + (offsets.get(lowestMember.idx) ?? 0);
-
-    // 附点:整组画一次(用首音),位置在数字右侧,垂直居中于整组中线
+    // 附点:整组画一次(用首音),位置在数字右侧
     if (head.dotted) {
       s += circle(x + 11, lowestYRow - 6, 2.2, fill, jpOpts);
     }
 
-    // 下划线(时值<四分):整组画一次(用首音时值),位置在最低声部下方。
-    // 若最低声部有低音点,下划线要从低音点下方开始(否则与低音点挤在一起重叠)。
-    const ucount = underlineCount(head.duration, head.dotted);
+    // 减时线(时值<四分):y 固定 = lowestYRow+8,整行纵向对齐(不受八度点影响)。
     const numHalfW = 7;
-    const lowDots = lowestMember.jp.octaveDots < 0 ? -lowestMember.jp.octaveDots : 0;
-    // 下划线起始 y:无低音点=lowestYRow+8;有低音点=lowestYRow+低音点最下+间隙
-    const underlineBaseY = lowDots > 0
-      ? lowestYRow + dotDnFromBase(lowDots) + DOT_R + 3   // 低音点下方 + 3px 间隙
-      : lowestYRow + 8;
     for (let u = 0; u < ucount; u++) {
       const uy = underlineBaseY + u * 5;
       s += line(x - numHalfW, uy, x + numHalfW, uy, fill, 1.4, jpLineOpts);
