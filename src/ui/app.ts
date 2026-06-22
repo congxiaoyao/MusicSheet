@@ -814,6 +814,9 @@ export class App {
     // hover 预览符头若超出当前布局范围,接受可能的边缘裁切(预览是临时的,鼠标移走即恢复),
     // 不应为临时预览而频繁改变整个编辑区高度。
     this.layout = computeLayout(this.piece, width, this.tool.duration, chordAnchor, chordAnchorDur);
+    // 在 innerHTML 替换前,锁定当前 staffY 屏幕(旧内容态),供 height 动画 scrollY 补偿用。
+    const prevStaffYScreen = this.measureStaffYScreen();
+    const prevHostTopDoc = this.svgHost.getBoundingClientRect().top + window.scrollY;
     const svg = buildSVG(this.piece, this.layout, this.playingIndex, { hover: this.hover });
     // SVG 内不再画播放头(改由独立 DOM 覆盖层 playheadLayer 驱动)。
     // 注意:innerHTML 会清空 svgHost 所有子元素(含 playheadLayer),需重新 append 回去。
@@ -831,7 +834,23 @@ export class App {
       this.staffAnchorScreen = this.measureStaffYScreen();
     }
     const startH = parseFloat(this.svgHost.style.height) || endH;
-    const hostTopDoc = this.svgHost.getBoundingClientRect().top + window.scrollY;
+    // 只有 height 真正变化时才跑动画 + scrollY 补偿。
+    // hover 等不改变 height 的 render 不动 scrollY,避免「hover 就强制滚动」。
+    if (Math.abs(endH - startH) < 1) {
+      this.svgHost.style.height = `${endH}px`;
+      this.svgHost.appendChild(this.playheadLayer);
+      // 状态/工具栏/卡片刷新(原 render 后续逻辑)
+      const rem = remainingBeats(this.piece);
+      const pct = Math.round((totalBeats(this.piece) / capacityBeats(this.piece)) * 100);
+      this.statusEl.textContent = `${this.piece.notes.length} 个音符 · 已用 ${pct}% · 还能再写约 ${rem.toFixed(1)} 拍`;
+      (this.toolbar as any)._refreshCapacity?.(remainingBeatsInCurrentBar(this.piece), rem);
+      this.refreshCard();
+      this.updatePlayheadAndHighlight();
+      return;
+    }
+    // height 变化:用首次锁定的 staffAnchorScreen(永不更新),保证累积不漂移
+    if (this.staffAnchorScreen === null) this.staffAnchorScreen = prevStaffYScreen;
+    const hostTopDoc = prevHostTopDoc;
     const off = this.layout.viewBoxYOffset;
     if (this.heightAnimFrame) cancelAnimationFrame(this.heightAnimFrame);
     const startT = performance.now();
