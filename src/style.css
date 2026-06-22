@@ -676,9 +676,10 @@ html, body {
   padding: 6px 2px 8px;
   user-select: none;
   cursor: pointer;
-  transition: background 0.14s cubic-bezier(.4,0,.2,1),
-              color 0.14s cubic-bezier(.4,0,.2,1),
-              box-shadow 0.14s cubic-bezier(.4,0,.2,1),
+  /* 注意:不 transition background。active 态用渐变背景,渐变之间无法平滑过渡,
+     红渐变→默认色的 transition 会经过中间灰白色调,视觉上「闪白/闪黑」。
+     让 background 瞬间切换反而干净。仅 transition transform/box-shadow(按压反馈)。 */
+  transition: box-shadow 0.14s cubic-bezier(.4,0,.2,1),
               transform 0.08s ease;
 }
 .pb-key.white {
