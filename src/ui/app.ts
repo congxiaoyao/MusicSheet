@@ -816,7 +816,6 @@ export class App {
     this.layout = computeLayout(this.piece, width, this.tool.duration, chordAnchor, chordAnchorDur);
     // 在 innerHTML 替换前,锁定当前 staffY 屏幕(旧内容态),供 height 动画 scrollY 补偿用。
     const prevStaffYScreen = this.measureStaffYScreen();
-    const prevHostTopDoc = this.svgHost.getBoundingClientRect().top + window.scrollY;
     const svg = buildSVG(this.piece, this.layout, this.playingIndex, { hover: this.hover });
     // SVG 内不再画播放头(改由独立 DOM 覆盖层 playheadLayer 驱动)。
     // 注意:innerHTML 会清空 svgHost 所有子元素(含 playheadLayer),需重新 append 回去。
@@ -850,19 +849,17 @@ export class App {
     }
     // height 变化:用首次锁定的 staffAnchorScreen(永不更新),保证累积不漂移
     if (this.staffAnchorScreen === null) this.staffAnchorScreen = prevStaffYScreen;
-    const hostTopDoc = prevHostTopDoc;
-    const off = this.layout.viewBoxYOffset;
     if (this.heightAnimFrame) cancelAnimationFrame(this.heightAnimFrame);
-    // 立即(同步)设 scrollY 到动画起点(startH 对应的补偿值),消除 innerHTML 替换后的跳变帧。
-    // 新 SVG 已渲染(viewBox/height 最终值),但 svgHost height 还在 startH(旧)。
-    // 居底:staffY物理 = hostTopDoc + startH - svgH + 121 + off。scrollY = 物理 - target。
+    // innerHTML 已替换新 SVG,svgHost height 还在 startH(旧)。
+    // 直接读当前 staffY 屏幕位置,算 scrollY 调整量让它 = target(动画起点无跳变)。
     {
-      const startScrollY = hostTopDoc + startH - this.layout.height + 121 + off - (this.staffAnchorScreen ?? 0);
-      window.scrollTo(0, Math.max(0, startScrollY));
+      const curScreen = this.measureStaffYScreen();
+      const adjust = curScreen - (this.staffAnchorScreen ?? curScreen);
+      window.scrollTo(0, Math.max(0, window.scrollY + adjust));
     }
     const startT = performance.now();
     this.heightAnimFrame = requestAnimationFrame((now: number) => {
-      this.heightTick(now, startT, startH, endH, hostTopDoc, this.layout.height, off);
+      this.heightTick(now, startT, startH, endH);
     });
     this.svgHost.appendChild(this.playheadLayer);
     // 状态
@@ -890,19 +887,20 @@ export class App {
     return Math.round(sr.top + (121 - vb.y) * sr.height / vb.height);
   }
 
-  /** 高度动画单帧:插值 svgHost height + 同步 scrollY 补偿 */
-  private heightTick(now: number, startT: number, startH: number, endH: number, hostTopDoc: number, svgH: number, off: number): void {
+  /** 高度动画单帧:插值 svgHost height + 闭环 scrollY 补偿(每帧读实际 staffY 屏幕位置) */
+  private heightTick(now: number, startT: number, startH: number, endH: number): void {
     const t = Math.min(1, (now - startT) / 120);
     const eased = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
     const curH = startH + (endH - startH) * eased;
     this.svgHost.style.height = `${curH}px`;
-    // scrollY = hostTopDoc + curH - svgH + 121 + off - target(居底几何推导)
+    // 闭环:每帧读 staffY 屏幕位置,scrollY 补偿让它 = target(消除公式偏差)
     if (this.staffAnchorScreen !== null) {
-      const scy = hostTopDoc + curH - svgH + 121 + off - this.staffAnchorScreen;
-      window.scrollTo(0, Math.max(0, scy));
+      const curScreen = this.measureStaffYScreen();
+      const adjust = curScreen - this.staffAnchorScreen;
+      window.scrollTo(0, Math.max(0, window.scrollY + adjust));
     }
     if (t < 1) {
-      this.heightAnimFrame = requestAnimationFrame((n: number) => this.heightTick(n, startT, startH, endH, hostTopDoc, svgH, off));
+      this.heightAnimFrame = requestAnimationFrame((n: number) => this.heightTick(n, startT, startH, endH));
     } else {
       this.heightAnimFrame = null;
     }
