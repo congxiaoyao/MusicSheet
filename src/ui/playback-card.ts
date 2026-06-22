@@ -312,6 +312,7 @@ export function buildPlaybackCard(
     keyElByMidi.clear();
 
     const blackKeys: { el: HTMLElement; leftWhiteIdx: number }[] = [];
+    const whiteEls: HTMLElement[] = [];   // 白键 DOM 引用,供黑键挂载后精确定位
     whites.forEach((wmidi, wi) => {
       const el = h('div', 'pb-key white');
       if (wmidi === CENTER_C) el.classList.add('center-c');
@@ -319,6 +320,7 @@ export function buildPlaybackCard(
       if (v.show.name) { const nm = midiName(wmidi); el.appendChild(h('div', 'pb-key-label', `${nm.name}${nm.octave}`)); }
       if (v.show.solfege) { const sf = midiSolfege(wmidi, v.piece.key); if (sf) el.appendChild(h('div', 'pb-key-solfege', sf)); }
       kb.appendChild(el);
+      whiteEls.push(el);
       keyElByMidi.set(wmidi, el);
 
       const pc = ((wmidi % 12) + 12) % 12;
@@ -331,19 +333,30 @@ export function buildPlaybackCard(
         keyElByMidi.set(bmidi, bEl);
       }
     });
-    const whiteCount = whites.length;
-    for (const { el, leftWhiteIdx } of blackKeys) {
-      // 黑键 CSS 百分比定位:白键 box-border 严格等宽后,理论等分准确,无需 rAF(消除延迟闪烁)。
-      // 中心对齐左侧白键右边界:left% = (leftWhiteIdx+1)/whiteCount*100,translateX(-50%) 居中。
-      el.style.left = `${(leftWhiteIdx + 1) / whiteCount * 100}%`;
-      el.style.width = `${1 / whiteCount * 100 * 0.6}%`;
-      el.style.transform = 'translateX(-50%)';
+    for (const { el } of blackKeys) {
       kb.appendChild(el);
     }
+    // 黑键精确定位:挂载后(rAF)读取左侧白键的真实右边界,黑键中心对齐该边界。
+    // 不能用 CSS 百分比等分 ((leftWhiteIdx+1)/whiteCount):keyboard 有 padding:6px,
+    // 百分比相对 padding box(含 padding),而白键在 content box 内,累积偏差越往外越大。
+    // 键盘 DOM 缓存(签名变化才重建),故 rAF 只在重建时跑一次,不会每次 refresh 闪烁。
+    requestAnimationFrame(() => {
+      const kbRect = kb.getBoundingClientRect();
+      for (const { el, leftWhiteIdx } of blackKeys) {
+        const wEl = whiteEls[leftWhiteIdx];
+        if (!wEl) continue;
+        const wRect = wEl.getBoundingClientRect();
+        const bw = wRect.width * 0.6;
+        const centerX = wRect.right - kbRect.left;
+        el.style.width = `${bw}px`;
+        el.style.left = `${(centerX / kbRect.width) * 100}%`;
+        el.style.transform = 'translateX(-50%)';
+      }
+    });
     box.appendChild(kb);
     keyboardKb = kb;
     // 签名:音域 + show 设置,变化才重建
-    keyboardSig = `${whiteCount}|${v.show.octave ? 1 : 0}${v.show.name ? 1 : 0}${v.show.solfege ? 1 : 0}|${v.piece.clef}`;
+    keyboardSig = `${whites.length}|${v.show.octave ? 1 : 0}${v.show.name ? 1 : 0}${v.show.solfege ? 1 : 0}|${v.piece.clef}`;
     return box;
   }
 
