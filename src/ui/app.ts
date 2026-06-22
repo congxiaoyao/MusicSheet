@@ -853,6 +853,13 @@ export class App {
     const hostTopDoc = prevHostTopDoc;
     const off = this.layout.viewBoxYOffset;
     if (this.heightAnimFrame) cancelAnimationFrame(this.heightAnimFrame);
+    // 立即(同步)设 scrollY 到动画起点(startH 对应的补偿值),消除 innerHTML 替换后的跳变帧。
+    // 新 SVG 已渲染(viewBox/height 最终值),但 svgHost height 还在 startH(旧)。
+    // 居底:staffY物理 = hostTopDoc + startH - svgH + 121 + off。scrollY = 物理 - target。
+    {
+      const startScrollY = hostTopDoc + startH - this.layout.height + 121 + off - (this.staffAnchorScreen ?? 0);
+      window.scrollTo(0, Math.max(0, startScrollY));
+    }
     const startT = performance.now();
     this.heightAnimFrame = requestAnimationFrame((now: number) => {
       this.heightTick(now, startT, startH, endH, hostTopDoc, this.layout.height, off);
