@@ -297,14 +297,21 @@ export class App {
   }
 
   private isMouseDown = false;
+  /** mousedown 时记录的音高:按下→抬起若跨多个音高,应按「按下音高」输入而非抬起音高。
+   *  click 事件在 mouseup 后触发,其坐标是抬起位置,故改用 mousedown 记录的音高。 */
+  private downMidi: number | null = null;
 
   private bindCanvas(): void {
     // 阻止双击/拖拽选中文本和音符（CSS user-select:none 的补充）
     this.svgHost.addEventListener('selectstart', (e) => e.preventDefault());
     this.svgHost.addEventListener('dblclick', (e) => e.preventDefault());
 
-    // 记录鼠标按下状态：按下期间绝不重渲染，避免点击中途中断
-    this.svgHost.addEventListener('mousedown', () => { this.isMouseDown = true; });
+    // mousedown:记录按下状态 + 按下位置的音高(用于 click 时按按下音高输入)
+    this.svgHost.addEventListener('mousedown', (e: MouseEvent) => {
+      this.isMouseDown = true;
+      const { y, ok } = this.toSvgCoords(e);
+      this.downMidi = ok ? clickYToMidi(y, this.piece, this.layout) : null;
+    });
     window.addEventListener('mouseup', () => { this.isMouseDown = false; });
 
     // mousemove → 悬停预览。仅当音高真正变化（吸附后的 midi 不同）才重渲染，
@@ -321,11 +328,12 @@ export class App {
     });
     this.svgHost.addEventListener('mouseleave', () => this.clearHover());
 
-    // click → 追加音符。命中范围：整个 SVG 区域（追加式录入里 x 不影响落点，只用 y 决定音高）。
-    this.svgHost.addEventListener('click', (e: MouseEvent) => {
-      const { y, ok } = this.toSvgCoords(e);
-      if (!ok) return;
-      const midi = clickYToMidi(y, this.piece, this.layout);
+    // click → 追加音符。用 mousedown 时记录的音高(按下位置),而非 click 事件坐标
+    // (click 在 mouseup 后触发,坐标是抬起位置;按下→抬起跨音高应按按下音高输入)。
+    this.svgHost.addEventListener('click', () => {
+      if (this.downMidi === null) return;
+      const midi = this.downMidi;
+      this.downMidi = null;
       this.appendNoteWithPitch(midi);
     });
   }
