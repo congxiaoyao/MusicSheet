@@ -3,7 +3,7 @@
 
 import { Note, Piece, DurationValue } from '../core/types';
 import { KEYS } from '../core/theory';
-import { createPiece, appendNote, popNote, remainingBeats, remainingBeatsInCurrentBar, capacityBeats, totalBeats } from '../core/model';
+import { createPiece, appendNote, popNote, remainingBeats, remainingBeatsInCurrentBar, capacityBeats, totalBeats, noteStartBeats } from '../core/model';
 import { computeLayout } from '../render/layout';
 import { buildSVG, exportPNG } from '../render/export';
 import { ensureFontLoaded } from '../render/glyphs';
@@ -752,7 +752,18 @@ export class App {
 
   private render(): void {
     const width = Math.min(1200, Math.max(640, this.svgHost.clientWidth || 940));
-    this.layout = computeLayout(this.piece, width, this.tool.duration);
+    // 和弦输入中:nextSlot 锁定在当前和弦组首音起点,让用户知道「还在这个位置加声部」,
+    // 关和弦后不传 anchor,nextSlot 才跳到 totalBeats(首音结束处)。
+    let chordAnchor: number | undefined;
+    if (this.tool.chordMode && this.currentChordId) {
+      const notes = this.piece.notes;
+      // 找当前和弦组的首音 startBeat
+      const firstIdx = notes.findIndex(n => n.chordId === this.currentChordId);
+      if (firstIdx >= 0) {
+        chordAnchor = noteStartBeats(this.piece)[firstIdx];
+      }
+    }
+    this.layout = computeLayout(this.piece, width, this.tool.duration, chordAnchor);
     const svg = buildSVG(this.piece, this.layout, this.playingIndex, { hover: this.hover });
     // SVG 内不再画播放头(改由独立 DOM 覆盖层 playheadLayer 驱动)。
     // 注意:innerHTML 会清空 svgHost 所有子元素(含 playheadLayer),需重新 append 回去。

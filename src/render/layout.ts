@@ -11,7 +11,7 @@
 
 import { Piece, DurationValue, durationBeats, noteValueBeats } from '../core/types';
 import { beatsPerBar } from '../core/types';
-import { noteStartBeats, capacityBeats, measureOfBeat } from '../core/model';
+import { noteStartBeats, capacityBeats, measureOfBeat, totalBeats } from '../core/model';
 
 export interface Layout {
   width: number;
@@ -80,7 +80,7 @@ const SLOT_MIN: Record<DurationValue, number> = {
   thirtysecond: 2.6,
 };
 
-export function computeLayout(piece: Piece, containerWidth: number, currentDuration: DurationValue = 'quarter'): Layout {
+export function computeLayout(piece: Piece, containerWidth: number, currentDuration: DurationValue = 'quarter', chordAnchorBeat?: number): Layout {
   const fontSize = FONT;
   const staffSpace = SS;
   const width = Math.max(containerWidth, 620);
@@ -125,13 +125,14 @@ export function computeLayout(piece: Piece, containerWidth: number, currentDurat
     noteSlotW.push(slotW);
   }
 
-  // 下一个待输入位置（写满后不显示）
+  // 下一个待输入位置 = totalBeats(跳过和弦尾音,它们与首音同时不占额外拍)。
+  // 旧实现用「末音 endBeat」,但和弦尾音 endBeat=首音start+时值,会多算一拍 →
+  // 和弦模式输入首音后 nextSlot 立即推进,且关和弦后位置错乱。
   const capBeats = capacityBeats(piece);
-  let nextBeat = 0;
-  if (piece.notes.length) {
-    const last = piece.notes.length - 1;
-    nextBeat = starts[last] + durationBeats(piece.notes[last]);
-  }
+  const totalNow = totalBeats(piece);
+  // 和弦输入中:nextSlot 锁定在当前和弦组首音起点,让用户视觉上知道「还在这个位置加声部」,
+  // 关和弦后(app 不再传 chordAnchorBeat)nextSlot 才跳到 totalBeats(首音结束处)。
+  const nextBeat = chordAnchorBeat !== undefined ? chordAnchorBeat : totalNow;
   const isFull = nextBeat >= capBeats - 1e-6;
   // measureOfBeat 浮点鲁棒:三连音填满小节时 nextBeat≈3.9999...,裸 floor 会把
   // 待输入格子算进原小节末尾(余量~4e-16)而非下一小节起点 → 指示框压在小节线上。

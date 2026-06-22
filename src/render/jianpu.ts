@@ -95,8 +95,17 @@ export function renderJianpuSVG(input: RenderInput): string {
     i = j;
   }
   // 和弦内数字纵排:按音高从高到低(简谱数字大→小的音高顺序)从上往下叠。
-  // 行高:一个数字高约 DIGIT_FS*0.75。
-  const CHORD_LINE = DIGIT_FS * 0.78;
+  // 行高动态:字形高约 DIGIT_FS*0.7=18px,基础行高需留间隙;带八度点的声部还需
+  // 额外空间(高音点在数字上方、低音点在下方),按各声部实际占高分配,避免重叠。
+  const DIGIT_HEIGHT = DIGIT_FS * 0.72;   // 数字字形高(baseline 到顶)
+  const DIGIT_DESCEND = DIGIT_FS * 0.18;  // 数字字形下伸(baseline 到底,数字无下伸但留余量)
+  const DOT_GAP = 6;                       // 八度点间距
+  const DOT_R = 2.2;
+  // 八度点中心相对数字 baseline 的偏移:高音点在字形顶上方,低音点在字形底下方。
+  // 第 n 个点(1-indexed)距 baseline:高音 = DIGIT_HEIGHT + 6 + (n-1)*DOT_GAP(往上,y 减);
+  // 低音 = DIGIT_DESCEND + 6 + (n-1)*DOT_GAP(往下,y 加)。
+  const dotUpFromBase = (n: number) => DIGIT_HEIGHT + 6 + (n - 1) * DOT_GAP;
+  const dotDnFromBase = (n: number) => DIGIT_DESCEND + 6 + (n - 1) * DOT_GAP;
 
   for (const [s0, s1] of slots) {
     const head = piece.notes[s0];           // 首音(时值/附点/tuplet 以它为准)
@@ -115,15 +124,38 @@ export function renderJianpuSVG(input: RenderInput): string {
     }
     if (members.length === 0) continue;
 
-    // 和弦纵排:按 midi 升序(高音在上=数字纵排顶部),算每个声部相对 baseY 的偏移。
-    // 单音(members.length===1):offset=0,数字在 baseY。
+    // 和弦纵排:按 midi 升序(高音在上=数字纵排顶部)。动态行高:
+    // 每个声部的「占高」= 数字字形高 + 上方八度点空间 + 下方八度点空间 + 声部间间隙。
+    // 总高 = sum(各声部占高),各声部 baseline 按累计高度居中分布,确保不重叠。
     const sorted = members.slice().sort((a, b) => (a.note.midi ?? 0) - (b.note.midi ?? 0));
     const nM = sorted.length;
+    const GAP = 4;   // 声部间最小间隙
+    // 各声部「占高」(从该声部最高点到最低点):
+    // 高音点(若有)= dotUpFromBase(n) + DOT_R(从 baseline 往上);
+    // 数字 = DIGIT_HEIGHT(从 baseline 往上);
+    // 低音点(若有)= dotDnFromBase(n) + DOT_R(从 baseline 往下) + DIGIT_DESCEND。
+    // 占高 = max(高音点顶, 数字顶) - min(低音点底, 数字底),相对 baseline 上下。
+    type Member = { idx: number; note: Note; jp: NonNullable<ReturnType<typeof noteToJianpu>> };
+    const upExtent = (m: Member): number => {   // baseline 上方占据(正数)
+      const n = m.jp.octaveDots > 0 ? m.jp.octaveDots : 0;
+      return n > 0 ? dotUpFromBase(n) + DOT_R : DIGIT_HEIGHT;
+    };
+    const dnExtent = (m: Member): number => {   // baseline 下方占据(正数)
+      const n = m.jp.octaveDots < 0 ? -m.jp.octaveDots : 0;
+      const dots = n > 0 ? dotDnFromBase(n) + DOT_R : 0;
+      return Math.max(dots, DIGIT_DESCEND);
+    };
+    const slotHeights = sorted.map(m => upExtent(m) + dnExtent(m));
+    const totalH = slotHeights.reduce((a, b) => a + b, 0) + GAP * (nM - 1);
+    // 各声部 baseline(相对组中心):从顶部往下累计。
+    // 第 r 声部顶部 = acc;r 声部 baseline = acc + upExtent(其上方点+字形高);
+    // 然后 acc += 字形下伸 + 下方点 + GAP,到下一声部顶部。
     const offsets = new Map<number, number>();
+    let topAcc = -totalH / 2;   // 第一个声部顶部,相对组中心(baseY)
     for (let r = 0; r < nM; r++) {
-      // 顶部声部(r=0,最高音)在最上方。偏移 = (顶部到该声部)*行高 - 总高的一半居中
-      const off = (r - (nM - 1) / 2) * CHORD_LINE;
-      offsets.set(sorted[r].idx, off);
+      const m = sorted[r];
+      offsets.set(m.idx, topAcc + upExtent(m));   // baseline = 顶部 + 上方占高
+      topAcc += upExtent(m) + dnExtent(m) + GAP;   // 移到下一声部顶部
     }
 
     const slotW = layout.noteSlotW[s0];
@@ -140,16 +172,12 @@ export function renderJianpuSVG(input: RenderInput): string {
       // 数字(休止用 0)
       const digitStr = jp.digit === 0 ? '0' : String(jp.digit);
       s += text(digitStr, x, yRow, DIGIT_FS, { ...jpOpts, weight: '500' });
-      // 八度点(各声部独立,基于该声部 yRow):移到数字 bbox 之外避免重叠。
-      // 数字字号 26,alphabetic baseline=yRow,数字顶约 yRow-18、底约 yRow+6。
-      // 高音点画在数字顶上方(yRow-22 起),低音点画在数字底下方(yRow+10 起)。
-      // 旧实现 yRow-15 / yRow+10 落在数字内部 → 与数字重叠 4-5px。
-      const dotR = 2.2;
-      const DOT_GAP = 6;   // 点间距
+      // 八度点(各声部独立,基于该声部 yRow):画在字形外,偏移与上方动态行高分配一致。
+      // 高音点 y = baseline - dotUpFromBase(n);低音点 y = baseline + dotDnFromBase(n)。
       if (jp.octaveDots > 0) {
-        for (let d = 0; d < jp.octaveDots; d++) s += circle(x, yRow - 22 - d * DOT_GAP, dotR, fill, jpOpts);
+        for (let d = 0; d < jp.octaveDots; d++) s += circle(x, yRow - dotUpFromBase(d + 1), DOT_R, fill, jpOpts);
       } else if (jp.octaveDots < 0) {
-        for (let d = 0; d < -jp.octaveDots; d++) s += circle(x, yRow + 12 + d * DOT_GAP, dotR, fill, jpOpts);
+        for (let d = 0; d < -jp.octaveDots; d++) s += circle(x, yRow + dotDnFromBase(d + 1), DOT_R, fill, jpOpts);
       }
     }
 
