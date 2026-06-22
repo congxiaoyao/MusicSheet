@@ -184,18 +184,25 @@ export function renderJianpuSVG(input: RenderInput): string {
     // 时值修饰(附点/下划线/短横)整组画一次,画在「整组最低声部」下方而非固定 baseY。
     // 和弦纵排时,下划线画在 baseY 会与中间声部数字挤;画在最低声部下方则与所有数字分离。
     // 单音时 lowestYRow = baseY(offset=0),行为与旧实现一致。
-    const lowestYRow = baseY + (offsets.get(sorted[nM - 1].idx) ?? 0);
+    const lowestMember = sorted[nM - 1];
+    const lowestYRow = baseY + (offsets.get(lowestMember.idx) ?? 0);
 
     // 附点:整组画一次(用首音),位置在数字右侧,垂直居中于整组中线
     if (head.dotted) {
       s += circle(x + 11, lowestYRow - 6, 2.2, fill, jpOpts);
     }
 
-    // 下划线(时值<四分):整组画一次(用首音时值),位置在最低声部下方
+    // 下划线(时值<四分):整组画一次(用首音时值),位置在最低声部下方。
+    // 若最低声部有低音点,下划线要从低音点下方开始(否则与低音点挤在一起重叠)。
     const ucount = underlineCount(head.duration, head.dotted);
     const numHalfW = 7;
+    const lowDots = lowestMember.jp.octaveDots < 0 ? -lowestMember.jp.octaveDots : 0;
+    // 下划线起始 y:无低音点=lowestYRow+8;有低音点=lowestYRow+低音点最下+间隙
+    const underlineBaseY = lowDots > 0
+      ? lowestYRow + dotDnFromBase(lowDots) + DOT_R + 3   // 低音点下方 + 3px 间隙
+      : lowestYRow + 8;
     for (let u = 0; u < ucount; u++) {
-      const uy = lowestYRow + 8 + u * 5;
+      const uy = underlineBaseY + u * 5;
       s += line(x - numHalfW, uy, x + numHalfW, uy, fill, 1.4, jpLineOpts);
     }
 

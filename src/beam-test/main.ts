@@ -612,15 +612,51 @@ const cases: Case[] = [
   // 三连音累加让第二个八分 startBeat=0.9999... 而非 1.0，曾导致 groupIndexOfBeat
   // 误判其仍在 beatGroup0 → 八分被并入前组(连梁跨拍),渲染成「83338 / 333」错乱分组。
   // 修复后应按 beatGroup 分成「8333 / 8333」两组:八分与同拍内三连音连成一组,
-  // 主梁贯穿4音,次梁(partial)只在3个十六分之间。0 issue。
+  // ── 57. 16分三连音 符干朝上(低音区)— tuplet 数字与多根梁避让回归 ──
+  // 16分=2根梁,符干朝上时 primary 在最上、次梁在下方朝符头。tuplet 数字应在所有梁外侧。
   {
-    title: '56. 八分+三连音(十六分) 混排（8333 / 8333 分组）',
-    expect: '2组连梁:[八分+三连音3音] [八分+三连音3音];每组主梁贯穿4音,次梁仅在三连音3个十六分之间;0 issue',
-    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 2, notes: [
-      n(C4, e),
-      ...tupGroup([D4, E4, F4], s, 3, 2, 'g8a'),
-      n(G4, e),
-      ...tupGroup([A4, B4, C5], s, 3, 2, 'g8b'),
+    title: '57. 16分三连音 符干朝上(C4 D4 E4)— 数字避开2根梁',
+    expect: '3个16分三连音,符干朝上,2根梁;数字「3」在最上根梁上方,不与任何梁重叠;0 issue',
+    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 1, notes: [
+      ...tupGroup([C4, D4, E4], s, 3, 2, 'g9'),
+    ] },
+  },
+  // ── 58. 16分三连音 跨度大(B4 C5 A4)— 梁倾斜,数字避让 ──
+  // 用户场景:高音跨度大,梁倾斜明显,数字位置易压梁。固化回归。
+  {
+    title: '58. 16分三连音 跨度大(B4 C5 A4)— 梁倾斜,数字避让',
+    expect: '3个16分三连音跨度大,梁倾斜;数字「3」在最外侧梁外,不压最下根梁;0 issue',
+    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 1, notes: [
+      ...tupGroup([B4, C5, A4], s, 3, 2, 'g10'),
+    ] },
+  },
+  // ── 59. 16分三连音 大跨度(A4 B4 A5)— 梁不穿符头 ──
+  // 用户场景:高音5 6 高音6,跨度大(跨八度),中间符头易被梁穿过。
+  // 规范(Gould Behind Bars):梁不应穿过任何符头;符干长度需调整让梁在符头外。
+  {
+    title: '59. 16分三连音 大跨度(A4 B4 A5)— 梁不穿符头',
+    expect: '3个16分三连音跨八度,梁不穿过中间/两端符头;0 issue',
+    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 1, notes: [
+      ...tupGroup([A4, B4, A5], s, 3, 2, 'g11'),
+    ] },
+  },
+  // ── 60. 16分三连音 极端跨度(C4 C5 跨八度,符干朝上)— 次梁避让符头 ──
+  // 真正触发 needShift 约束的场景:跨度极大时次梁需外移避开中间高音符头。
+  {
+    title: '60. 16分三连音 极端跨度(C4 E4 C5)— 次梁避让高音符头',
+    expect: '3个16分三连音跨八度(C4到C5),次梁不穿过C5符头;0 issue',
+    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 1, notes: [
+      ...tupGroup([C4, E4, C5], s, 3, 2, 'g12'),
+    ] },
+  },
+  // ── 61. 简谱混排(高音/低音/普通 + 减时线)— 八度点与减时线位置回归 ──
+  // C5(高音1,上方点) G3(低音5,下方点) E4(普通3) + 八分(减时线)。
+  // 验证:高音点在数字上方、低音点在数字下方、减时线在数字下方,互不重叠。
+  {
+    title: '61. 简谱混排 高/低/普通音 + 减时线',
+    expect: 'C5(高音1+上点) G3(低音5+下点) E4(3) C5八分 G3八分;八度点在字形外,减时线在数字下方;0 issue',
+    piece: { clef: 'treble', key: CKEY, time: T44, measureCount: 1, notes: [
+      n(72, q), n(55, q), n(64, q), n(72, e), n(55, e),
     ] },
   },
 ];

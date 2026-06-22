@@ -294,6 +294,14 @@ export function buildPlaybackCard(
   }
 
   // ── 键位区 ──
+  // 键盘 DOM 缓存:只在音域/show 设置变化时重建,播放高亮只切 .active class。
+  // 旧实现每次 refresh 都重建键盘 + rAF 定位黑键 → 播放时闪烁(第一帧旧位置第二帧新位置)
+  // + 卡顿(rAF 堆积)。重构后高亮零成本,跟随播放同步。
+  let keyboardKb: HTMLElement | null = null;   // 缓存的 .pb-keyboard 元素
+  let keyboardSig = '';                          // 上次重建的签名(音域+show),变化才重建
+  /** midi → 键元素 的映射(重建时填充),供 updateKeyboardHighlight 切 class */
+  const keyElByMidi = new Map<number, HTMLElement>();
+
   function buildKeyboard(): HTMLElement {
     const v = getView();
     const box = h('div', 'pb-keys');
@@ -301,71 +309,86 @@ export function buildPlaybackCard(
     kb.appendChild(h('div', 'pb-center-mark'));
 
     const whites = whiteKeyRange(v.piece);
-
-    // 当前应高亮的 midi 集合。playingIndex 是当前时间位首音;
-    // 若它在和弦组里,整组声部都高亮(和弦多键同亮)。
-    const activeSet = new Set<number>();
-    if (v.playingIndex >= 0 && v.playingIndex < v.piece.notes.length) {
-      const head = v.piece.notes[v.playingIndex];
-      if (head.chordId) {
-        // 和弦:收集同组所有声部的 midi
-        for (const n of v.piece.notes) {
-          if (n.chordId !== head.chordId || n.midi === null) continue;
-          const hm = highlightMidi(n, v.piece.key, v.fingering);
-          if (hm !== null) activeSet.add(hm);
-        }
-      } else {
-        const hm = highlightMidi(head, v.piece.key, v.fingering);
-        if (hm !== null) activeSet.add(hm);
-      }
-    }
+    keyElByMidi.clear();
 
     const blackKeys: { el: HTMLElement; leftWhiteIdx: number }[] = [];
-    const whiteEls: HTMLElement[] = [];   // 白键 DOM 引用,供黑键精确定位(读取真实 offsetLeft/offsetWidth)
     whites.forEach((wmidi, wi) => {
       const el = h('div', 'pb-key white');
-      if (activeSet.has(wmidi)) el.classList.add('active');
       if (wmidi === CENTER_C) el.classList.add('center-c');
       if (v.show.octave && isC(wmidi)) el.appendChild(h('div', 'pb-key-octave', `C${Math.floor(wmidi / 12) - 1}`));
       if (v.show.name) { const nm = midiName(wmidi); el.appendChild(h('div', 'pb-key-label', `${nm.name}${nm.octave}`)); }
       if (v.show.solfege) { const sf = midiSolfege(wmidi, v.piece.key); if (sf) el.appendChild(h('div', 'pb-key-solfege', sf)); }
       kb.appendChild(el);
-      whiteEls.push(el);
+      keyElByMidi.set(wmidi, el);
 
       const pc = ((wmidi % 12) + 12) % 12;
       if (![4, 11].includes(pc)) {
         const bmidi = wmidi + 1;
         const bEl = h('div', 'pb-key black');
-        if (activeSet.has(bmidi)) bEl.classList.add('active');
         if (v.show.name) { const nm = midiName(bmidi); bEl.appendChild(h('div', 'pb-key-label', `${nm.name}${nm.octave}`)); }
         if (v.show.solfege) { const sf = midiSolfege(bmidi, v.piece.key); if (sf) bEl.appendChild(h('div', 'pb-key-solfege', sf)); }
         blackKeys.push({ el: bEl, leftWhiteIdx: wi });
+        keyElByMidi.set(bmidi, bEl);
       }
     });
-    for (const { el } of blackKeys) {
+    const whiteCount = whites.length;
+    for (const { el, leftWhiteIdx } of blackKeys) {
+      // 黑键 CSS 百分比定位:白键 box-border 严格等宽后,理论等分准确,无需 rAF(消除延迟闪烁)。
+      // 中心对齐左侧白键右边界:left% = (leftWhiteIdx+1)/whiteCount*100,translateX(-50%) 居中。
+      el.style.left = `${(leftWhiteIdx + 1) / whiteCount * 100}%`;
+      el.style.width = `${1 / whiteCount * 100 * 0.6}%`;
+      el.style.transform = 'translateX(-50%)';
       kb.appendChild(el);
     }
-    // 黑键精确定位:挂载后读取左侧白键的真实右边界位置(px),黑键中心对齐该边界。
-    // 旧实现用 (leftWhiteIdx+1)/whiteCount 理论等分,但 keyboard padding/border 让白键
-    // 实际起始偏移,理论值与真实边界有偏差,越往两端累积越大 →「越往两端越偏」。
-    // 用真实 DOM 位置彻底消除偏差;translateX(-50%) 让黑键中心(非左边缘)对齐边界。
-    requestAnimationFrame(() => {
-      const kbRect = kb.getBoundingClientRect();
-      for (const { el, leftWhiteIdx } of blackKeys) {
-        const wEl = whiteEls[leftWhiteIdx];
-        if (!wEl) continue;
-        const wRect = wEl.getBoundingClientRect();
-        // 黑键宽度 = 白键真实宽度的 60%
-        const bw = wRect.width * 0.6;
-        // 黑键中心 = 左侧白键的右边界(px),转成相对 kb 的百分比
-        const centerX = wRect.right - kbRect.left;
-        el.style.width = `${bw}px`;
-        el.style.left = `${(centerX / kbRect.width) * 100}%`;
-        el.style.transform = 'translateX(-50%)';   // 中心对齐边界
-      }
-    });
     box.appendChild(kb);
+    keyboardKb = kb;
+    // 签名:音域 + show 设置,变化才重建
+    keyboardSig = `${whiteCount}|${v.show.octave ? 1 : 0}${v.show.name ? 1 : 0}${v.show.solfege ? 1 : 0}|${v.piece.clef}`;
     return box;
+  }
+
+  /** 计算当前应高亮的 midi 集合(playingIndex 对应音 + 和弦组全部声部) */
+  function computeActiveMidis(): Set<number> {
+    const v = getView();
+    const set = new Set<number>();
+    if (v.playingIndex >= 0 && v.playingIndex < v.piece.notes.length) {
+      const head = v.piece.notes[v.playingIndex];
+      if (head.chordId) {
+        for (const n of v.piece.notes) {
+          if (n.chordId !== head.chordId || n.midi === null) continue;
+          const hm = highlightMidi(n, v.piece.key, v.fingering);
+          if (hm !== null) set.add(hm);
+        }
+      } else {
+        const hm = highlightMidi(head, v.piece.key, v.fingering);
+        if (hm !== null) set.add(hm);
+      }
+    }
+    return set;
+  }
+
+  /** 只更新键高亮(切 .active class),不重建键盘。播放高频回调用,零闪烁零延迟。 */
+  function updateKeyboardHighlight(): void {
+    if (!keyboardKb) return;
+    const active = computeActiveMidis();
+    // 遍历缓存的键元素,按是否在 active 集合切 class
+    keyElByMidi.forEach((el, midi) => {
+      if (active.has(midi)) el.classList.add('active');
+      else el.classList.remove('active');
+    });
+  }
+
+  /** 音域/show 设置变化时重建键盘(签名比对),否则跳过 */
+  function maybeRebuildKeyboard(): void {
+    const v = getView();
+    const whites = whiteKeyRange(v.piece);
+    const sig = `${whites.length}|${v.show.octave ? 1 : 0}${v.show.name ? 1 : 0}${v.show.solfege ? 1 : 0}|${v.piece.clef}`;
+    if (sig !== keyboardSig) {
+      const newBox = buildKeyboard();
+      keyboardBox.replaceWith(newBox);
+      keyboardBox = newBox;
+    }
+    updateKeyboardHighlight();
   }
 
   // ── 组装 ──
@@ -441,15 +464,14 @@ export function buildPlaybackCard(
     // 进度
     setProgress(v.currentBeat);
     redrawTrackTicks();
-    // 键盘重建（音域/高亮/标注都可能变）
-    const newKb = buildKeyboard();
-    keyboardBox.replaceWith(newKb);
-    keyboardBox = newKb;
+    // 键盘:音域/show 变化才重建,否则只更新高亮(零闪烁)
+    maybeRebuildKeyboard();
   }
 
   // 暴露命令式 API（项目约定：挂 DOM 上）
   (card as any)._refresh = refresh;
   (card as any)._setProgress = setProgress;
+  (card as any)._updateHighlight = updateKeyboardHighlight;   // 高频高亮更新(不重建键盘)
   (card as any)._closeSettings = () => { settingsPanel.classList.remove('open'); settingsBtn.classList.remove('active'); };
 
   // 首次填充

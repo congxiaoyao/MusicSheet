@@ -54,12 +54,13 @@ export class App {
       // onNote 不再驱动高亮(改由 onTick 统一更新,避免数据源不一致导致「落后一个音符」)。
       // 保留回调供未来用途(如 MIDI 输出),当前空实现。
       onNote: () => {},
-      // onTick:单一数据源 currentBeat → 同时更新进度条 + 编辑区播放头 + 符头高亮。
-      // 这保证三者完全同步,不再出现「播放头滞后/暂停才刷新」。
+      // onTick:单一数据源 currentBeat → 同时更新进度条 + 编辑区播放头 + 符头高亮 + 键盘高亮。
+      // 这保证四者完全同步,不再出现「播放头滞后/键盘高亮不跟随」。
       onTick: (beat) => {
         this.currentBeat = beat;
         (this.playbackCard as any)._setProgress?.(beat);
         this.updatePlayheadAndHighlight();
+        (this.playbackCard as any)._updateHighlight?.();   // 键盘高亮(只切 class,不重建)
       },
       onStateChange: (s) => {
         this.playState = s;
@@ -183,7 +184,9 @@ export class App {
       trigger.classList.toggle('is-open', open);
       if (open) {
         const r = trigger.getBoundingClientRect();
-        // 边界感知定位:默认右对齐(菜单右边贴按钮右边),若左侧空间不足则左对齐
+        // 边界感知定位(水平 + 垂直):
+        // 水平:默认右对齐(菜单右边贴按钮右边),若左侧空间不足则左对齐
+        // 垂直:默认向下展开,若下方空间不足则向上展开(避免被视口底/页底裁切)
         const menuW = 200;
         const margin = 8;
         let left: number;
@@ -193,8 +196,18 @@ export class App {
           left = margin;                      // 左侧不够:贴左边
         }
         menu.style.left = `${left}px`;
-        menu.style.top = `${r.bottom + 6}px`;
         menu.style.minWidth = `${menuW}px`;
+        // 先设 top(向下),测高度后判断是否需向上
+        menu.style.top = `${r.bottom + 6}px`;
+        // 用 rAF 等渲染后测实际高度,若超出视口底部则向上展开
+        requestAnimationFrame(() => {
+          const menuH = menu.getBoundingClientRect().height;
+          const spaceBelow = window.innerHeight - r.bottom;
+          if (menuH + margin > spaceBelow && r.top > menuH + margin) {
+            // 下方不够且上方够:向上展开
+            menu.style.top = `${r.top - menuH - 6}px`;
+          }
+        });
       }
     });
     // 点外部关闭
@@ -616,10 +629,35 @@ export class App {
       }
     }
 
-    // chord 状态:currentChordId 不在末尾时清掉
-    const last = notes[notes.length - 1];
-    if (this.currentChordId && (!last || last.chordId !== this.currentChordId)) {
-      this.currentChordId = null;
+    // chord 状态修正(对齐 tuplet 逻辑):
+    // 删除的和弦尾音,若组还有残音 → 恢复 currentChordId + 开和弦模式,让用户继续补;
+    // 若组删到只剩1音 → 清掉它的 chordId(单音不该带和弦标记);若删空 → 关模式。
+    const removedChord = removed.chordId;
+    if (removedChord) {
+      const remainInChord = notes.filter(n => n.chordId === removedChord);
+      if (remainInChord.length === 0) {
+        // 组删空
+        this.currentChordId = null;
+        this.tool.chordMode = false;
+        (this.toolbar as any)._setChordMode?.(false);
+      } else if (remainInChord.length === 1) {
+        // 只剩1音:清掉 chordId 变普通单音(单音不该是和弦)
+        remainInChord[0].chordId = undefined;
+        this.currentChordId = null;
+        this.tool.chordMode = false;
+        (this.toolbar as any)._setChordMode?.(false);
+      } else {
+        // 还有2+残音:恢复 currentChordId + 开和弦模式,让用户继续补声部
+        this.currentChordId = removedChord;
+        this.tool.chordMode = true;
+        (this.toolbar as any)._setChordMode?.(true);
+      }
+    } else {
+      // 删的是普通音(非和弦):currentChordId 不在末尾时清掉避免误复用
+      const last = notes[notes.length - 1];
+      if (this.currentChordId && (!last || last.chordId !== this.currentChordId)) {
+        this.currentChordId = null;
+      }
     }
     this.render();
   }
