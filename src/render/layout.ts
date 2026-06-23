@@ -207,11 +207,14 @@ export function computeLayout(piece: Piece, containerWidth: number, currentDurat
  *  兜底：若音符的 beatInBar 超出小节容量(超拍数据)，clamp 到小节内，
  *  防止音符漂到下一小节视觉区/压小节线。可能和相邻音符挤一起，但至少在小节框内。 */
 function positionInBar(notes: Piece['notes'], startBeat: number, barIdx: number, barWidth: number, bpb: number, noteIdx: number, barLines: number[]): { x: number; slotW: number } {
-  const dur = durationBeats(notes[noteIdx]);
+  const note = notes[noteIdx];
+  const dur = durationBeats(note);
   // clamp beatInBar 到 [0, bpb - dur]：超拍时不让音符漂出当前小节
   const rawBeatInBar = startBeat - barIdx * bpb;
   const beatInBar = Math.min(Math.max(0, rawBeatInBar), Math.max(0, bpb - dur));
-  const slotW = (dur / bpb) * barWidth;
+  // slotW 用 slotWidthFor(与 nextSlot 一致,保证 noteX 与 nextSlotX 对齐):
+  // 短时值(32分)纯时值占比 slotW 过窄,需 SLOT_MIN 兜底,否则 noteX[0] ≠ 空谱 nextSlotX 导致符头偏移。
+  const slotW = slotWidthFor(note.duration, bpb, barWidth);
   const x = barLines[barIdx] + beatInBar / bpb * barWidth + slotW / 2;
   return { x, slotW };
 }
