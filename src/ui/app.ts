@@ -8,6 +8,7 @@ import { computeLayout, Layout } from '../render/layout';
 import { buildSVG, exportPNG } from '../render/export';
 import { ensureFontLoaded } from '../render/glyphs';
 import { clickYToMidi } from '../render/staff';
+import { computeBeams, indexBeamMap } from '../render/beam';
 import { buildToolbar, defaultTool, ToolState, TUPLET_CONFIG, TupletMode, tupletModeForActual } from './toolbar';
 import { Player, PlayState } from '../audio/player';
 import { buildPlaybackCard, loadFingering, loadShow, saveFingering, saveShow, Fingering, ShowFlags, PlaybackView } from './playback-card';
@@ -36,8 +37,16 @@ export class App {
    *  height 变化(加/删极端音)时用 scrollY + svg/jianpu transform 三路同步插值,让五线谱屏幕恒定。 */
   private staffAnchorScreen: number | null = null;
   private heightAnimFrame: number | null = null;
+  /** 指示器平移动画的 rAF id(与 heightTick 同款 JS 逐帧驱动,SVG CSS transform transition 不可靠)。 */
+  private slotAnimFrame: number | null = null;
+  /** 新音淡入动画的 rAF id(JS 逐帧 opacity,避免 CSS transition 与 heightTick rAF 交错失效)。 */
+  private noteAnimFrame: number | null = null;
   /** 上次 render 的 layout,用于算 offDelta(高音扩展量)/jpDelta(简谱下移量)。 */
   private lastLayout: Layout | null = null;
+  /** 上次 render 的音符数,用于判断本次 render 是新增(末尾淡入)/删除(残影淡出)/其它(不动画)。 */
+  private lastNoteCount = 0;
+  /** 上次 render 的连梁组(供连梁刷新时克隆「旧组范围」做残影,新音加入会改变组形状)。 */
+  private lastBeamGroups: { startIdx: number; endIdx: number }[] = [];
   private statusEl!: HTMLElement;
   private bpm = 100;
   private playingIndex = -1;
@@ -371,12 +380,15 @@ export class App {
   }
 
   private toSvgCoords(e: MouseEvent): { x: number; y: number; ok: boolean } {
+    // 用 svg 自身的 getBoundingClientRect(直接反映 svg 实际渲染位置,最准确)。
+    // 不要用 svgHost rect + padding 推算:absolute 的 svg top:0 贴 padding box 顶,
+    // 实测 svgRect.top - hostRect.top ≈ border(非 padding),推算会引入 ~7px 系统偏差。
     const svg = this.svgHost.querySelector('svg');
     if (!svg) return { x: 0, y: 0, ok: false };
     const rect = svg.getBoundingClientRect();
     const x = ((e.clientX - rect.left) / rect.width) * this.layout.width;
     // y 映射要考虑 viewBox 的 y 起点(-viewBoxYOffset):SVG 物理顶对应 viewBox y=-offset,
-    // 故内部 y = (距物理顶比例) * viewBox高 + viewBoxY起点。margin-top 上移不影响(rect 已反映真实位置)。
+    // 故内部 y = (距物理顶比例) * viewBox高 + viewBoxY起点。
     const vbY0 = -this.layout.viewBoxYOffset;
     const y = ((e.clientY - rect.top) / rect.height) * this.layout.height + vbY0;
     return { x, y, ok: true };
@@ -833,6 +845,10 @@ export class App {
     const prevStaffYScreen = this.measureStaffYScreen();
     const prevScrollY = window.scrollY;
     const startH = parseFloat(this.svgHost.style.height) || (this.layout.height + 16);
+    // ── 增删音动画:innerHTML 替换前抓旧状态 ──
+    const noteDelta = this.piece.notes.length - this.lastNoteCount;  // >0 新增,<0 删除,0 无变化
+    const oldNextSlotX = this.lastLayout ? this.lastLayout.nextSlotX : null;
+    const oldSvgEl = this.svgHost.querySelector('svg') as SVGSVGElement | null;  // 删除时克隆残影用
     // 渲染新 SVG
     const svg = buildSVG(this.piece, this.layout, this.playingIndex, { hover: this.hover });
     this.svgHost.innerHTML = svg;
@@ -863,6 +879,8 @@ export class App {
       if (jg) jg.style.transform = '';
       this.staffAnchorScreen = this.measureStaffYScreen();
       this.lastLayout = this.layout;
+      this.lastNoteCount = this.piece.notes.length;
+      this.lastBeamGroups = computeBeams(this.piece).map(g => ({ startIdx: g.startIdx, endIdx: g.endIdx }));
       finalize();
       return;
     }
@@ -874,6 +892,9 @@ export class App {
       if (jg) jg.style.transform = '';
       this.lastLayout = this.layout;
       finalize();
+      this.applyNoteAnim(noteDelta, oldNextSlotX, oldSvgEl, svgEl, false);
+      this.lastNoteCount = this.piece.notes.length;
+      this.lastBeamGroups = computeBeams(this.piece).map(g => ({ startIdx: g.startIdx, endIdx: g.endIdx }));
       return;
     }
 
@@ -898,6 +919,9 @@ export class App {
     });
     this.lastLayout = this.layout;
     finalize();
+    this.applyNoteAnim(noteDelta, oldNextSlotX, oldSvgEl, svgEl, true);
+    this.lastNoteCount = this.piece.notes.length;
+    this.lastBeamGroups = computeBeams(this.piece).map(g => ({ startIdx: g.startIdx, endIdx: g.endIdx }));
   }
 
   /** 测量五线谱 bottomLineY 当前屏幕 y(高度动画锚定 + 播放头等共用) */
@@ -907,6 +931,181 @@ export class App {
     const sr = svg.getBoundingClientRect();
     const vb = (svg as SVGSVGElement).viewBox.baseVal;
     return Math.round(sr.top + (121 - vb.y) * sr.height / vb.height);
+  }
+
+  /** 收集 lastIdx 所在连梁组的所有元素(供新音加入连梁组时整组刷新)。
+   *  和弦尾音不在 BeamGroup(computeBeams 跳过 tail),需往前找同 chordId 的首音定位组。
+   *  返回 {grp, beams, noteEls}:grp=组范围;beams=组内梁 polygon;noteEls=组内所有音符元素。
+   *  grp=null 表示 lastIdx 不在任何连梁组里(非连梁时值或孤立音)。 */
+  private collectBeamGroupEls(lastIdx: number): { grp: { startIdx: number; endIdx: number } | null; beams: SVGElement[]; noteEls: SVGElement[] } {
+    const notes = this.piece.notes;
+    // 定位 lastIdx 在连梁组里的代表索引:和弦尾音 → 组内首音 idx
+    let probeIdx = lastIdx;
+    const last = notes[lastIdx];
+    if (last?.chordId) {
+      // 往前找同 chordId 的首音
+      for (let i = lastIdx; i >= 0; i--) {
+        if (notes[i].chordId === last.chordId && !(i > 0 && notes[i - 1].chordId === last.chordId)) {
+          probeIdx = i; break;
+        }
+      }
+    }
+    const groups = computeBeams(this.piece);
+    const grp = indexBeamMap(groups).get(probeIdx);
+    if (!grp) return { grp: null, beams: [], noteEls: [] };
+    // 组内所有梁 polygon 带 class beam-grp-${startIdx}
+    const beams = Array.from(this.svgHost.querySelectorAll(`.beam-grp-${grp.startIdx}`)) as SVGElement[];
+    // 组内所有音符元素(startIdx..endIdx 各 idx 的 [data-idx]):整组刷新,让老音符也参与透明变化
+    const noteEls: SVGElement[] = [];
+    for (let i = grp.startIdx; i <= grp.endIdx; i++) {
+      noteEls.push(...Array.from(this.svgHost.querySelectorAll(`[data-idx="${i}"]`)) as SVGElement[]);
+    }
+    return { grp: { startIdx: grp.startIdx, endIdx: grp.endIdx }, beams, noteEls };
+  }
+
+  /** 从旧 svg 克隆「变化的连梁组」的老内容(梁 polygon + 组内音符),挂到 staff-group 做残影淡出。
+   *  连梁刷新时:老组(旧形状,如独立 flag)淡出 1→0,新组(新形状)淡入 0→1,交叉淡化。
+   *  范围用 lastBeamGroups(旧连梁组),而非新组 —— 新音加入会改变组结构,新组范围在旧 svg 里不存在。
+   *  oldSvgEl 是 innerHTML 替换前的旧 svg(已脱离 DOM 但引用还在)。 */
+  private cloneOldBeamGhost(oldSvgEl: SVGSVGElement | null): SVGElement[] {
+    if (!oldSvgEl || !this.lastBeamGroups.length) return [];
+    const staffGroup = this.svgHost.querySelector('.staff-group') as SVGGElement | null;
+    if (!staffGroup) return [];
+    const oldStaff = oldSvgEl.querySelector('.staff-group');
+    if (!oldStaff) return [];
+    // 收集旧连梁组覆盖的所有 idx(只限五线谱侧 staff-group,简谱侧无连梁)
+    const idxSet = new Set<number>();
+    for (const g of this.lastBeamGroups) {
+      for (let i = g.startIdx; i <= g.endIdx; i++) idxSet.add(i);
+    }
+    // 选择器:旧 staff-group 内的梁 polygon + 这些 idx 的音符元素
+    const sel: string[] = [`[class*="beam-grp-"]`];
+    for (const i of idxSet) sel.push(`[data-idx="${i}"]`);
+    const oldEls = Array.from(oldStaff.querySelectorAll(sel.join(','))) as SVGElement[];
+    if (!oldEls.length) return [];
+    const clones: SVGElement[] = [];
+    for (const el of oldEls) {
+      const c = el.cloneNode(true) as SVGElement;
+      c.classList.add('beam-ghost');
+      staffGroup.appendChild(c);
+      clones.push(c);
+    }
+    return clones;
+  }
+
+  /** 增删音过渡动画注入(innerHTML 替换后调用)。
+   *  - noteDelta>0(新增):末尾音符元素淡入(opacity+轻微上浮,120ms easeOutCubic)+连梁整组刷新
+   *  - noteDelta<0(删除):克隆旧 svg 为残影层淡出。但删除极端音触发高度回缩时跳过残影
+   *    (heightTick 的 viewBox transform 与残影层(旧坐标系)叠加会露馅,此时优先保证五线谱不动)
+   *  - 指示器位移:nextSlot 从旧位 slide 到新位,或 fade(按 indicatorMode)
+   *  所有动画统一 120ms easeOutCubic,与高度动画 heightTick 协调。 */
+  private applyNoteAnim(
+    noteDelta: number, oldNextSlotX: number | null,
+    oldSvgEl: SVGSVGElement | null, newSvgEl: SVGSVGElement | null,
+    heightChanging: boolean,
+  ): void {
+    // 删除:克隆旧 svg 残影淡出。高度变化时跳过(避免与 heightTick transform 叠加露馅)
+    if (noteDelta < 0 && oldSvgEl && !heightChanging) {
+      const ghost = oldSvgEl.cloneNode(true) as SVGSVGElement;
+      ghost.classList.add('fade-ghost');
+      ghost.removeAttribute('width'); ghost.removeAttribute('height');
+      ghost.setAttribute('width', '100%');
+      // 残影高度用旧 viewBox 比例保持,宽度 100% 与新 svg 重叠
+      this.svgHost.appendChild(ghost);
+      // 强制重绘后触发淡出
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          ghost.classList.add('fade-ghost-out');
+        });
+      });
+      const removeGhost = () => { ghost.remove(); };
+      ghost.addEventListener('transitionend', removeGhost, { once: true });
+      // 兜底:transitionend 偶尔不触发(被中断),定时移除
+      window.setTimeout(removeGhost, 200);
+    }
+
+    // 新增:末尾音符元素淡入 + 纵向弹起(从 hover 原位上去再下来)。
+    // opacity(0.55→1)衔接 hover ghost 终态;translateY 用 sin 曲线(0→-AMP→0)先上后下,弹起感。
+    // 连梁场景:新音加入连梁组时,老组全部内容(梁+符头+符干+符尾)克隆残影淡出 + 新组整体淡入跳动。
+    if (noteDelta > 0 && newSvgEl) {
+      const lastIdx = this.piece.notes.length - 1;
+      const els = Array.from(this.svgHost.querySelectorAll(`[data-idx="${lastIdx}"]`)) as SVGElement[];
+      const lastNote = this.piece.notes[lastIdx];
+      // tieRepeat 场景:新 tie 弧线随新音淡入
+      const tieEls = lastNote?.tieEnd
+        ? Array.from(this.svgHost.querySelectorAll('.tie-elem')) as SVGElement[]
+        : [];
+      // 连梁场景:末音属于连梁组 → 整组交叉淡化(老残影淡出 + 新组整体淡入跳动)
+      const beam = this.collectBeamGroupEls(lastIdx);
+      // 弹起跳动元素:连梁时整组(所有音符 + 梁 polygon)一起跳;非连梁时只有新音
+      const jumpEls = beam.grp ? [...beam.noteEls, ...beam.beams] : els;
+      // 新音从 0.55 起(衔接 hover);连梁组的老音符/梁/tie 从 0 起(纯淡入,交叉淡化老残影)
+      const hoverLinkEls = els;            // 新音:opacity 0.55→1
+      const hoverSet = new Set<SVGElement>(els);
+      const fadeInEls = [...tieEls, ...beam.beams, ...beam.noteEls].filter(el => !hoverSet.has(el as SVGElement));
+      // 连梁老残影:从 oldSvgEl 克隆旧连梁组内容(用 lastBeamGroups 旧范围),淡出 1→0
+      const oldBeamEls = (beam.grp && beam.beams.length)
+        ? this.cloneOldBeamGhost(oldSvgEl)
+        : [];
+
+      // 初始态
+      hoverLinkEls.forEach(el => { el.style.opacity = '0.55'; });
+      fadeInEls.forEach(el => { el.style.opacity = '0'; });
+      // 弹起:jumpEls translateY 用 sin(0→-AMP→0),从原位上去再下来
+      const AMP = 4;
+      if (this.noteAnimFrame) cancelAnimationFrame(this.noteAnimFrame);
+      const noteStart = performance.now();
+      const noteTick = (now: number) => {
+        const t = Math.min(1, (now - noteStart) / 120);
+        const eased = 1 - Math.pow(1 - t, 3);   // opacity 用 easeOutCubic
+        // translateY 弹起:0→-AMP→0(前半上升,后半回落)
+        const ty = -AMP * Math.sin(t * Math.PI);
+        const linkOp = 0.55 + 0.45 * eased;
+        const fadeInOp = eased;   // 0→1
+        const fadeOutOp = 1 - eased;   // 1→0(老残影)
+        hoverLinkEls.forEach(el => { el.style.opacity = String(linkOp); });
+        fadeInEls.forEach(el => { el.style.opacity = String(fadeInOp); });
+        oldBeamEls.forEach(el => { el.style.opacity = String(fadeOutOp); });
+        jumpEls.forEach(el => { el.style.transform = ty !== 0 ? `translateY(${ty.toFixed(2)}px)` : ''; });
+        if (t < 1) {
+          this.noteAnimFrame = requestAnimationFrame(noteTick);
+        } else {
+          this.noteAnimFrame = null;
+          hoverLinkEls.forEach(el => { el.style.opacity = ''; });
+          jumpEls.forEach(el => { el.style.transform = ''; });
+          fadeInEls.forEach(el => { el.style.opacity = ''; });
+          oldBeamEls.forEach(el => { el.remove(); });   // 移除老残影
+        }
+      };
+      this.noteAnimFrame = requestAnimationFrame(noteTick);
+    }
+
+    // 指示器平移:nextSlot 从旧位 slide 到新位(统一只用平移动画)。
+    // 用 JS rAF 逐帧插值(SVG 元素的 CSS transform transition 不可靠会瞬间跳;与 heightTick 同款 easeOutCubic)。
+    const slot = this.svgHost.querySelector('.next-slot') as SVGRectElement | null;
+    if (slot && oldNextSlotX !== null && !this.layout.isFull) {
+      const dx = this.layout.nextSlotX - oldNextSlotX;
+      if (Math.abs(dx) > 0.5) {
+        // 停掉呼吸动画,位移期间手动控制 transform
+        slot.style.animation = 'none';
+        slot.style.transform = `translateX(${-dx}px)`;
+        if (this.slotAnimFrame) cancelAnimationFrame(this.slotAnimFrame);
+        const slideStart = performance.now();
+        const slideTick = (now: number) => {
+          const t = Math.min(1, (now - slideStart) / 120);
+          const eased = 1 - Math.pow(1 - t, 3);   // easeOutCubic,与 heightTick 一致
+          slot.style.transform = `translateX(${-dx * (1 - eased)}px)`;
+          if (t < 1) {
+            this.slotAnimFrame = requestAnimationFrame(slideTick);
+          } else {
+            this.slotAnimFrame = null;
+            slot.style.transform = '';
+            slot.style.animation = '';   // 恢复呼吸动画
+          }
+        };
+        this.slotAnimFrame = requestAnimationFrame(slideTick);
+      }
+    }
   }
 
   /** 高度动画单帧:三路同步插值

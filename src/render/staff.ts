@@ -339,10 +339,12 @@ function renderNextSlot(layout: Layout): string {
   const h = (layout.staffBottom - layout.staffTop) + layout.staffSpace;
   const x = layout.nextSlotX - w / 2;
   const y = layout.staffTop - layout.staffSpace / 2;
-  return rect(x, y, w, h, { fill: 'none', stroke: '#4f46e5', sw: 1.5, rx: 7, class: 'next-slot' });
+  return rect(x, y, w, h, { fill: 'none', stroke: '#1f2430', sw: 1.5, rx: 7, class: 'next-slot' });
 }
 
-/** 悬停 ghost 音符（预览即将输入的音）。当音超出五线谱范围时，联动指示对应加线。 */
+/** 悬停 ghost 音符（预览即将输入的音）。黑色半透明符头 + 联动加线，超出五线谱时画出对应加线。
+ *  颜色用黑(与正式音一致)+ CSS 半透明(opacity:0.55),点击转正时 opacity 0.55→1 平滑过渡。
+ *  去掉了横跨全谱表的贯穿辅助线(太抢眼),只在 ghost 处保留加线指示。 */
 function renderHover(input: RenderInput, layout: Layout): string {
   if (!input.hover) return '';
   const { midi, x } = input.hover;
@@ -350,13 +352,11 @@ function renderHover(input: RenderInput, layout: Layout): string {
   // y 由 midi → step
   const step = midiStep(midi, input.piece);
   const y = stepToY(step, layout);
-  const glyph = input.piece.notes.length >= 0 ? G.noteheadBlack : G.noteheadBlack;
-  // 用半透明音符头 + 一条贯穿的细辅助线
+  const glyph = G.noteheadBlack;
   let s = '';
-  s += line(layout.barLines[0], y, layout.barLines[layout.barLines.length - 1], y, '#a5b4fc', 1, { class: 'hover-guide' });
-  // 联动加线指示：音超出五线谱时，用指示色画出对应加线
+  // 联动加线指示：音超出五线谱时,用黑色画出对应加线(与正式加线同色,CSS 半透明区分)
   // (do=C4 step-2 及更低 → 下加线 / 高音6=A5 step10 及更高 → 上加线)
-  const acc = '#a5b4fc';
+  const acc = '#1f2430';
   if (step > 8) {
     for (let st = 10; st <= step; st += 2) {
       const ly = stepToY(st, layout);
@@ -368,7 +368,7 @@ function renderHover(input: RenderInput, layout: Layout): string {
       s += line(x - ss * 1.15, ly, x + ss * 1.15, ly, acc, W_LEDGER * ss, { class: 'hover-guide' });
     }
   }
-  s += text(glyph, x, y, layout.fontSize, { fill: '#a5b4fc', class: 'hover-note' });
+  s += text(glyph, x, y, layout.fontSize, { fill: '#1f2430', class: 'hover-note hover-ghost' });
   void ss;
   return s;
 }
@@ -404,6 +404,8 @@ function renderBeams(groups: BeamGroup[], piece: Piece, layout: Layout): { svg: 
   const thick = BEAM_THICKNESS * ss;
 
   for (const g of groups) {
+    // 连梁组标识(供增删音动画选中整组梁做刷新淡入):用组首音 idx 唯一标识
+    const beamCls = `beam-grp-${g.startIdx}`;
     // 收集组内「时间位首音」的原始数据。和弦首音代表整个和弦:收集组内所有声部 step。
     // 和弦尾音不在 BeamGroup 里(computeBeams 跳过了 tail),故无需在此处理。
     const idxs: number[] = [];        // 时间位首音索引
@@ -555,7 +557,7 @@ function renderBeams(groups: BeamGroup[], piece: Piece, layout: Layout): { svg: 
     //     符头宽度，让读者能识别它是更短时值（如 16-8-16 两端的十六分各有一小段次梁）。
     //     短桩两端跟随 primary 主梁斜率（用 primaryLineY），与主梁平行。
     //     短桩朝向：朝相邻同组音的方向（右优先）；组末孤立音朝左。
-    svg += drawBeam(x1, beamY1, x2, beamY2, thick);
+    svg += drawBeam(x1, beamY1, x2, beamY2, thick, beamCls);
     const stubLen = headHalfW * 2; // 短桩长度 ≈ 一个符头宽
     for (let level = 2; level <= maxCount; level++) {
       const off = (level - 1) * gap * inSign;
@@ -571,7 +573,7 @@ function renderBeams(groups: BeamGroup[], piece: Piece, layout: Layout): { svg: 
             // 段 segStart..k（含两端）画一根第 level 梁
             const yA = primaryYAt(segStart) + off;
             const yB = primaryYAt(k) + off;
-            svg += drawBeam(stemXs[segStart], yA, stemXs[k] + stemW, yB, thick);
+            svg += drawBeam(stemXs[segStart], yA, stemXs[k] + stemW, yB, thick, beamCls);
             segStart = -1;
           }
         }
@@ -585,11 +587,11 @@ function renderBeams(groups: BeamGroup[], piece: Piece, layout: Layout): { svg: 
         if (k < n - 1) {
           const sx0 = stemXs[k];
           const sx1 = stemXs[k] + stubLen;
-          svg += drawBeam(sx0, primaryLineY(sx0) + off, sx1, primaryLineY(sx1) + off, thick);
+          svg += drawBeam(sx0, primaryLineY(sx0) + off, sx1, primaryLineY(sx1) + off, thick, beamCls);
         } else {
           const sx0 = stemXs[k] + stemW - stubLen;
           const sx1 = stemXs[k] + stemW;
-          svg += drawBeam(sx0, primaryLineY(sx0) + off, sx1, primaryLineY(sx1) + off, thick);
+          svg += drawBeam(sx0, primaryLineY(sx0) + off, sx1, primaryLineY(sx1) + off, thick, beamCls);
         }
       }
     }
@@ -610,13 +612,13 @@ function renderBeams(groups: BeamGroup[], piece: Piece, layout: Layout): { svg: 
 
 /** 画一根横梁：倾斜平行四边形。(x1,y1) 是首端梁中心、(x2,y2) 是末端梁中心，
  *  thick 是梁厚度。两端以各自 y 为中心上下各 thick/2，形成平行四边形（两端切口竖直）。 */
-function drawBeam(x1: number, y1: number, x2: number, y2: number, thick: number): string {
+function drawBeam(x1: number, y1: number, x2: number, y2: number, thick: number, cls?: string): string {
   const half = thick / 2;
   const pts: [number, number][] = [
     [x1, y1 - half], [x2, y2 - half], // 上边：首→末
     [x2, y2 + half], [x1, y1 + half], // 下边：末→首
   ];
-  return polygon(pts, { fill: '#1f2430' });
+  return polygon(pts, { fill: '#1f2430', class: cls });
 }
 
 /** 渲染连音线(tie):按「时间位」(单音或和弦组)分组,在相邻两个时间位之间,
@@ -648,7 +650,7 @@ function renderTies(piece: Piece, layout: Layout): string {
     const bowH = ss * 1.1;
     const cy = (yAend + yBend) / 2 + sign * bowH;
     const d = `M ${x1.toFixed(1)} ${yAend.toFixed(1)} Q ${mx.toFixed(1)} ${cy.toFixed(1)} ${x2.toFixed(1)} ${yBend.toFixed(1)}`;
-    s += path(d, { stroke: '#1f2430', sw: Math.max(1.4, ss * 0.18), fill: 'none' });
+    s += path(d, { stroke: '#1f2430', sw: Math.max(1.4, ss * 0.18), fill: 'none', class: 'tie-elem' });
   };
 
   // 把 notes 切成「时间位」段:连续同 chordId 的音归一段;无 chordId 的单音自成一段。

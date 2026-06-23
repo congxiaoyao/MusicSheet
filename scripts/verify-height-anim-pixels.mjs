@@ -268,6 +268,190 @@ try {
   check('S5.2 连续操作后 5 条 staff 线屏幕位置全不变(dev≤2)', staffLinesMaxDev(lines0e, lines5) <= 2,
     `dev=${staffLinesMaxDev(lines0e, lines5)}`);
 
+  // ═══ 场景 6:增删音动画(JS rAF opacity 驱动验证) ═══
+  console.log('\n═══ 场景 6:增删音过渡动画 ═══');
+  // 6.1 新音淡入:点击放音,动画期间末尾音 opacity 应 <1(高频采样取最小,捕获起始低值帧)
+  await clickAtSvgY(page, c4Y, 300);
+  let minOp = 1;
+  for (let i = 0; i < 10; i++) {
+    await sleep(6);
+    const op = await page.evaluate(() => {
+      const els = document.querySelectorAll('[data-idx]');
+      if (!els.length) return 1;
+      const maxIdx = Math.max(...Array.from(els).map(e => parseInt(e.getAttribute('data-idx'))));
+      const e = document.querySelector(`[data-idx="${maxIdx}"]`);
+      return e ? parseFloat(getComputedStyle(e).opacity) : 1;
+    });
+    if (op < minOp) minOp = op;
+  }
+  check('S6.1 新音淡入期间 opacity<0.95(JS rAF 生效,证明在过渡而非恒定1)', minOp < 0.95, `动画中最小 opacity=${minOp.toFixed(3)}`);
+  await sleep(250);   // 等动画结束 + 清理
+  const opResidue = await page.evaluate(() => {
+    const els = document.querySelectorAll('[data-idx]');
+    if (!els.length) return 'no-elem';
+    const maxIdx = Math.max(...Array.from(els).map(e => parseInt(e.getAttribute('data-idx'))));
+    const e = document.querySelector(`[data-idx="${maxIdx}"]`);
+    return e ? e.style.opacity : 'no-elem';
+  });
+  check('S6.2 新音淡入完成后无 inline opacity 残留', opResidue === '', `残留="${opResidue}"`);
+  // 末尾音元素存在
+  const lastIdx = await page.evaluate(() => {
+    const els = document.querySelectorAll('[data-idx]');
+    if (!els.length) return -1;
+    return Math.max(...Array.from(els).map(e => parseInt(e.getAttribute('data-idx'))));
+  });
+  check('S6.3 末尾音元素存在(data-idx 末值>0)', lastIdx > 0, `lastIdx=${lastIdx}`);
+
+  // 6.2 删除残影:按 Backspace 后,瞬间应出现 .fade-ghost,250ms 后被移除
+  await page.keyboard.press('Backspace');
+  await sleep(40);    // 残影刚挂上
+  const ghostDuring = await page.evaluate(() => document.querySelectorAll('.fade-ghost').length);
+  await sleep(250);   // 等淡出 + 移除
+  const ghostAfter = await page.evaluate(() => document.querySelectorAll('.fade-ghost').length);
+  check('S6.4 删除时残影层出现', ghostDuring >= 1, `删除瞬间 .fade-ghost=${ghostDuring}`);
+  check('S6.5 删除淡出后残影层移除', ghostAfter === 0, `淡出后 .fade-ghost=${ghostAfter}`);
+
+  // 6.3 指示器平移:放音后指示器 slide 到新位,动画结束后无 transform/animation 残留
+  const slotBefore = await page.evaluate(() => {
+    const s = document.querySelector('.next-slot');
+    return s ? { x: Math.round(s.getBoundingClientRect().left), tf: s.style.transform, anim: s.style.animation } : null;
+  });
+  await clickAtSvgY(page, c4Y, 400);
+  await sleep(250);
+  const slotClean = await page.evaluate(() => {
+    const s = document.querySelector('.next-slot');
+    if (!s) return { exists: false };
+    return { exists: true, transform: s.style.transform, animation: s.style.animation };
+  });
+  check('S6.6 指示器存在', slotClean.exists, '');
+  check('S6.7 指示器平移结束后无 transform/animation 残留',
+    slotClean.exists && !slotClean.transform && !slotClean.animation,
+    `transform="${slotClean.transform}" animation="${slotClean.animation}"`);
+
+  // ═══ 场景 7:tie 连音线淡入 + 和弦尾音淡入 ═══
+  console.log('\n═══ 场景 7:tie 与和弦动画 ═══');
+  // 重新加载获得干净上下文(前面场景累积状态不可控)
+  await page.goto(URL, { waitUntil: 'networkidle0' });
+  await page.evaluate(() => document.fonts.ready);
+  await sleep(400);
+  // 7.1 tie:放两个 C4,按 t 复制(tieRepeat),验证新 tie 弧线出现且随新音淡入
+  await clickAtSvgY(page, c4Y, 350);
+  await sleep(250);
+  await clickAtSvgY(page, c4Y, 450);
+  await sleep(250);
+  await page.keyboard.press('t');   // tieRepeat
+  await sleep(250);
+  const tieState = await page.evaluate(() => ({
+    tieCount: document.querySelectorAll('.tie-elem').length,
+    // tie 随新音 JS opacity 淡入,结束后 inline opacity 应清空
+    opResidue: Array.from(document.querySelectorAll('.tie-elem')).filter(e => e.style.opacity !== '').length,
+  }));
+  check('S7.1 tie 后产生弧线', tieState.tieCount >= 1, `tie弧线=${tieState.tieCount}`);
+  check('S7.2 tie 淡入完成后无 inline opacity 残留', tieState.opResidue === 0, `残留=${tieState.opResidue}`);
+
+  // 7.2 和弦:开和弦(c) + 放一个音 + 高音声部,验证尾音淡入后无残留
+  await page.keyboard.press('c');
+  await sleep(150);
+  await clickAtSvgY(page, c4Y, 550);
+  await sleep(250);
+  // 高音声部(step=8 顶线,y=121-8*5.75=75)
+  const topY = 121 - 8 * 5.75;
+  await clickAtSvgY(page, topY, 550);
+  await sleep(250);
+  const chordResidue = await page.evaluate(() => {
+    // 和弦尾音 JS opacity 淡入,结束后 inline opacity 应清空
+    const idx = document.querySelectorAll('[data-idx]').length - 1;
+    return Array.from(document.querySelectorAll(`[data-idx="${idx}"]`)).filter(e => e.style.opacity !== '').length;
+  });
+  check('S7.3 和弦尾音淡入完成后无 inline opacity 残留', chordResidue === 0, `残留=${chordResidue}`);
+  // 关和弦
+  await page.keyboard.press('c');
+  await sleep(150);
+
+  // 7.3 删和弦尾音:残影出现并淡出
+  const ghostBefore = await page.evaluate(() => document.querySelectorAll('.fade-ghost').length);
+  await page.keyboard.press('Backspace');
+  await sleep(40);
+  const ghostMid = await page.evaluate(() => document.querySelectorAll('.fade-ghost').length);
+  await sleep(250);
+  const ghostEnd = await page.evaluate(() => document.querySelectorAll('.fade-ghost').length);
+  check('S7.4 删和弦尾音时残影出现', ghostMid >= 1 && ghostBefore === 0, `前=${ghostBefore} 中=${ghostMid}`);
+  check('S7.5 删和弦尾音残影淡出后移除', ghostEnd === 0, `后=${ghostEnd}`);
+
+  // ═══ 场景 8:连梁整组刷新 + 删除极端音无残影(避免与高度动画露馅) ═══
+  console.log('\n═══ 场景 8:连梁刷新 + 删极端音 ═══');
+  // 重新加载页面获得干净状态(前面场景的和弦/tie 状态会影响连梁判定,这里要纯单音八分序列)
+  await page.goto(URL, { waitUntil: 'networkidle0' });
+  await page.evaluate(() => document.fonts.ready);
+  await sleep(400);
+  await page.keyboard.press('4');   // eighth 时值
+  await sleep(150);
+  // 放 4 个八分音符形成 2 个连梁组(每拍 2 个八分)
+  for (const x of [350, 410, 470, 530]) {
+    await clickAtSvgY(page, c4Y, x);
+    await sleep(230);
+  }
+  // 验证连梁组 class 存在(4 个八分 → 2 组,梁 polygon 带 beam-grp class)
+  const beamDiag = await page.evaluate(() => ({
+    beams: document.querySelectorAll('[class*="beam-grp-"]').length,
+    noteElems: document.querySelectorAll('.note-elem').length,
+    headXs: Array.from(document.querySelectorAll('text.note-elem')).slice(0, 6).map(h => parseFloat(h.getAttribute('x')).toFixed(0)),
+  }));
+  check('S8.1 八分音符形成连梁组(梁 polygon 带 beam-grp class)', beamDiag.beams >= 1, `梁元素=${beamDiag.beams} 音符元素=${beamDiag.noteElems} headXs=${beamDiag.headXs.join(',')}`);
+
+  // S8.1b 连梁组刷新:整组(含老音符)参与透明变化。
+  // reload 获得干净状态,放1个八分(独立 flag),再放第2个(与第1个形成连梁组),
+  // 此时 idx0 从 flag 变连梁,采样 idx0 opacity 应 <1(整组刷新,老音符参与)
+  await page.goto(URL, { waitUntil: 'networkidle0' });
+  await page.evaluate(() => document.fonts.ready);
+  await sleep(400);
+  await page.keyboard.press('4'); await sleep(150);
+  await clickAtSvgY(page, c4Y, 350);
+  await sleep(300);   // 第1个八分(独立)
+  await clickAtSvgY(page, c4Y, 420);   // 第2个,与第1个形成连梁组
+  let oldMinOp = 1;
+  for (let i = 0; i < 8; i++) {
+    await sleep(8);
+    const op = await page.evaluate(() => {
+      const e = document.querySelector('[data-idx="0"]');
+      return e ? parseFloat(getComputedStyle(e).opacity) : 1;
+    });
+    if (op < oldMinOp) oldMinOp = op;
+  }
+  check('S8.1b 连梁组形成时老音符(idx0)参与透明变化(opacity<0.95)', oldMinOp < 0.95, `idx0 最小opacity=${oldMinOp.toFixed(3)}`);
+
+  // 再加一个八分(加入已有连梁组),验证整组梁淡入后无残留(连梁 polygon 随新音 JS opacity 淡入)
+  await clickAtSvgY(page, c4Y, 650);
+  await sleep(250);
+  const beamResidue = await page.evaluate(() => {
+    return Array.from(document.querySelectorAll('[class*="beam-grp-"]')).filter(e => e.style.opacity !== '').length;
+  });
+  check('S8.2 新音加入连梁组后整组梁淡入完成无 inline opacity 残留', beamResidue === 0, `残留=${beamResidue}`);
+
+  // 8.3 删普通音(高度不变):残影应出现
+  const ghostNormalBefore = await page.evaluate(() => document.querySelectorAll('.fade-ghost').length);
+  await page.keyboard.press('Backspace');
+  await sleep(40);
+  const ghostNormalMid = await page.evaluate(() => document.querySelectorAll('.fade-ghost').length);
+  await sleep(250);
+  check('S8.3 删普通音(高度不变)残影出现', ghostNormalMid >= 1 && ghostNormalBefore === 0, `前=${ghostNormalBefore} 中=${ghostNormalMid}`);
+
+  // 8.4 删极端高音(触发高度回缩):此时不应出现残影(避免与 heightTick 露馅)
+  // 先放一个高音 C8(触发顶部扩展),再删它(高度回缩)
+  await clickAtSvgY(page, c8Y, 670);
+  await sleep(250);
+  // 切回 quarter 避免连梁干扰
+  await page.keyboard.press('3'); await sleep(100);
+  // 现在删 C8:高度回缩,应走 heightTick 路径,残影被跳过
+  const staffBefore = await staffScreenY(page);
+  await page.keyboard.press('Backspace');
+  await sleep(40);
+  const ghostHighMid = await page.evaluate(() => document.querySelectorAll('.fade-ghost').length);
+  await sleep(250);
+  const staffAfter = await staffScreenY(page);
+  check('S8.4 删极端音(高度回缩)时不出现残影(避免露馅)', ghostHighMid === 0, `残影=${ghostHighMid}`);
+  check('S8.5 删极端音后五线谱不动(dev≤1)', Math.abs(staffAfter - staffBefore) <= 1, `dev=${Math.abs(staffAfter - staffBefore)}`);
+
   console.log(`\n${failed === 0 ? '✅ 像素验证全部通过' : `❌ ${failed} 项失败`} (通过 ${passed}/${passed + failed})`);
 } catch (err) {
   console.error('脚本异常:', err.message);

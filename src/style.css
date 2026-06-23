@@ -255,7 +255,7 @@ html, body {
      顶锚让页面自然向下撑开不跳动(高音向上扩展由 viewBox 负 y + svg transform 处理)。 */
   overflow: hidden;
 }
-.svg-host svg { display: block; user-select: none; -webkit-user-select: none; position: absolute; top: 0; left: 0; width: 100%; }
+.svg-host svg { display: block; user-select: none; -webkit-user-select: none; position: absolute; top: 0; left: 0; width: 100%; touch-action: manipulation; }
 /* 播放头覆盖层:覆盖整个 svgHost(含 padding),内部 .pb-playhead 按百分比定位 */
 .playhead-layer {
   position: absolute;
@@ -277,6 +277,14 @@ html, body {
 .status.flash { animation: flashPulse 1.6s ease; }
 @keyframes flashPulse { 0% { opacity: 1; } 70% { opacity: 1; } 100% { opacity: 0.6; } }
 
+/* ── 增删音过渡动画（统一 120ms easeOutCubic）──
+   cubic-bezier(0.33,1,0.68,1) = JS easeOutCubic 1-(1-t)^3 的 CSS 等价曲线,
+   与高度动画 heightTick 完全一致,保证视觉协调。 */
+:root {
+  --ease-out-cubic: cubic-bezier(0.33, 1, 0.68, 1);
+  --anim-dur: 120ms;
+}
+
 /* 下一个待输入位置的圆角矩形指示器（短信验证码式）。
    填充透明度做脉冲动画，边框保持不透明。 */
 @keyframes slotFillPulse {
@@ -286,8 +294,36 @@ html, body {
 .next-slot {
   animation: slotFillPulse 2.4s ease-in-out infinite;
 }
-.hover-guide { pointer-events: none; }
-.hover-note { pointer-events: none; }
+/* 指示器平移:由 JS rAF 逐帧设 transform(SVG 的 CSS transform transition 不可靠)。
+   位移期间 JS 设 animation:none 停掉呼吸,结束后恢复。 */
+
+/* hover 预览:黑色半透明(CSS opacity 区分正式音)。点击转正时 opacity 0.55→1 平滑过渡,
+   让 ghost 与正式音衔接自然。 */
+.hover-guide { pointer-events: none; opacity: 0.55; }
+.hover-note { pointer-events: none; opacity: 0.55; }
+
+/* 新音淡入:由 JS rAF 逐帧设 inline opacity(0.55→1, easeOutCubic)。
+   不用 CSS transition:与 heightTick 的 rAF 交错时 transition 起始态会失效,导致 opacity 卡在终态。
+   起始 0.55 = hover ghost 终态,点击转正无缝衔接。tie 弧线/连梁 polygon 同款驱动。 */
+
+/* tie 弧线:tieRepeat 时随新音一起 JS 逐帧 opacity 淡入;删除时随残影层淡出。 */
+
+/* 连梁交叉淡化残影:连梁刷新时从旧 svg 克隆的老梁 polygon,淡出 1→0(与新梁淡入交叉)。
+   pointer-events:none 不干扰点击。opacity 由 JS rAF 逐帧设。 */
+.beam-ghost { pointer-events: none; }
+
+/* 删除残影层:innerHTML 替换前克隆整个旧 svg,淡出 120ms 后移除。
+   position:absolute;top:0 与新 svg 重叠,前面音完全重合无视觉变化,只末尾被删音淡出。 */
+.fade-ghost {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  pointer-events: none;
+  opacity: 1;
+  transition: opacity var(--anim-dur) var(--ease-out-cubic);
+}
+.fade-ghost.fade-ghost-out { opacity: 0; }
 
 /* ── 底栏 ── */
 .bottom-bar {
