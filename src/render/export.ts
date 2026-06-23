@@ -32,7 +32,7 @@ export function buildSVG(piece: Piece, layout: Layout, playingIndex: number, opt
   const title = opts.exportMode
     ? `<text x="${layout.contentLeft}" y="${vby + 18}" font-family='system-ui,sans-serif' font-size="13" fill="#64748b">五线谱 — 简谱对照</text>`
     : '';
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${layout.width}" height="${layout.height}" viewBox="0 ${vby} ${layout.width} ${layout.height}">${bg}${title}${staff}${jianpu}</svg>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${layout.width}" height="${layout.height}" viewBox="0 ${vby} ${layout.width} ${layout.height}">${bg}${title}<g class="staff-group">${staff}</g><g class="jianpu-group">${jianpu}</g></svg>`;
   // 渲染完成(已 clamp 兜底)后，抛 issues 回调。diagnose 读 piece 原始数据，不受 clamp 影响。
   const issues = diagnoseAll(piece);
   if (issues.length) {
