@@ -27,7 +27,20 @@ scrollY 补偿这个变化量,让五线谱屏幕位置恒定。
 
 ## 遇到的问题(核心难题)
 
-### 问题 1:innerHTML 替换瞬间跳变(未完全解决)
+### 关键澄清:跳动来自 scrollY 代码,不是 SVG/卡片本身
+SVG 是 `position:absolute`(不参与文档流)。只要 svgHost height 不变,SVG 高度变化(被裁剪)
+页面布局**完全不动**——零跳动。跳动 100% 来自手动写的 `window.scrollTo()` 补偿代码。
+
+因此存在两条路线:
+- **A. 自然扩展(无 scrollY)**:svgHost height 动画 + SVG 居底。页面不跳、不溢出、平滑。
+  但五线谱随 height 变化**平滑移动**(居底,height 增时五线谱下移)。非"绝对不动"。
+- **B. scrollY 补偿(绝对不动)**:在 A 基础上加 scrollY 让五线谱屏幕恒定。
+  但 scrollY 必然引入跳动(瞬间跳或 30px 偏移),无法两全。
+
+用户要求"五线谱绝对不动"→ 选 B → 跳动问题。
+若接受"五线谱平滑移动"→ 选 A → 无跳动,方案简单可靠。
+
+### 问题 1:innerHTML 替换瞬间跳变(路线 B 的难题,未完全解决)
 innerHTML 瞬间替换新 SVG(新 viewBox),新 SVG 在旧 startH 居底的 staffY ≠ 旧 SVG 的 staffY。
 差值 = startAdjust(viewBox 变化导致)。
 
