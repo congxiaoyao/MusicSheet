@@ -4,7 +4,7 @@
 import { Note, Piece, DurationValue } from '../core/types';
 import { KEYS } from '../core/theory';
 import { createPiece, appendNote, popNote, remainingBeats, remainingBeatsInCurrentBar, capacityBeats, totalBeats, noteStartBeats } from '../core/model';
-import { computeLayout } from '../render/layout';
+import { computeLayout, Layout } from '../render/layout';
 import { buildSVG, exportPNG } from '../render/export';
 import { ensureFontLoaded } from '../render/glyphs';
 import { clickYToMidi } from '../render/staff';
@@ -31,9 +31,13 @@ export class App {
   private svgHost!: HTMLElement;
   /** 播放头覆盖层:独立 DOM div,叠在 svgHost 上,由 currentBeat 驱动定位(onTick 时更新) */
   private playheadLayer!: HTMLElement;
-  /** 五线谱屏幕锚点:staffY 应固定的屏幕 y(首次锁定)。高度动画用 scrollY 补偿让 staffY 屏幕恒定。 */
+  /** 五线谱屏幕锚点:首次 render 后锁定五线谱 bottomLineY 在屏幕上的 y。
+   *  height 不变(hover/普通编辑)时走快速路径,五线谱物理位置天然不变,无需动画。
+   *  height 变化(加/删极端音)时用 scrollY + svg/jianpu transform 三路同步插值,让五线谱屏幕恒定。 */
   private staffAnchorScreen: number | null = null;
   private heightAnimFrame: number | null = null;
+  /** 上次 render 的 layout,用于算 offDelta(高音扩展量)/jpDelta(简谱下移量)。 */
+  private lastLayout: Layout | null = null;
   private statusEl!: HTMLElement;
   private bpm = 100;
   private playingIndex = -1;
@@ -814,65 +818,89 @@ export class App {
     // hover 预览符头若超出当前布局范围,接受可能的边缘裁切(预览是临时的,鼠标移走即恢复),
     // 不应为临时预览而频繁改变整个编辑区高度。
     this.layout = computeLayout(this.piece, width, this.tool.duration, chordAnchor, chordAnchorDur);
-    // 高度动画:SVG 居底(bottom:0) + transform:translateY 补偿 + svgHost height 动画。
-    // 不用 scrollY(彻底消除页面跳动)。transform 不影响文档流,页面自然撑高不跳。
-    const prevStaffYDoc = this.measureStaffYDoc();
+    // ── 高度动画:统一方案(三路同步插值) ──
+    // SVG absolute top:0(顶锚,页面自然向下撑开不跳)。height 变化时:
+    //   1) svgHost height: startH → endH(120ms easeOutCubic)
+    //   2) scrollY + svg transform(仅 offDelta≠0):scrollY 同步增减让 svgHost 底部屏幕恒定;
+    //      svg transform 从 T0→0 消除 viewBox 负 y 变化导致的五线谱偏移
+    //   3) jianpu-group transform(仅 jpDelta≠0):简谱从 -jpDelta→0 平滑过渡
+    // height 不变(hover/普通编辑)走快速路径,不动画,五线谱物理位置天然不变。
+    const oldLayout = this.lastLayout ?? this.layout;
+    const off = this.layout.viewBoxYOffset;
+    const offDelta = off - oldLayout.viewBoxYOffset;   // 高音扩展量(正值=新扩展)
+    const jpDelta = this.layout.jianpuTop - oldLayout.jianpuTop;  // 简谱下移量(正值=下移)
+    // 读旧状态(innerHTML 前):prevStaffYScreen = 旧 SVG 五线谱屏幕 y(用户当前位置)
+    const prevStaffYScreen = this.measureStaffYScreen();
+    const prevScrollY = window.scrollY;
+    const startH = parseFloat(this.svgHost.style.height) || (this.layout.height + 16);
+    // 渲染新 SVG
     const svg = buildSVG(this.piece, this.layout, this.playingIndex, { hover: this.hover });
     this.svgHost.innerHTML = svg;
-    const svgEl = this.svgHost.querySelector('svg');
-    if (svgEl) svgEl.setAttribute('width', '100%');
-    const endH = this.layout.height + 16;
-    const svgH = this.layout.height;
-    const off = this.layout.viewBoxYOffset;
-    if (this.staffAnchorScreen === null) {
-      this.svgHost.style.height = endH + 'px';
-      this.staffAnchorScreen = this.measureStaffYScreen();
+    const svgEl = this.svgHost.querySelector('svg') as SVGSVGElement | null;
+    if (svgEl) {
+      svgEl.setAttribute('width', '100%');
+      svgEl.setAttribute('height', String(this.layout.height));
+      svgEl.setAttribute('preserveAspectRatio', 'none');
     }
-    const startH = parseFloat(this.svgHost.style.height) || endH;
-    if (Math.abs(endH - startH) < 1) {
-      this.svgHost.style.height = endH + 'px';
-      if (svgEl) svgEl.style.transform = '';
+    const jg = this.svgHost.querySelector('.jianpu-group') as SVGGElement | null;
+    const endH = this.layout.height + 16;
+
+    // 公共尾部:重挂播放头层 + 刷新状态栏 + 更新播放头/高亮
+    const finalize = () => {
       this.svgHost.appendChild(this.playheadLayer);
       const rem = remainingBeats(this.piece);
       const pct = Math.round((totalBeats(this.piece) / capacityBeats(this.piece)) * 100);
-      this.statusEl.textContent = this.piece.notes.length + ' 个音符 \u00b7 \u5df2\u7528 ' + pct + '% \u00b7 \u8fd8\u80fd\u518d\u5199\u7ea6 ' + rem.toFixed(1) + ' \u62cd';
+      this.statusEl.textContent = this.piece.notes.length + ' \u4e2a\u97f3\u7b26 \u00b7 \u5df2\u7528 ' + pct + '% \u00b7 \u8fd8\u80fd\u518d\u5199\u7ea6 ' + rem.toFixed(1) + ' \u62cd';
       (this.toolbar as any)._refreshCapacity?.(remainingBeatsInCurrentBar(this.piece), rem);
       this.refreshCard();
       this.updatePlayheadAndHighlight();
+    };
+
+    // 首次初始化:锁定屏幕锚点,直接定高
+    if (this.staffAnchorScreen === null) {
+      this.svgHost.style.height = endH + 'px';
+      if (svgEl) svgEl.style.transform = '';
+      if (jg) jg.style.transform = '';
+      this.staffAnchorScreen = this.measureStaffYScreen();
+      this.lastLayout = this.layout;
+      finalize();
       return;
     }
+
+    // height 不变:快速路径,不动画
+    if (Math.abs(endH - startH) < 1) {
+      this.svgHost.style.height = endH + 'px';
+      if (svgEl) svgEl.style.transform = '';
+      if (jg) jg.style.transform = '';
+      this.lastLayout = this.layout;
+      finalize();
+      return;
+    }
+
+    // ====== 统一动画:三路同步插值 ======
+    // 锁定五线谱屏幕目标(= 用户当前看到的位置)
+    const targetScreen = Math.round(prevStaffYScreen);
+    this.staffAnchorScreen = targetScreen;
     const hostTopDoc = this.svgHost.getBoundingClientRect().top + window.scrollY;
-    const K = prevStaffYDoc - hostTopDoc + svgH - 121 - off;
+    // T0:让新 SVG 在 startH(旧高)时五线谱屏幕 = target。
+    // 五线谱屏幕 = hostTopDoc - scrollY + T + (121 + off);t=0 时 scrollY=prevScrollY:
+    //   T0 = target - hostTopDoc + prevScrollY - 121 - off(仅 offDelta≠0 时需要 svg transform)
+    const T0 = offDelta !== 0 ? (targetScreen - hostTopDoc + prevScrollY - 121 - off) : 0;
+    const jpT0 = -jpDelta;   // 简谱初始偏移(从旧位置起步)
+    // 同步首帧:设 startH + T0 + jpT0(消除 innerHTML 替换瞬间的跳变)
     this.svgHost.style.height = startH + 'px';
-    if (svgEl) svgEl.style.transform = 'translateY(' + (K - startH) + 'px)';
+    if (svgEl) svgEl.style.transform = 'translateY(' + T0 + 'px)';
+    if (jg) jg.style.transform = 'translateY(' + jpT0 + 'px)';
     if (this.heightAnimFrame) cancelAnimationFrame(this.heightAnimFrame);
     const startT = performance.now();
     this.heightAnimFrame = requestAnimationFrame((now: number) => {
-      this.heightTick(now, startT, startH, endH, K, svgEl);
+      this.heightTick(now, startT, startH, endH, T0, jpT0, prevScrollY, offDelta, svgEl, jg);
     });
-    this.svgHost.appendChild(this.playheadLayer);
-    const rem = remainingBeats(this.piece);
-    const pct = Math.round((totalBeats(this.piece) / capacityBeats(this.piece)) * 100);
-    this.statusEl.textContent = this.piece.notes.length + ' \u4e2a\u97f3\u7b26 \u00b7 \u5df2\u7528 ' + pct + '% \u00b7 \u8fd8\u80fd\u518d\u5199\u7ea6 ' + rem.toFixed(1) + ' \u62cd';
-    (this.toolbar as any)._refreshCapacity?.(remainingBeatsInCurrentBar(this.piece), rem);
-    this.refreshCard();
-    this.updatePlayheadAndHighlight();
+    this.lastLayout = this.layout;
+    finalize();
   }
 
-  /** \u6d4b\u91cf\u4e94\u7ebf\u8c31 bottomLineY \u7684\u6587\u6863\u7edd\u5bf9\u4f4d\u7f6e */
-  private measureStaffYDoc(): number {
-    const svg = this.svgHost.querySelector('svg');
-    if (!svg) return 0;
-    const sr = svg.getBoundingClientRect();
-    const vb = (svg as SVGSVGElement).viewBox.baseVal;
-    return sr.top + (121 - vb.y) * sr.height / vb.height + window.scrollY;
-  }
-
-  /** 单一数据源同步:由 currentBeat → 算当前音 idx → 更新播放头位置 + 符头/简谱高亮。
-   *  在 onTick(每帧)、onStateChange、onEnd、seek、render 后调用,保证播放头/高亮/进度条三者同步。
-   *  - 停止态:隐藏播放头,清除所有 .playing 高亮
-   *  - 播放/暂停态:显示播放头,定位到 currentBeat 对应音,高亮该音(和弦组全部声部) */
-  /** 测量五线谱 bottomLineY 当前的屏幕 y（用于高度动画锚定） */
+  /** 测量五线谱 bottomLineY 当前屏幕 y(高度动画锚定 + 播放头等共用) */
   private measureStaffYScreen(): number {
     const svg = this.svgHost.querySelector('svg');
     if (!svg) return 0;
@@ -881,22 +909,38 @@ export class App {
     return Math.round(sr.top + (121 - vb.y) * sr.height / vb.height);
   }
 
-  /** 高度动画单帧:插值 svgHost height + 闭环 scrollY 补偿(每帧读实际 staffY 屏幕位置) */
-  private heightTick(now: number, startT: number, startH: number, endH: number): void {
+  /** 高度动画单帧:三路同步插值
+   *  - height: startH → endH(卡片自然扩展)
+   *  - scrollY: prevScrollY + (curH - startH),仅 offDelta≠0(让 svgHost 底部屏幕恒定)
+   *  - svg transform: T0*(1-eased) → 0(消除 viewBox 变化的五线谱偏移)
+   *  - jianpu-group transform: jpT0*(1-eased) → 0(简谱平滑过渡) */
+  private heightTick(
+    now: number, startT: number, startH: number, endH: number,
+    T0: number, jpT0: number, prevScrollY: number, offDelta: number,
+    svgEl: SVGSVGElement | null, jg: SVGGElement | null,
+  ): void {
     const t = Math.min(1, (now - startT) / 120);
-    const eased = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+    // easeOutCubic:开头快速冲到位、结尾柔顺停住(有响应感)。height 大跨度伸缩收尾自然。
+    const eased = 1 - Math.pow(1 - t, 3);
+    // 1) height 插值
     const curH = startH + (endH - startH) * eased;
-    this.svgHost.style.height = `${curH}px`;
-    // 闭环:每帧读 staffY 屏幕位置,scrollY 补偿让它 = target(消除公式偏差)
-    if (this.staffAnchorScreen !== null) {
-      const curScreen = this.measureStaffYScreen();
-      const adjust = curScreen - this.staffAnchorScreen;
-      window.scrollTo(0, Math.max(0, window.scrollY + adjust));
+    this.svgHost.style.height = curH + 'px';
+    // 2) scrollY 同步(仅 offDelta≠0:让 svgHost 底部屏幕位置恒定,避免页面跳动)
+    if (offDelta !== 0) {
+      const curScrollY = prevScrollY + (curH - startH);
+      window.scrollTo(0, Math.max(0, curScrollY));
     }
+    // 3) svg transform: T0 → 0
+    if (svgEl) svgEl.style.transform = 'translateY(' + (T0 * (1 - eased)) + 'px)';
+    // 4) jianpu-group transform: jpT0 → 0
+    if (jg) jg.style.transform = 'translateY(' + (jpT0 * (1 - eased)) + 'px)';
     if (t < 1) {
-      this.heightAnimFrame = requestAnimationFrame((n: number) => this.heightTick(n, startT, startH, endH));
+      this.heightAnimFrame = requestAnimationFrame((n: number) =>
+        this.heightTick(n, startT, startH, endH, T0, jpT0, prevScrollY, offDelta, svgEl, jg));
     } else {
       this.heightAnimFrame = null;
+      if (svgEl) svgEl.style.transform = '';
+      if (jg) jg.style.transform = '';
     }
   }
 

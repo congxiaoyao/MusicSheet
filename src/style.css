@@ -250,10 +250,12 @@ html, body {
   /* 防止双击/拖拽选中五线谱上的文字与音符 */
   user-select: none;
   -webkit-user-select: none;
-  /* 高度动画:overflow hidden 裁掉 SVG 居底后顶部溢出。height 由 JS rAF 控制(不用 CSS transition)。 */
+  /* 高度动画(统一方案):SVG absolute top:0 顶锚,svgHost height 由 JS rAF 动画,
+     overflow hidden 裁底部溢出。svg transform 与 jianpu-group transform 消除 viewBox 变化偏移。
+     顶锚让页面自然向下撑开不跳动(高音向上扩展由 viewBox 负 y + svg transform 处理)。 */
   overflow: hidden;
 }
-.svg-host svg { display: block; user-select: none; -webkit-user-select: none; position: absolute; bottom: 0; left: 0; width: 100%; }
+.svg-host svg { display: block; user-select: none; -webkit-user-select: none; position: absolute; top: 0; left: 0; width: 100%; }
 /* 播放头覆盖层:覆盖整个 svgHost(含 padding),内部 .pb-playhead 按百分比定位 */
 .playhead-layer {
   position: absolute;

@@ -63,7 +63,11 @@ const SS = FONT / 4;   // = 23，真实 staff space（线间距）
 const PAD_LEFT = 8;    // 五线谱横线/起始线的左边缘(顶格,仅极小留白防贴死)
 const PAD_RIGHT = 12;  // 随谱表等比缩小(原24)
 const STAFF_TOP = 75;    // 谱表顶端y:字号减半后需容纳朝上符干(stdLen=3.5ss≈40px)+梁厚度+clamp阈值,原58导致梁被裁顶
-const JIANPU_GAP = 44;
+// JIANPU_GAP = 34.5:默认简谱顶距 staffBottom。让默认 jianpuTop = 121+34.5 = 155.5,
+// 恰好等于 C4(中央C,step=-2)下加线场景(lowLedgerY 132.5 + PAD 23 = 155.5)。
+// 这样「空谱 → 输入 C4」简谱位置不变,不触发上缩跳动(C4 是最常用音之一)。
+// 更低音(下加线 y 更大)仍按 dynamicJianpuTop 正常下移。
+const JIANPU_GAP = 34.5;
 // prefix 区宽度按字形实际 advance（staff space 单位）定，不盲目翻倍。
 // gClef advance=2.684 → 谱号区 3.0；升降号 advance≈1 → 0.9；拍号数字 1.88 → 1.8；留白 1.2。
 const CLEF_W = 3.0 * SS;
