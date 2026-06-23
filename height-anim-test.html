@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8" />
+<title>高度动画 像素校验版</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: system-ui; margin: 0; padding: 0; background: #f1f5f9; }
+  .topbar { height: 120px; background: #6366f1; color:#fff; padding: 0 16px; display: flex; align-items: center; font-weight: 600; border-bottom: 3px solid #dc2626; }
+  .controls { text-align: center; padding: 10px; background: #fff; border-bottom: 1px solid #e2e8f0; }
+  .controls button { padding: 8px 16px; margin: 2px; border: 1px solid #cbd5e1; border-radius: 6px; cursor: pointer; font-size: 13px; }
+  .stage { background: #fff; border: 3px solid #2563eb; border-radius: 0; padding: 20px 16px 16px; max-width: 900px; margin: 16px auto; position: relative; box-shadow: none; }
+  .svg-host { position: relative; width: 100%; height: 275px; background: #fffbeb; border: 3px solid #059669; border-radius: 0; padding: 8px 4px; box-sizing: border-box; overflow: hidden; }
+  .svg-host svg { position: absolute; top: 0; left: 0; width: 100%; display: block; }
+  .status { padding: 8px 0; font-size: 12px; color: #64748b; }
+  .anchor { position: fixed; left: 0; right: 0; height: 2px; background: #dc2626; z-index: 999; opacity: 0.6; pointer-events: none; }
+  .bottom-anchor { position: fixed; left: 0; right: 0; height: 2px; background: #2563eb; z-index: 999; opacity: 0.4; pointer-events: none; }
+  .spacer { height: 600px; background: #e2e8f0; margin: 16px auto; max-width: 900px; display: flex; align-items: center; justify-content: center; color: #94a3b8; border-radius: 8px; }
+  .log { font-family: monospace; font-size: 11px; white-space: pre; background: #1e293b; color: #94a3b8; padding: 10px; margin: 8px auto; border-radius: 6px; max-width: 900px; max-height: 100px; overflow: auto; }
+</style>
+</head>
+<body>
+<div class="topbar">顶部留白(120px) TOOLBAR 红线底边</div>
+<div class="controls">
+  <button onclick="addHigh()">+C8高音</button>
+  <button onclick="addLow()">+A0低音</button>
+  <button onclick="delLast()">删除</button>
+</div>
+<div class="stage" id="stage">
+  <div class="svg-host" id="host"></div>
+  <div class="status" id="status"></div>
+</div>
+<div class="spacer">下方内容</div>
+<div class="anchor" id="anchor"></div>
+<div class="bottom-anchor" id="bottomAnchor"></div>
+<div class="log" id="log"></div>
+<script type="module">
+import { createPiece, appendNote } from './src/core/model.ts';
+import { computeLayout } from './src/render/layout.ts';
+import { buildSVG } from './src/render/export.ts';
+const host = document.getElementById('host');
+const statusEl = document.getElementById('status');
+const logEl = document.getElementById('log');
+const anchor = document.getElementById('anchor');
+const bottomAnchor = document.getElementById('bottomAnchor');
+const CK = { name: 'C', tonic: 0, sharps: [], flats: [] };
+let piece = createPiece(); piece.time = {num:4,den:4}; piece.key = CK; piece.measureCount = 8;
+for (const m of [60, 62, 64]) appendNote(piece, { midi: m, duration: 'quarter', dotted: false, accidental: null });
+let animFrame = null;
+let targetScreen = null;
+let bottomTarget = null;
+const ANIM_MS = 5000;
+function measureStaffYScreen() {
+  const svg = host.querySelector('svg');
+  if (!svg) return 0;
+  const sr = svg.getBoundingClientRect();
+  const vb = svg.viewBox.baseVal;
+  return sr.top + (121 - vb.y) * sr.height / vb.height;
+}
+function render() {
+  const lay = computeLayout(piece, 900, 'quarter');
+  const endH = lay.height + 16;
+  const svgH = lay.height;
+  const off = lay.viewBoxYOffset;
+  const prevStaffYScreen = measureStaffYScreen();
+  const prevScrollY = window.scrollY;
+  const startH = parseFloat(host.style.height) || endH;
+  // 先读旧状态(用于算 T0,消除跳变)
+  const oldSvgH = (function(){ var s = host.querySelector('svg'); return s ? s.viewBox.baseVal.height : svgH; })();
+  const oldOff = (function(){ var s = host.querySelector('svg'); return s ? -s.viewBox.baseVal.y : 0; })();
+  // 算 T0(新 SVG 在 startH 时的 transform,让五线谱 = target)
+  // 但 target 还没更新(prevStaffYScreen 是旧 SVG 的)。用旧 SVG 的 staffY 文档位置。
+  const oldHostTopDoc = host.getBoundingClientRect().top + window.scrollY;
+  const newOff = off;
+  // 旧 SVG staffY 文档 = oldHostTopDoc + startH - oldSvgH + 121 + oldOff
+  // 新 SVG(top:0 + T) staffY 文档 = oldHostTopDoc + T + 121 + newOff
+  // 要相等:T = startH - oldSvgH + oldOff - newOff
+  // 把 transform 注入 SVG 标签(和内容一起 innerHTML,消除渲染间隙)
+  const injectT = oldOff - newOff;
+  const rawSvgStr = buildSVG(piece, lay, -1, {});
+  const svgStr = rawSvgStr.replace('<svg ', '<svg style="transform:translateY(' + injectT + 'px)" ');
+  host.innerHTML = svgStr;
+  const svg = host.querySelector('svg');
+  svg.setAttribute('width', '100%');
+  svg.setAttribute('height', svgH);
+  svg.setAttribute('preserveAspectRatio', 'none');
+  if (targetScreen === null) {
+    host.style.height = endH + 'px';
+    svg.style.transform = '';
+    targetScreen = Math.round(measureStaffYScreen());
+    anchor.style.top = targetScreen + 'px';
+    bottomTarget = Math.round(host.getBoundingClientRect().bottom);
+    bottomAnchor.style.top = bottomTarget + 'px';
+    log('init target=' + targetScreen + ' bottom=' + bottomTarget);
+    return;
+  }
+  if (Math.abs(endH - startH) < 1) {
+    host.style.height = endH + 'px';
+    svg.style.transform = '';
+    return;
+  }
+  targetScreen = Math.round(prevStaffYScreen);
+  anchor.style.top = targetScreen + 'px';
+  const hostTopDoc = host.getBoundingClientRect().top + window.scrollY;
+  host.style.height = startH + 'px';
+  svg.style.transform = 'translateY(' + injectT + 'px)';  // 和 innerHTML 注入的一致,消除跳变
+  if (animFrame) cancelAnimationFrame(animFrame);
+  const startT = performance.now();
+  function tick(now) {
+    const t = Math.min(1, (now - startT) / ANIM_MS);
+    const eased = t < 0.5 ? 2*t*t : 1 - Math.pow(-2*t+2, 2)/2;
+    const curH = startH + (endH - startH) * eased;
+    host.style.height = curH + 'px';
+    const curScrollY = prevScrollY + (curH - startH);
+    window.scrollTo(0, Math.max(0, curScrollY));
+    const T = injectT * (1 - eased);
+    svg.style.transform = 'translateY(' + T + 'px)';
+    statusEl.textContent = 't=' + (t*100).toFixed(0) + '% H=' + Math.round(curH) + ' sc=' + Math.round(curScrollY) + ' T=' + Math.round(T);
+    if (t < 1) animFrame = requestAnimationFrame(tick);
+    else { animFrame = null; const fy = Math.round(measureStaffYScreen()); log('done staffY=' + fy + ' dev=' + (fy-targetScreen)); }
+  }
+  animFrame = requestAnimationFrame(tick);
+}
+function log(msg) { logEl.textContent = msg + '\n' + logEl.textContent; }
+window.addHigh = () => { appendNote(piece, { midi: 108, duration: 'quarter', dotted: false, accidental: null }); render(); };
+window.addLow = () => { appendNote(piece, { midi: 21, duration: 'quarter', dotted: false, accidental: null }); render(); };
+window.delLast = () => { if (piece.notes.length) { piece.notes.pop(); render(); } };
+render();
+</script>
+</body>
+</html>

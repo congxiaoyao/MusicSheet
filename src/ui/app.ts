@@ -814,66 +814,58 @@ export class App {
     // hover 预览符头若超出当前布局范围,接受可能的边缘裁切(预览是临时的,鼠标移走即恢复),
     // 不应为临时预览而频繁改变整个编辑区高度。
     this.layout = computeLayout(this.piece, width, this.tool.duration, chordAnchor, chordAnchorDur);
-    // 在 innerHTML 替换前,锁定当前 staffY 屏幕(旧内容态),供 height 动画 scrollY 补偿用。
-    const prevStaffYScreen = this.measureStaffYScreen();
+    // 高度动画:SVG 居底(bottom:0) + transform:translateY 补偿 + svgHost height 动画。
+    // 不用 scrollY(彻底消除页面跳动)。transform 不影响文档流,页面自然撑高不跳。
+    const prevStaffYDoc = this.measureStaffYDoc();
     const svg = buildSVG(this.piece, this.layout, this.playingIndex, { hover: this.hover });
-    // SVG 内不再画播放头(改由独立 DOM 覆盖层 playheadLayer 驱动)。
-    // 注意:innerHTML 会清空 svgHost 所有子元素(含 playheadLayer),需重新 append 回去。
     this.svgHost.innerHTML = svg;
     const svgEl = this.svgHost.querySelector('svg');
     if (svgEl) svgEl.setAttribute('width', '100%');
-    // ── 高度动画:SVG 居底 + JS rAF 动画 + scrollY 补偿 ──
-    // SVG absolute bottom:0 居底,svgHost overflow hidden 裁溢出。
-    // 五线谱物理位置 = svgHost顶 + curH - svgH + 121 + off(居底几何)。
-    // JS rAF 动画:svgHost height 从旧→新(120ms),同步 scrollY = hostTopDoc + curH - svgH + 121 + off - target。
-    // staffY 屏幕 = 物理 - scrollY = 恒定(推导见 height-anim-test 验证)。
     const endH = this.layout.height + 16;
+    const svgH = this.layout.height;
+    const off = this.layout.viewBoxYOffset;
     if (this.staffAnchorScreen === null) {
-      this.svgHost.style.height = `${endH}px`;
+      this.svgHost.style.height = endH + 'px';
       this.staffAnchorScreen = this.measureStaffYScreen();
     }
     const startH = parseFloat(this.svgHost.style.height) || endH;
-    // 只有 height 真正变化时才跑动画 + scrollY 补偿。
-    // hover 等不改变 height 的 render 不动 scrollY,避免「hover 就强制滚动」。
     if (Math.abs(endH - startH) < 1) {
-      this.svgHost.style.height = `${endH}px`;
+      this.svgHost.style.height = endH + 'px';
+      if (svgEl) svgEl.style.transform = '';
       this.svgHost.appendChild(this.playheadLayer);
-      // 状态/工具栏/卡片刷新(原 render 后续逻辑)
       const rem = remainingBeats(this.piece);
       const pct = Math.round((totalBeats(this.piece) / capacityBeats(this.piece)) * 100);
-      this.statusEl.textContent = `${this.piece.notes.length} 个音符 · 已用 ${pct}% · 还能再写约 ${rem.toFixed(1)} 拍`;
+      this.statusEl.textContent = this.piece.notes.length + ' 个音符 \u00b7 \u5df2\u7528 ' + pct + '% \u00b7 \u8fd8\u80fd\u518d\u5199\u7ea6 ' + rem.toFixed(1) + ' \u62cd';
       (this.toolbar as any)._refreshCapacity?.(remainingBeatsInCurrentBar(this.piece), rem);
       this.refreshCard();
       this.updatePlayheadAndHighlight();
       return;
     }
-    // height 变化:innerHTML 后新 SVG 已替换旧 SVG(svgHost height 还在 startH)。
-    // target = prevStaffYScreen(用户看到的旧 SVG staffY 屏幕)。
-    // 新 SVG 在 startH 居底的 staffY 屏幕 ≠ 旧 SVG(因 viewBox 变了),用 scrollY 补偿消除差值。
-    this.staffAnchorScreen = prevStaffYScreen;
-    this.svgHost.style.height = `${startH}px`;
+    const hostTopDoc = this.svgHost.getBoundingClientRect().top + window.scrollY;
+    const K = prevStaffYDoc - hostTopDoc + svgH - 121 - off;
+    this.svgHost.style.height = startH + 'px';
+    if (svgEl) svgEl.style.transform = 'translateY(' + (K - startH) + 'px)';
     if (this.heightAnimFrame) cancelAnimationFrame(this.heightAnimFrame);
-    // 同步补偿:让新 SVG 的 staffY 屏幕 = prevStaffYScreen(用户看到的位置)
-    {
-      const curScreen = this.measureStaffYScreen();
-      const adjust = curScreen - this.staffAnchorScreen;
-      if (adjust !== 0) window.scrollTo(0, Math.max(0, window.scrollY + adjust));
-    }
     const startT = performance.now();
     this.heightAnimFrame = requestAnimationFrame((now: number) => {
-      this.heightTick(now, startT, startH, endH);
+      this.heightTick(now, startT, startH, endH, K, svgEl);
     });
     this.svgHost.appendChild(this.playheadLayer);
-    // 状态
     const rem = remainingBeats(this.piece);
     const pct = Math.round((totalBeats(this.piece) / capacityBeats(this.piece)) * 100);
-    this.statusEl.textContent = `${this.piece.notes.length} 个音符 · 已用 ${pct}% · 还能再写约 ${rem.toFixed(1)} 拍`;
-    // 工具栏容量联动：disable 放不下的时值/附点按钮
+    this.statusEl.textContent = this.piece.notes.length + ' \u4e2a\u97f3\u7b26 \u00b7 \u5df2\u7528 ' + pct + '% \u00b7 \u8fd8\u80fd\u518d\u5199\u7ea6 ' + rem.toFixed(1) + ' \u62cd';
     (this.toolbar as any)._refreshCapacity?.(remainingBeatsInCurrentBar(this.piece), rem);
-    // 卡片随 render 刷新（音域/高亮/状态可能变）
     this.refreshCard();
-    // render 后用当前 currentBeat 同步播放头/高亮(SVG 刚重建,.playing class 需重打)
     this.updatePlayheadAndHighlight();
+  }
+
+  /** \u6d4b\u91cf\u4e94\u7ebf\u8c31 bottomLineY \u7684\u6587\u6863\u7edd\u5bf9\u4f4d\u7f6e */
+  private measureStaffYDoc(): number {
+    const svg = this.svgHost.querySelector('svg');
+    if (!svg) return 0;
+    const sr = svg.getBoundingClientRect();
+    const vb = (svg as SVGSVGElement).viewBox.baseVal;
+    return sr.top + (121 - vb.y) * sr.height / vb.height + window.scrollY;
   }
 
   /** 单一数据源同步:由 currentBeat → 算当前音 idx → 更新播放头位置 + 符头/简谱高亮。
