@@ -242,6 +242,34 @@ export class Player {
   /** 从头播放 */
   play(piece: Piece): void {
     this.piece = piece;
+    this.recomputeSchedule(piece);
+    this.playFrom(0);
+  }
+
+  /** 重算 schedule / totalBeats（不重启播放）。
+   *  播放中编辑音符(增删音)后调用:让 Player 持有的 schedule 与最新乐谱一致,
+   *  避免 noteIndexAtBeat 返回越界 idx、播放头坐标与新音符错位。
+   *  - playing 态:从「当前 beat」无缝重调度(startBeat 夹在新 totalBeats 内,
+   *    若当前已超过新曲长则视作到尾 → finish)。
+   *  - paused 态:只更新 schedule 与位置指针,不发声。
+   *  - stopped 态:无需调用(下次 play 会重建)。 */
+  rebuildSchedule(piece: Piece): void {
+    this.piece = piece;
+    this.recomputeSchedule(piece);
+    // 当前 beat 夹在新 totalBeats 内,避免越界
+    const beat = this.getCurrentBeat();
+    this.startBeat = Math.max(0, Math.min(beat, this.totalBeats));
+    if (this.state === 'playing') {
+      // playing 态无缝重调度(沿用 seek 的"从当前 beat 继续"语义)
+      this.playFrom(this.startBeat);
+    } else if (this.state === 'paused') {
+      // paused 态:清掉旧的待发声调度,位置指针已更新,等 resume 时用新 schedule
+      this.stopAllOscs();
+    }
+  }
+
+  /** 计算 schedule / totalBeats（play 与 rebuildSchedule 共用）。 */
+  private recomputeSchedule(piece: Piece): void {
     this.schedule = this.computeSchedule(piece);
     // totalBeats 吸附到小节网格:乐谱总拍数应是 bpb 整数倍,但末音 endBeat
     // 因 tuplet 累加可能含 ~1e-16 误差(如 3.9999... 而非 4.0),会让 tickLoop
@@ -251,7 +279,6 @@ export class Player {
       ? this.schedule[this.schedule.length - 1].endBeat
       : 0;
     this.totalBeats = snapBeat(rawTotal, bpb);
-    this.playFrom(0);
   }
 
   /** seek：从指定 beat 开始（playing 态继续播，paused 态保持暂停但更新位置） */

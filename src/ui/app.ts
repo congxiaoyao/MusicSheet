@@ -553,7 +553,22 @@ export class App {
     // 追加后重置一次性修饰（附点/升降/休止），符合行业惯例
     (this.toolbar as any)._resetModifiers?.();
     this.hover = null;
+    this.syncPlayerAfterEdit();
     this.render();
+  }
+
+  /** 编辑（增删音）后同步 Player 的 schedule，避免播放头/高亮与新乐谱错位。
+   *  - playing 态:按新 schedule 从当前 beat 无缝重调度；
+   *  - paused 态:更新 schedule 与位置，播放头/高亮即时对齐（不发声）；
+   *  - stopped 态:无需处理（下次 play 会重建 schedule）。
+   *  当前 beat 夹在新 totalBeats 内，删除末音后不会越界。 */
+  private syncPlayerAfterEdit(): void {
+    if (this.playState === 'stopped') return;
+    this.player.rebuildSchedule(this.piece);
+    // currentBeat 与进度条/播放头对齐新的曲长
+    this.currentBeat = this.player.getCurrentBeat();
+    (this.playbackCard as any)._setProgress?.(this.currentBeat);
+    this.updatePlayheadAndHighlight();
   }
 
   private onToolChange(): void {
@@ -569,6 +584,14 @@ export class App {
     if (oldClef !== this.piece.clef || oldTime !== newTime || oldMeasureCount !== this.piece.measureCount) {
       this.piece.notes = [];
       this.playingIndex = -1;
+      // 清空音符后，Player 旧 schedule 与新（空）乐谱脱节：强制停止播放并归零，
+      // 否则 Player 仍按旧 schedule 出声、noteIndexAtBeat 会越界。
+      if (this.playState !== 'stopped') {
+        this.player.stop();
+        this.currentBeat = 0;
+        this.playState = 'stopped';
+        this.refreshCard();
+      }
     }
     this.render();
   }
@@ -681,6 +704,7 @@ export class App {
         this.currentChordId = null;
       }
     }
+    this.syncPlayerAfterEdit();
     this.render();
   }
 
@@ -1108,18 +1132,19 @@ export class App {
     }
   }
 
-  /** 高度动画单帧:三路同步插值
+  /** 高度动画单帧:三路开环同步插值(与测试页 dev=0 方案完全一致)
    *  - height: startH → endH(卡片自然扩展)
    *  - scrollY: prevScrollY + (curH - startH),仅 offDelta≠0(让 svgHost 底部屏幕恒定)
-   *  - svg transform: T0*(1-eased) → 0(消除 viewBox 变化的五线谱偏移)
-   *  - jianpu-group transform: jpT0*(1-eased) → 0(简谱平滑过渡) */
+   *  - svg transform: T0*(1-eased) → 0(开环,消除 viewBox 偏移)
+   *  - jianpu-group transform: jpT0*(1-eased) → 0(简谱平滑过渡)
+   *  开环在测试页验证 dev=0(scrollY 和 svg transform 同步抵消,五线谱屏幕恒定)。
+   *  注:之前尝试闭环 scrollY 补偿反而引入抖动(读 rect 时序与 rAF 不同步),已回退。 */
   private heightTick(
     now: number, startT: number, startH: number, endH: number,
     T0: number, jpT0: number, prevScrollY: number, offDelta: number,
     svgEl: SVGSVGElement | null, jg: SVGGElement | null,
   ): void {
     const t = Math.min(1, (now - startT) / 120);
-    // easeOutCubic:开头快速冲到位、结尾柔顺停住(有响应感)。height 大跨度伸缩收尾自然。
     const eased = 1 - Math.pow(1 - t, 3);
     // 1) height 插值
     const curH = startH + (endH - startH) * eased;
@@ -1129,7 +1154,7 @@ export class App {
       const curScrollY = prevScrollY + (curH - startH);
       window.scrollTo(0, Math.max(0, curScrollY));
     }
-    // 3) svg transform: T0 → 0
+    // 3) svg transform: T0 → 0(开环,消除 viewBox 偏移)
     if (svgEl) svgEl.style.transform = 'translateY(' + (T0 * (1 - eased)) + 'px)';
     // 4) jianpu-group transform: jpT0 → 0
     if (jg) jg.style.transform = 'translateY(' + (jpT0 * (1 - eased)) + 'px)';
