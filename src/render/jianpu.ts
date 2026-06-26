@@ -186,15 +186,20 @@ export function renderJianpuSVG(input: RenderInput): string {
       // 数字(休止用 0)
       const digitStr = jp.digit === 0 ? '0' : String(jp.digit);
       s += text(digitStr, x, yRow, DIGIT_FS, { ...jpOpts, weight: '500' });
-      // 八度点:高音点在数字上方(yRow-dotUpFromBase);低音点在数字下方,但若有减时线则
-      // 画在减时线下方避开(低音点与减时线都在数字下方,减时线固定位置,低音点让位)。
+      // 八度点:高音点在数字上方(yRow-dotUpFromBase);低音点在数字下方。
+      // 低音点起始 y 的规则(只对「最低声部」让位于减时线,其余声部紧跟自己数字):
+      //   - 最低声部 + 有减时线:画在减时线下方(与单音一致,单音=唯一声部即最低声部);
+      //   - 其余声部 / 无减时线:画在自己数字下方 yRow+dotDnFromBase。
+      // 历史bug:曾对所有声部统一用减时线下方那一个固定 y(基于最低声部 baseline),
+      // 导致和弦里多声部低音点全部叠在同一点。只有最低声部才需要避开减时线,
+      // 高位/中间声部的低音点天然在减时线上方区域,紧跟自己数字即可。
       if (jp.octaveDots > 0) {
         for (let d = 0; d < jp.octaveDots; d++) s += circle(x, yRow - dotUpFromBase(d + 1), DOT_R, fill, jpOpts);
       } else if (jp.octaveDots < 0) {
-        // 低音点起始 y:默认 yRow+dotDnFromBase(1);若有减时线,从减时线下方开始
-        const dotStartY = underlineBottomY > -Infinity
-          ? underlineBottomY + DOT_R + 3   // 减时线下方 + 间隙
-          : yRow + dotDnFromBase(1);
+        const isLowest = m.idx === lowestMember.idx;
+        const dotStartY = (isLowest && underlineBottomY > -Infinity)
+          ? underlineBottomY + DOT_R + 3   // 最低声部:减时线下方 + 间隙
+          : yRow + dotDnFromBase(1);       // 其余声部 / 无减时线:紧跟自己数字
         for (let d = 0; d < -jp.octaveDots; d++) s += circle(x, dotStartY + d * DOT_GAP, DOT_R, fill, jpOpts);
       }
     }
