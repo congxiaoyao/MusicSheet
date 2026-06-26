@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>符干宽度验证 — 符干染红检查连接</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 20px; background: #fafafa; }
+  h2 { font-size: 15px; color: #475569; margin: 24px 0 8px; }
+  .stage { background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px; }
+  .stage svg { display: block; width: 100%; max-width: 900px; }
+  /* 关键:符干染红,符头/连梁/加线保持黑色。
+     连接完美时,红色只出现在符干中段(被符头/连梁覆盖的区域不显红)。
+     若连接处漏红 → 符干超出符头/连梁范围(脱开) */
+  .stage rect.note-elem { fill: #ff0000 !important; }   /* 符干 = 红 */
+  .stage text.note-elem { fill: #000 !important; }       /* 符头/符尾 = 黑 */
+  .stage polygon { fill: #000 !important; }              /* 连梁 = 黑 */
+  .stage .note-elem { color: #000; }                     /* currentColor 兜底 */
+  .meta { font-size: 12px; color: #94a3b8; margin-top: 4px; }
+</style>
+</head>
+<body>
+<h1 style="font-size:18px">符干宽度验证 (W_STEM=0.24, 加粗一倍)</h1>
+<p class="meta">符干染红,符头/连梁黑色。连接完美 → 红色只在符干中段;漏红 → 符干脱离符头/连梁。</p>
+<div id="app"></div>
+<script type="module">
+  import { createPiece, appendNote } from './src/core/model.ts';
+  import { computeLayout } from './src/render/layout.ts';
+  import { buildSVG } from './src/render/export.ts';
+
+  const CK = { name: 'C', tonic: 0, sharps: [], flats: [] };
+  const T44 = { num: 4, den: 4 };
+
+  function makeStage(label, buildPiece) {
+    const p = createPiece();
+    p.time = T44; p.key = CK; p.measureCount = 1;
+    buildPiece(p);
+    const layout = computeLayout(p, 880, 'quarter');
+    const svg = buildSVG(p, layout, -1, { exportMode: true });
+    const wrap = document.createElement('div');
+    wrap.innerHTML = `<h2>${label}</h2><div class="stage">${svg}</div>`;
+    return wrap;
+  }
+
+  const app = document.getElementById('app');
+
+  // 1) stemUp 单音(低音区,符干朝上): C4 step=-2
+  app.appendChild(makeStage('1. stemUp 单音 (C4, 符干朝上)', p => {
+    appendNote(p, { midi: 60, duration: 'quarter', dotted: false, accidental: null });
+  }));
+
+  // 2) stemDown 单音(高音区,符干朝下): A5 step=10
+  app.appendChild(makeStage('2. stemDown 单音 (A5, 符干朝下)', p => {
+    appendNote(p, { midi: 81, duration: 'quarter', dotted: false, accidental: null });
+  }));
+
+  // 3) 连梁 stemUp (低音区八分,符干朝上): 2个 C4 eighth
+  app.appendChild(makeStage('3. 连梁 stemUp (2个八分 C4)', p => {
+    appendNote(p, { midi: 60, duration: 'eighth', dotted: false, accidental: null });
+    appendNote(p, { midi: 60, duration: 'eighth', dotted: false, accidental: null });
+  }));
+
+  // 4) 连梁 stemDown (高音区八分,符干朝下): 2个 A5 eighth
+  app.appendChild(makeStage('4. 连梁 stemDown (2个八分 A5)', p => {
+    appendNote(p, { midi: 81, duration: 'eighth', dotted: false, accidental: null });
+    appendNote(p, { midi: 81, duration: 'eighth', dotted: false, accidental: null });
+  }));
+
+  // 5) 十六分连梁(双梁,符干顶端被两根梁覆盖): 4个 C4 sixteenth
+  app.appendChild(makeStage('5. 十六分连梁 stemUp (4个十六分 C4, 双梁)', p => {
+    for (let i = 0; i < 4; i++) appendNote(p, { midi: 60, duration: 'sixteenth', dotted: false, accidental: null });
+  }));
+
+  // 6) 和弦 stemUp: C4+E4+G4 (符干贯穿)
+  app.appendChild(makeStage('6. 和弦 stemUp (C4+E4+G4)', p => {
+    const gid = 'chord-1';
+    appendNote(p, { midi: 60, duration: 'quarter', dotted: false, accidental: null, chordId: gid });
+    appendNote(p, { midi: 64, duration: 'quarter', dotted: false, accidental: null, chordId: gid });
+    appendNote(p, { midi: 67, duration: 'quarter', dotted: false, accidental: null, chordId: gid });
+  }));
+
+  // 7) 和弦 stemDown: A5+C6+E6
+  app.appendChild(makeStage('7. 和弦 stemDown (A5+C6+E6)', p => {
+    const gid = 'chord-2';
+    appendNote(p, { midi: 81, duration: 'quarter', dotted: false, accidental: null, chordId: gid });
+    appendNote(p, { midi: 84, duration: 'quarter', dotted: false, accidental: null, chordId: gid });
+    appendNote(p, { midi: 88, duration: 'quarter', dotted: false, accidental: null, chordId: gid });
+  }));
+</script>
+</body>
+</html>
