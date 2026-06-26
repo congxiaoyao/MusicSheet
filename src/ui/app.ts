@@ -686,22 +686,21 @@ export class App {
         this.tool.chordMode = false;
         (this.toolbar as any)._setChordMode?.(false);
       } else {
-        // 还有残音(含只剩1个):恢复 currentChordId + 开和弦模式,可继续补声部
+        // 还有残音(含只剩1个):恢复 currentChordId + 开和弦模式,可继续补声部。
+        // 此时 nextSlot 锁回和弦首音位置(chordAnchor),指示器叠在和弦起始位,符合「继续补这个和弦」直觉。
         this.currentChordId = removedChord;
         this.tool.chordMode = true;
         (this.toolbar as any)._setChordMode?.(true);
       }
     } else {
-      // 删的是普通音(非和弦)。若删除后新末音属于某个和弦组,恢复该组模式
-      // (让 nextSlot 回到和弦位置且宽度跟随和弦时值,符合「删回到和弦位置继续编辑」直觉)。
-      const last = notes[notes.length - 1];
-      if (last && last.chordId) {
-        this.currentChordId = last.chordId;
-        this.tool.chordMode = true;
-        (this.toolbar as any)._setChordMode?.(true);
-      } else {
-        // 新末音非和弦:清掉 currentChordId 避免误复用
-        this.currentChordId = null;
+      // 删的是普通音(非和弦成员):绝不恢复和弦模式。
+      // 即使新末音属于某个已完成的和弦(如 (123) 1 删 1 后末音是 (123) 成员),
+      // 该和弦已完成,用户在和弦之外编辑,nextSlot 应在该和弦之后(关模式)。
+      // 只有「删和弦成员本身」(上面 removedChord 非空分支)才进入和弦编辑模式。
+      this.currentChordId = null;
+      if (this.tool.chordMode) {
+        this.tool.chordMode = false;
+        (this.toolbar as any)._setChordMode?.(false);
       }
     }
     this.syncPlayerAfterEdit();

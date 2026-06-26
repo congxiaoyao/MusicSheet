@@ -30,3 +30,4 @@ pnpm-debug.log*
 
 # 截图产物(puppeteer 截图、分段图、验证图等，统一放此目录)
 screenshots/
+node_modules/
