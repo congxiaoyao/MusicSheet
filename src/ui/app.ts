@@ -867,6 +867,10 @@ export class App {
     const off = this.layout.viewBoxYOffset;
     const offDelta = off - oldLayout.viewBoxYOffset;   // 高音扩展量(正值=新扩展)
     const jpDelta = this.layout.jianpuBaseline - oldLayout.jianpuBaseline;  // 简谱数字下移量(正值=下移)
+    // 简谱区扩高量(声部多→区域变高):底部扩展,不应进 scrollY。
+    // 高音加线(offDelta≠0)触发 scrollY 路时,若把 jpExpand 算进 scrollY(curH-startH 含它),
+    // scrollY 会多滚 jpExpand,导致 svgHost 顶部上移、五线谱上移(实测 B4F4+A6 上移 20px)。
+    const jpExpand = (this.layout.jianpuBottom - this.layout.jianpuTop) - (oldLayout.jianpuBottom - oldLayout.jianpuTop);
     // 读旧状态(innerHTML 前):prevStaffYScreen = 旧 SVG 五线谱屏幕 y(用户当前位置)
     const prevStaffYScreen = this.measureStaffYScreen();
     const prevScrollY = window.scrollY;
@@ -930,7 +934,9 @@ export class App {
     this.staffAnchorScreen = targetScreen;
     const hostTopDoc = this.svgHost.getBoundingClientRect().top + window.scrollY;
     // T0:让新 SVG 在 startH(旧高)时五线谱屏幕 = target。
-    // 五线谱屏幕 = hostTopDoc - scrollY + T + (121 + off);t=0 时 scrollY=prevScrollY:
+    // SVG 渲染高 = layout.height(固定,setAttribute),五线谱在 SVG 内 y = 121+off(线性,preserveAspectRatio 拉伸
+    // 但 viewBox 高 = layout.height,故 (121+off)/layout.height * layout.height = 121+off)。
+    // staffScreenY = hostTopDoc - scrollY + svgT + (121 + off);t=0 时 scrollY=prevScrollY:
     //   T0 = target - hostTopDoc + prevScrollY - 121 - off(仅 offDelta≠0 时需要 svg transform)
     const T0 = offDelta !== 0 ? (targetScreen - hostTopDoc + prevScrollY - 121 - off) : 0;
     const jpT0 = -jpDelta;   // 简谱初始偏移(从旧位置起步)
@@ -941,7 +947,7 @@ export class App {
     if (this.heightAnimFrame) cancelAnimationFrame(this.heightAnimFrame);
     const startT = performance.now();
     this.heightAnimFrame = requestAnimationFrame((now: number) => {
-      this.heightTick(now, startT, startH, endH, T0, jpT0, prevScrollY, offDelta, svgEl, jg);
+      this.heightTick(now, startT, startH, endH, T0, jpT0, prevScrollY, offDelta, jpExpand, svgEl, jg);
     });
     this.lastLayout = this.layout;
     finalize();
@@ -1143,7 +1149,7 @@ export class App {
    *  注:之前尝试闭环 scrollY 补偿反而引入抖动(读 rect 时序与 rAF 不同步),已回退。 */
   private heightTick(
     now: number, startT: number, startH: number, endH: number,
-    T0: number, jpT0: number, prevScrollY: number, offDelta: number,
+    T0: number, jpT0: number, prevScrollY: number, offDelta: number, jpExpand: number,
     svgEl: SVGSVGElement | null, jg: SVGGElement | null,
   ): void {
     const t = Math.min(1, (now - startT) / 120);
@@ -1151,18 +1157,20 @@ export class App {
     // 1) height 插值
     const curH = startH + (endH - startH) * eased;
     this.svgHost.style.height = curH + 'px';
-    // 2) scrollY 同步(仅 offDelta≠0:让 svgHost 底部屏幕位置恒定,避免页面跳动)
+    // 2) scrollY 同步(仅 offDelta≠0:高音顶扩时滚动,保持五线谱屏幕恒定)。
+    //    scrollY 只跟随「会让 svgHost 顶部移动的 height 增量」;底部简谱扩高(jpExpand)是 svgHost
+    //    自然向下长、不挪顶部,故从 (curH-startH) 中扣除 jpExpand(它随 eased 渐进,与 height 同步)。
     if (offDelta !== 0) {
-      const curScrollY = prevScrollY + (curH - startH);
+      const curScrollY = prevScrollY + (curH - startH) - jpExpand * eased;
       window.scrollTo(0, Math.max(0, curScrollY));
     }
     // 3) svg transform: T0 → 0(开环,消除 viewBox 偏移)
     if (svgEl) svgEl.style.transform = 'translateY(' + (T0 * (1 - eased)) + 'px)';
-    // 4) jianpu-group transform: jpT0 → 0
+    // 4) jianpu-group transform: jpT0 → 0(简谱平滑过渡)
     if (jg) jg.style.transform = 'translateY(' + (jpT0 * (1 - eased)) + 'px)';
     if (t < 1) {
       this.heightAnimFrame = requestAnimationFrame((n: number) =>
-        this.heightTick(n, startT, startH, endH, T0, jpT0, prevScrollY, offDelta, svgEl, jg));
+        this.heightTick(n, startT, startH, endH, T0, jpT0, prevScrollY, offDelta, jpExpand, svgEl, jg));
     } else {
       this.heightAnimFrame = null;
       if (svgEl) svgEl.style.transform = '';
