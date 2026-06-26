@@ -6,6 +6,9 @@ import { G } from '../render/glyphs';
 /** 连音模式。off=普通；其余值表示对应连音类型（actual:normal）。 */
 export type TupletMode = 'off' | 'triplet' | 'quintuplet' | 'sextuplet';
 
+/** 视图模式(排版区 radio):高音谱/低音谱/高低音谱/仅预览 */
+export type ViewMode = 'treble' | 'bass' | 'grand' | 'preview';
+
 /** 各连音模式的 actual:normal 配置。三连音=3:2(3个音占2个普通音位)；五连音=5:4；六连音=6:4。 */
 export const TUPLET_CONFIG: Record<Exclude<TupletMode, 'off'>, { actual: number; normal: number; label: string }> = {
   triplet: { actual: 3, normal: 2, label: '三连音' },
@@ -39,6 +42,8 @@ export interface ToolState {
   time: TimeSig;
   /** 总小节数（单行） */
   measureCount: number;
+  /** 视图模式:高音谱/低音谱/高低音谱/仅预览 */
+  viewMode: ViewMode;
 }
 
 export function defaultTool(): ToolState {
@@ -53,6 +58,7 @@ export function defaultTool(): ToolState {
     key: 'C',
     time: { num: 4, den: 4 },
     measureCount: 2,
+    viewMode: 'treble',
   };
 }
 
@@ -267,20 +273,10 @@ export function buildToolbar(state: ToolState, cb: ToolbarCallbacks): HTMLElemen
   optWrap.appendChild(accWrap);
   root.appendChild(optWrap);
 
-  // ── 谱号 / 调号 / 拍号 ──
+  // ── 调号 / 拍号 ──(谱号由排版区 viewMode radio 控制,不再单独设谱号按钮)
   const setWrap = document.createElement('div');
   setWrap.className = 'tb-group';
   setWrap.appendChild(label('设置'));
-
-  const clefWrap = document.createElement('div');
-  clefWrap.className = 'seg';
-  const clefT = segBtn('高音 𝄞', '高音谱号');
-  const clefB = segBtn('低音 𝄢', '低音谱号');
-  clefT.onclick = () => { state.clef = 'treble'; clefT.classList.add('active'); clefB.classList.remove('active'); cb.onChange(); };
-  clefB.onclick = () => { state.clef = 'bass'; clefB.classList.add('active'); clefT.classList.remove('active'); cb.onChange(); };
-  (state.clef === 'treble' ? clefT : clefB).classList.add('active');
-  clefWrap.append(clefT, clefB);
-  setWrap.appendChild(clefWrap);
 
   // 调号：自定义下拉（原生 <select> 的弹出面板无法用 CSS 美化，所以自建）
   const keyDrop = document.createElement('div');
@@ -368,6 +364,28 @@ export function buildToolbar(state: ToolState, cb: ToolbarCallbacks): HTMLElemen
     barWrap.appendChild(b);
   }
   layoutWrap.appendChild(barWrap);
+
+  // 视图模式 radio(高音谱/低音谱/高低音谱/仅预览):控制显示几个卡片 + 预览模式
+  const viewWrap = document.createElement('div');
+  viewWrap.className = 'seg';
+  const VIEW_OPTIONS: { v: ViewMode; label: string; title: string }[] = [
+    { v: 'treble', label: '𝄞 高音', title: '高音谱(单卡)' },
+    { v: 'bass', label: '𝄢 低音', title: '低音谱(单卡)' },
+    { v: 'grand', label: '𝄞𝄢 双谱', title: '高低音谱(双卡可分别编辑)' },
+    { v: 'preview', label: '👁 预览', title: '仅预览(双谱表可视化 seekbar)' },
+  ];
+  for (const o of VIEW_OPTIONS) {
+    const b = segBtn(o.label, o.title);
+    if (state.viewMode === o.v) b.classList.add('active');
+    b.onclick = () => {
+      state.viewMode = o.v;
+      viewWrap.querySelectorAll('button').forEach(x => x.classList.remove('active'));
+      b.classList.add('active');
+      cb.onChange();
+    };
+    viewWrap.appendChild(b);
+  }
+  layoutWrap.appendChild(viewWrap);
   root.appendChild(layoutWrap);
 
   // 返回需要重置修饰的钩子（休止符/连音现在是动作按钮，无需重置；和弦模式是持久开关，也不重置）。

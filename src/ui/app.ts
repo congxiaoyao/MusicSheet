@@ -4,7 +4,7 @@
 import { Note, Piece, DurationValue } from '../core/types';
 import { KEYS, resolvePitch } from '../core/theory';
 import { createPiece, appendNote, popNote, remainingBeats, remainingBeatsInCurrentBar, capacityBeats, totalBeats, noteStartBeats } from '../core/model';
-import { computeLayout, Layout } from '../render/layout';
+import { computeLayout } from '../render/layout';
 import { buildSVG, exportPNG } from '../render/export';
 import { ensureFontLoaded } from '../render/glyphs';
 import { clickYToMidi } from '../render/staff';
@@ -16,6 +16,24 @@ import { serialize, deserialize, sheetFileName, SHEET_EXTENSION } from '../core/
 import { twinkleExample } from './examples';
 
 interface HoverState { midi: number; x: number; }
+
+/** 单卡片状态(多谱表模式下 treble/bass 各一个 CardState)。
+ *  封装原 App 的单卡字段:DOM 宿主、布局、高度动画锚点、增删/连梁状态。
+ *  渲染层(render/bindCanvas/heightTick/playhead)通过 CardState 参数化,支持多卡。 */
+interface CardState {
+  staff: 'treble' | 'bass';
+  svgHost: HTMLElement;
+  playheadLayer: HTMLElement;
+  playheadEl: HTMLElement | null;
+  layout: ReturnType<typeof computeLayout> | null;
+  lastLayout: ReturnType<typeof computeLayout> | null;
+  lastNoteCount: number;
+  lastBeamGroups: { startIdx: number; endIdx: number }[];
+  heightAnimFrame: number | null;
+  staffAnchorScreen: number | null;
+  /** 该卡的 piece 视图:{...piece, clef, notes: 对应组}。渲染层零侵入地用它。 */
+  pieceView: Piece;
+}
 
 export class App {
   private piece: Piece;
@@ -29,27 +47,18 @@ export class App {
   private currentChordId: string | null = null;
   private chordIdCounter = 0;
   private root: HTMLElement;
-  private svgHost!: HTMLElement;
-  /** 播放头覆盖层:独立 DOM div,叠在 svgHost 上,由 currentBeat 驱动定位(onTick 时更新) */
-  private playheadLayer!: HTMLElement;
-  /** 播放头方块(复用同一 div,只改 style,让 CSS transition 生效);懒创建于 playheadLayer 内 */
-  private playheadEl: HTMLElement | null = null;
-  /** 五线谱屏幕锚点:首次 render 后锁定五线谱 bottomLineY 在屏幕上的 y。
-   *  height 不变(hover/普通编辑)时走快速路径,五线谱物理位置天然不变,无需动画。
-   *  height 变化(加/删极端音)时用 scrollY + svg/jianpu transform 三路同步插值,让五线谱屏幕恒定。 */
-  private staffAnchorScreen: number | null = null;
-  private heightAnimFrame: number | null = null;
+  /** 卡片:按 viewMode 挂载 1-2 个。treble/bass/grand 模式用;preview 模式单独处理。 */
+  private cards: CardState[] = [];
+  /** 当前激活卡(编辑/hover/nextSlot 只作用于激活卡)。单卡模式唯一卡天然激活。 */
+  private activeCard: CardState | null = null;
+  /** 视图模式:高音谱(treble)/低音谱(bass)/高低音谱(grand)/仅预览(preview)。 */
+  private viewMode: 'treble' | 'bass' | 'grand' | 'preview' = 'treble';
   /** 指示器平移动画的 rAF id(与 heightTick 同款 JS 逐帧驱动,SVG CSS transform transition 不可靠)。 */
   private slotAnimFrame: number | null = null;
   /** 新音淡入动画的 rAF id(JS 逐帧 opacity,避免 CSS transition 与 heightTick rAF 交错失效)。 */
   private noteAnimFrame: number | null = null;
-  /** 上次 render 的 layout,用于算 offDelta(高音扩展量)/jpDelta(简谱下移量)。 */
-  private lastLayout: Layout | null = null;
-  /** 上次 render 的音符数,用于判断本次 render 是新增(末尾淡入)/删除(残影淡出)/其它(不动画)。 */
-  private lastNoteCount = 0;
-  /** 上次 render 的连梁组(供连梁刷新时克隆「旧组范围」做残影,新音加入会改变组形状)。 */
-  private lastBeamGroups: { startIdx: number; endIdx: number }[] = [];
   private statusEl!: HTMLElement;
+  private stageWrap!: HTMLElement;
   private bpm = 100;
   private playingIndex = -1;
   private currentBeat = 0;
@@ -60,12 +69,12 @@ export class App {
   private toolbar!: HTMLElement;
   private playbackCard!: HTMLElement;
   private hover: HoverState | null = null;
-  private layout!: ReturnType<typeof computeLayout>;
 
   constructor(root: HTMLElement) {
     this.root = root;
     this.piece = createPiece();
     this.tool = defaultTool();
+    this.viewMode = this.tool.viewMode;
     this.fingering = loadFingering();
     this.show = loadShow();
     this.player = new Player({
@@ -117,23 +126,15 @@ export class App {
     });
     this.root.appendChild(this.toolbar);
 
-    const stageWrap = document.createElement('div');
-    stageWrap.className = 'stage';
-    this.svgHost = document.createElement('div');
-    this.svgHost.className = 'svg-host';
-    stageWrap.appendChild(this.svgHost);
-    // 播放头覆盖层:叠在 svgHost 内,absolute 定位,pointer-events:none 不阻挡点击。
-    // 由 currentBeat 驱动(onTick 时更新 left/width),不再画进 SVG 字符串。
-    this.playheadLayer = document.createElement('div');
-    this.playheadLayer.className = 'playhead-layer';
-    this.playheadLayer.style.display = 'none';   // 默认隐藏,播放/暂停态才显示
-    this.svgHost.appendChild(this.playheadLayer);
-
+    this.stageWrap = document.createElement('div');
+    this.stageWrap.className = 'stage';
     this.statusEl = document.createElement('div');
     this.statusEl.className = 'status';
-    stageWrap.appendChild(this.statusEl);
+    this.stageWrap.appendChild(this.statusEl);
+    this.root.appendChild(this.stageWrap);
 
-    this.root.appendChild(stageWrap);
+    // 按 viewMode 创建卡片
+    this.rebuildCards();
 
     // 放音功能区卡片（替换原播放底栏）
     this.playbackCard = buildPlaybackCard(() => this.playbackView(), {
@@ -155,10 +156,58 @@ export class App {
     editBar.append(spacer(), exampleBtn, clearBtn, this.buildExportImportMenu());
     this.root.appendChild(editBar);
 
-    this.bindCanvas();
     this.bindKeys();
     this.bindDragDrop();
     this.render();
+  }
+
+  /** 按 viewMode 创建/重建卡片 DOM。treble/bass=1 卡,grand=2 卡,preview=预览卡(阶段5)。
+   *  卡片 svgHost 挂在 stageWrap 内(statusEl 之前)。切模式时调用重建。 */
+  private rebuildCards(): void {
+    // 清旧卡片 DOM
+    for (const c of this.cards) c.svgHost.remove();
+    this.cards = [];
+    this.activeCard = null;
+    const staves: ('treble' | 'bass')[] = this.viewMode === 'bass' ? ['bass'] : this.viewMode === 'grand' ? ['treble', 'bass'] : ['treble'];
+    for (const staff of staves) {
+      const card = this.createCard(staff);
+      this.cards.push(card);
+      this.stageWrap.insertBefore(card.svgHost, this.statusEl);
+      this.bindCard(card);
+    }
+    this.activeCard = this.cards[0] ?? null;
+    // 激活态:piece.notes 指向激活卡的组(编辑层操作 piece.notes = 活跃组)
+    if (this.activeCard) {
+      this.piece.notes = this.activeCard.staff === 'bass' ? this.piece.bass : this.piece.treble;
+      this.piece.clef = this.activeCard.staff;
+    }
+    this.updateCardActiveVisual();
+  }
+
+  /** 创建一个卡片(svgHost + playheadLayer + CardState)。pieceView = {..piece, clef, notes: 对应组}。 */
+  private createCard(staff: 'treble' | 'bass'): CardState {
+    const svgHost = document.createElement('div');
+    svgHost.className = 'svg-host';
+    if (this.viewMode === 'grand') svgHost.classList.add('dual');
+    const playheadLayer = document.createElement('div');
+    playheadLayer.className = 'playhead-layer';
+    playheadLayer.style.display = 'none';
+    svgHost.appendChild(playheadLayer);
+    const notes = staff === 'bass' ? this.piece.bass : this.piece.treble;
+    return {
+      staff, svgHost, playheadLayer, playheadEl: null,
+      layout: null, lastLayout: null, lastNoteCount: 0, lastBeamGroups: [],
+      heightAnimFrame: null, staffAnchorScreen: null,
+      pieceView: { ...this.piece, clef: staff, notes },
+    };
+  }
+
+  /** 更新卡片激活态视觉(active 卡正常,非 active 半透明 + 点击切换激活)。 */
+  private updateCardActiveVisual(): void {
+    for (const c of this.cards) {
+      const isActive = c === this.activeCard;
+      c.svgHost.classList.toggle('inactive', this.viewMode === 'grand' && !isActive);
+    }
   }
 
   /** 构建「导出/导入」下拉按钮组：导出 PNG / 导出乐谱 / 导入乐谱 */
@@ -282,15 +331,15 @@ export class App {
     }
   }
 
-  /** 应用导入的 piece：同步 tool 状态 + 重建工具栏 + 重置播放 + render */
+  /** 应用导入的 piece：同步 tool 状态 + 重建卡片/工具栏 + 重置播放 + render */
   private applyImportedPiece(piece: Piece): void {
     this.piece = piece;
-    // 同步工具栏选项到导入的乐谱
-    this.tool.clef = piece.clef;
+    // 同步工具栏选项(谱号由导入 piece 决定 viewMode)
     this.tool.key = piece.key.name;
     this.tool.time = { ...piece.time };
     this.tool.measureCount = piece.measureCount;
-    // 重置播放/输入状态
+    // 按 piece.clef 设 viewMode
+    this.viewMode = piece.clef === 'bass' ? 'bass' : 'treble';
     this.player.stop();
     this.playingIndex = -1;
     this.currentBeat = 0;
@@ -298,6 +347,7 @@ export class App {
     this.hover = null;
     this.currentChordId = null;
     this.tupletProgress = null;
+    this.rebuildCards();
     this.rebuildToolbar();
     this.render();
   }
@@ -332,41 +382,57 @@ export class App {
    *  click 事件在 mouseup 后触发,其坐标是抬起位置,故改用 mousedown 记录的音高。 */
   private downMidi: number | null = null;
 
-  private bindCanvas(): void {
-    // 阻止双击/拖拽选中文本和音符（CSS user-select:none 的补充）
-    this.svgHost.addEventListener('selectstart', (e) => e.preventDefault());
-    this.svgHost.addEventListener('dblclick', (e) => e.preventDefault());
+  /** 绑定单卡片的画布交互(mousedown/move/click)。card 决定坐标换算用哪个 layout/clef。
+   *  click 时:grand 模式点非激活卡先切换激活;激活卡的 click 才追加音符。 */
+  private bindCard(card: CardState): void {
+    const host = card.svgHost;
+    host.addEventListener('selectstart', (e) => e.preventDefault());
+    host.addEventListener('dblclick', (e) => e.preventDefault());
 
-    // mousedown:记录按下状态 + 按下位置的音高(用于 click 时按按下音高输入)
-    this.svgHost.addEventListener('mousedown', (e: MouseEvent) => {
+    host.addEventListener('mousedown', (e: MouseEvent) => {
       this.isMouseDown = true;
-      const { y, ok } = this.toSvgCoords(e);
-      this.downMidi = ok ? clickYToMidi(y, this.piece, this.layout) : null;
+      // grand 模式:点非激活卡 → 切换激活(不输入,只激活)
+      if (this.viewMode === 'grand' && card !== this.activeCard) {
+        this.setActiveCard(card);
+      }
+      const { y, ok } = this.toSvgCoords(e, card);
+      this.downMidi = ok && card.layout ? clickYToMidi(y, card.pieceView, card.layout) : null;
     });
     window.addEventListener('mouseup', () => { this.isMouseDown = false; });
 
-    // mousemove → 悬停预览。仅当音高真正变化（吸附后的 midi 不同）才重渲染，
-    // 既省性能，又避免每次微小移动都重建 SVG 把点击打断。
-    this.svgHost.addEventListener('mousemove', (e: MouseEvent) => {
-      if (this.isMouseDown) return; // 按下期间不重渲染
-      const { y, ok } = this.toSvgCoords(e);
-      if (!ok) { this.clearHover(); return; }
-      const midi = clickYToMidi(y, this.piece, this.layout);
-      if (this.hover && this.hover.midi === midi) return; // 音高没变，不重渲染
-      this.hover = { midi, x: this.layout.nextSlotX };
+    // mousemove → 悬停预览(仅激活卡)
+    host.addEventListener('mousemove', (e: MouseEvent) => {
+      if (this.isMouseDown) return;
+      if (card !== this.activeCard) return;   // 非激活卡不预览
+      const { y, ok } = this.toSvgCoords(e, card);
+      if (!ok || !card.layout) { this.clearHover(); return; }
+      const midi = clickYToMidi(y, card.pieceView, card.layout);
+      if (this.hover && this.hover.midi === midi) return;
+      this.hover = { midi, x: card.layout.nextSlotX };
       this.render();
       this.maybePreview(midi);
     });
-    this.svgHost.addEventListener('mouseleave', () => this.clearHover());
+    host.addEventListener('mouseleave', () => this.clearHover());
 
-    // click → 追加音符。用 mousedown 时记录的音高(按下位置),而非 click 事件坐标
-    // (click 在 mouseup 后触发,坐标是抬起位置;按下→抬起跨音高应按按下音高输入)。
-    this.svgHost.addEventListener('click', () => {
+    // click → 追加音符(仅激活卡)
+    host.addEventListener('click', () => {
+      if (card !== this.activeCard) return;
       if (this.downMidi === null) return;
       const midi = this.downMidi;
       this.downMidi = null;
       this.appendNoteWithPitch(midi);
     });
+  }
+
+  /** 切换激活卡(grand 模式)。同步 piece.notes 指向新激活组 + 更新视觉。 */
+  private setActiveCard(card: CardState): void {
+    if (card === this.activeCard) return;
+    this.activeCard = card;
+    this.piece.notes = card.staff === 'bass' ? this.piece.bass : this.piece.treble;
+    this.piece.clef = card.staff;
+    this.hover = null;
+    this.updateCardActiveVisual();
+    this.render();
   }
 
   private lastPreviewMidi: number | null = null;
@@ -381,18 +447,16 @@ export class App {
     if (this.hover) { this.hover = null; this.render(); }
   }
 
-  private toSvgCoords(e: MouseEvent): { x: number; y: number; ok: boolean } {
+  private toSvgCoords(e: MouseEvent, card: CardState): { x: number; y: number; ok: boolean } {
+    const lay = card.layout;
+    if (!lay) return { x: 0, y: 0, ok: false };
     // 用 svg 自身的 getBoundingClientRect(直接反映 svg 实际渲染位置,最准确)。
-    // 不要用 svgHost rect + padding 推算:absolute 的 svg top:0 贴 padding box 顶,
-    // 实测 svgRect.top - hostRect.top ≈ border(非 padding),推算会引入 ~7px 系统偏差。
-    const svg = this.svgHost.querySelector('svg');
+    const svg = card.svgHost.querySelector('svg');
     if (!svg) return { x: 0, y: 0, ok: false };
     const rect = svg.getBoundingClientRect();
-    const x = ((e.clientX - rect.left) / rect.width) * this.layout.width;
-    // y 映射要考虑 viewBox 的 y 起点(-viewBoxYOffset):SVG 物理顶对应 viewBox y=-offset,
-    // 故内部 y = (距物理顶比例) * viewBox高 + viewBoxY起点。
-    const vbY0 = -this.layout.viewBoxYOffset;
-    const y = ((e.clientY - rect.top) / rect.height) * this.layout.height + vbY0;
+    const x = ((e.clientX - rect.left) / rect.width) * lay.width;
+    const vbY0 = -lay.viewBoxYOffset;
+    const y = ((e.clientY - rect.top) / rect.height) * lay.height + vbY0;
     return { x, y, ok: true };
   }
 
@@ -574,26 +638,30 @@ export class App {
   }
 
   private onToolChange(): void {
-    const oldClef = this.piece.clef;
     const oldTime = `${this.piece.time.num}/${this.piece.time.den}`;
     const oldMeasureCount = this.piece.measureCount;
-    this.piece.clef = this.tool.clef;
+    const oldViewMode = this.viewMode;
     this.piece.key = KEYS[this.tool.key];
     this.piece.time = { ...this.tool.time };
     this.piece.measureCount = this.tool.measureCount;
-    // 切换谱号 / 拍号 / 小节数：清空已输入的音符（避免错位与节奏错乱）
+    this.viewMode = this.tool.viewMode;
+    // 切换拍号 / 小节数:两组共享,清空已输入音符(避免错位与节奏错乱)。
     const newTime = `${this.piece.time.num}/${this.piece.time.den}`;
-    if (oldClef !== this.piece.clef || oldTime !== newTime || oldMeasureCount !== this.piece.measureCount) {
-      this.piece.notes = [];
+    if (oldTime !== newTime || oldMeasureCount !== this.piece.measureCount) {
+      this.piece.treble = [];
+      this.piece.bass = [];
+      if (this.activeCard) this.piece.notes = this.activeCard.staff === 'bass' ? this.piece.bass : this.piece.treble;
       this.playingIndex = -1;
-      // 清空音符后，Player 旧 schedule 与新（空）乐谱脱节：强制停止播放并归零，
-      // 否则 Player 仍按旧 schedule 出声、noteIndexAtBeat 会越界。
       if (this.playState !== 'stopped') {
         this.player.stop();
         this.currentBeat = 0;
         this.playState = 'stopped';
         this.refreshCard();
       }
+    }
+    // 切视图模式:重建卡片布局(单卡↔双卡↔预览)。数据(treble/bass 组)保留不清空。
+    if (oldViewMode !== this.viewMode) {
+      this.rebuildCards();
     }
     this.render();
   }
@@ -793,21 +861,20 @@ export class App {
 
   private clear(): void {
     this.piece = createPiece();
-    this.piece.clef = this.tool.clef;
     this.piece.key = KEYS[this.tool.key];
     this.piece.time = { ...this.tool.time };
     this.piece.measureCount = this.tool.measureCount;
     this.playingIndex = -1;
+    this.rebuildCards();
     this.render();
   }
 
   private loadExample(): void {
     this.piece = twinkleExample(this.tool.measureCount);
-    // 保留用户当前选择的调号与拍号（示例用绝对 MIDI 音高，调号只影响显示与简谱）
-    this.piece.clef = this.tool.clef;
     this.piece.key = KEYS[this.tool.key];
     this.piece.time = { ...this.tool.time };
     this.piece.measureCount = this.tool.measureCount;
+    this.rebuildCards();
     this.rebuildToolbar();
     this.render();
   }
@@ -824,7 +891,9 @@ export class App {
   }
 
   private async doExport(): Promise<void> {
-    try { await exportPNG(this.piece, this.layout); this.flash('已导出 PNG'); }
+    const card = this.activeCard ?? this.cards[0];
+    if (!card || !card.layout) { this.flash('无可导出的乐谱'); return; }
+    try { await exportPNG(card.pieceView, card.layout); this.flash('已导出 PNG'); }
     catch (err) { this.flash('导出失败：' + (err as Error).message); }
   }
 
@@ -836,129 +905,118 @@ export class App {
     this.flashTimer = window.setTimeout(() => { this.statusEl.classList.remove('show', 'flash'); this.render(); }, 1600);
   }
 
+  /** 渲染所有卡片 + 刷新状态栏/播放头。遍历 cards 调 renderCard。 */
   private render(): void {
-    const width = Math.min(1200, Math.max(640, this.svgHost.clientWidth || 940));
-    // 和弦输入中:nextSlot 锁定在当前和弦组首音起点,让用户知道「还在这个位置加声部」,
-    // 且 slot 宽度跟随和弦首音时值(删除到和音位置时不沿用工具栏可能已切换的时值)。
-    // 关和弦后不传 anchor,nextSlot 才跳到 totalBeats(首音结束处)。
+    // 同步每个 card 的 pieceView(切组/编辑后 piece 变了,pieceView 要重建)
+    for (const c of this.cards) {
+      const notes = c.staff === 'bass' ? this.piece.bass : this.piece.treble;
+      c.pieceView = { ...this.piece, clef: c.staff, notes };
+    }
+    for (const c of this.cards) this.renderCard(c);
+    // 状态栏(全局:两组音符总数)
+    const total = this.piece.treble.length + this.piece.bass.length;
+    const rem = remainingBeats(this.piece);
+    const pct = Math.round((totalBeats(this.piece) / capacityBeats(this.piece)) * 100);
+    this.statusEl.textContent = total + ' \u4e2a\u97f3\u7b26 \u00b7 \u5df2\u7528 ' + pct + '% \u00b7 \u8fd8\u80fd\u518d\u5199\u7ea6 ' + rem.toFixed(1) + ' \u62cd';
+    (this.toolbar as any)._refreshCapacity?.(remainingBeatsInCurrentBar(this.piece), rem);
+    this.refreshCard();
+    this.updatePlayheadAndHighlight();
+  }
+
+  /** 渲染单卡片(高度动画 + SVG 重建 + 增删动画)。原 render() 的单卡逻辑,参数化为 card。 */
+  private renderCard(card: CardState): void {
+    const piece = card.pieceView;
+    const width = Math.min(1200, Math.max(640, card.svgHost.clientWidth || 940));
+    // 和弦输入中:nextSlot 锁定在当前和弦组首音起点(仅激活卡的和弦模式)
     let chordAnchor: number | undefined;
     let chordAnchorDur: DurationValue | undefined;
-    if (this.tool.chordMode && this.currentChordId) {
-      const notes = this.piece.notes;
+    if (card === this.activeCard && this.tool.chordMode && this.currentChordId) {
+      const notes = piece.notes;
       const firstIdx = notes.findIndex(n => n.chordId === this.currentChordId);
       if (firstIdx >= 0) {
-        chordAnchor = noteStartBeats(this.piece)[firstIdx];
+        chordAnchor = noteStartBeats(piece)[firstIdx];
         chordAnchorDur = notes[firstIdx].duration;
       }
     }
-    // 布局高度只由实际 notes 决定,不含 hoverMidi。
-    // 之前传 hoverMidi 导致鼠标上下移动时 hover 预览音高变化 → layout 高度随鼠标 y 实时跳变(乱跳)。
-    // hover 预览符头若超出当前布局范围,接受可能的边缘裁切(预览是临时的,鼠标移走即恢复),
-    // 不应为临时预览而频繁改变整个编辑区高度。
-    this.layout = computeLayout(this.piece, width, this.tool.duration, chordAnchor, chordAnchorDur);
-    // ── 高度动画:统一方案(三路同步插值) ──
-    // SVG absolute top:0(顶锚,页面自然向下撑开不跳)。height 变化时:
-    //   1) svgHost height: startH → endH(120ms easeOutCubic)
-    //   2) scrollY + svg transform(仅 offDelta≠0):scrollY 同步增减让 svgHost 底部屏幕恒定;
-    //      svg transform 从 T0→0 消除 viewBox 负 y 变化导致的五线谱偏移
-    //   3) jianpu-group transform(仅 jpDelta≠0):简谱从 -jpDelta→0 平滑过渡
-    // height 不变(hover/普通编辑)走快速路径,不动画,五线谱物理位置天然不变。
-    const oldLayout = this.lastLayout ?? this.layout;
-    const off = this.layout.viewBoxYOffset;
-    const offDelta = off - oldLayout.viewBoxYOffset;   // 高音扩展量(正值=新扩展)
-    const jpDelta = this.layout.jianpuBaseline - oldLayout.jianpuBaseline;  // 简谱数字下移量(正值=下移)
-    // 简谱区扩高量(声部多→区域变高):底部扩展,不应进 scrollY。
-    // 高音加线(offDelta≠0)触发 scrollY 路时,若把 jpExpand 算进 scrollY(curH-startH 含它),
-    // scrollY 会多滚 jpExpand,导致 svgHost 顶部上移、五线谱上移(实测 B4F4+A6 上移 20px)。
-    const jpExpand = (this.layout.jianpuBottom - this.layout.jianpuTop) - (oldLayout.jianpuBottom - oldLayout.jianpuTop);
-    // 读旧状态(innerHTML 前):prevStaffYScreen = 旧 SVG 五线谱屏幕 y(用户当前位置)
-    const prevStaffYScreen = this.measureStaffYScreen();
+    const isCardActive = card === this.activeCard;
+    const cardHover = isCardActive ? this.hover : null;
+    card.layout = computeLayout(piece, width, this.tool.duration, chordAnchor, chordAnchorDur);
+    const lay = card.layout;
+    const oldLayout = card.lastLayout ?? lay;
+    const off = lay.viewBoxYOffset;
+    const offDelta = off - oldLayout.viewBoxYOffset;
+    const jpDelta = lay.jianpuBaseline - oldLayout.jianpuBaseline;
+    const jpExpand = (lay.jianpuBottom - lay.jianpuTop) - (oldLayout.jianpuBottom - oldLayout.jianpuTop);
+    const prevStaffYScreen = this.measureStaffYScreen(card);
     const prevScrollY = window.scrollY;
-    const startH = parseFloat(this.svgHost.style.height) || (this.layout.height + 16);
-    // ── 增删音动画:innerHTML 替换前抓旧状态 ──
-    const noteDelta = this.piece.notes.length - this.lastNoteCount;  // >0 新增,<0 删除,0 无变化
-    const oldNextSlotX = this.lastLayout ? this.lastLayout.nextSlotX : null;
-    const oldSvgEl = this.svgHost.querySelector('svg') as SVGSVGElement | null;  // 删除时克隆残影用
-    // 渲染新 SVG
-    const svg = buildSVG(this.piece, this.layout, this.playingIndex, { hover: this.hover });
-    this.svgHost.innerHTML = svg;
-    const svgEl = this.svgHost.querySelector('svg') as SVGSVGElement | null;
+    const startH = parseFloat(card.svgHost.style.height) || (lay.height + 16);
+    const noteDelta = isCardActive ? (piece.notes.length - card.lastNoteCount) : 0;
+    const oldNextSlotX = card.lastLayout ? card.lastLayout.nextSlotX : null;
+    const oldSvgEl = card.svgHost.querySelector('svg') as SVGSVGElement | null;
+    const svg = buildSVG(piece, lay, isCardActive ? this.playingIndex : -1, { hover: cardHover });
+    card.svgHost.innerHTML = svg;
+    const svgEl = card.svgHost.querySelector('svg') as SVGSVGElement | null;
     if (svgEl) {
       svgEl.setAttribute('width', '100%');
-      svgEl.setAttribute('height', String(this.layout.height));
+      svgEl.setAttribute('height', String(lay.height));
       svgEl.setAttribute('preserveAspectRatio', 'none');
     }
-    const jg = this.svgHost.querySelector('.jianpu-group') as SVGGElement | null;
-    const endH = this.layout.height + 16;
+    const jg = card.svgHost.querySelector('.jianpu-group') as SVGGElement | null;
+    const endH = lay.height + 16;
 
-    // 公共尾部:重挂播放头层 + 刷新状态栏 + 更新播放头/高亮
-    const finalize = () => {
-      this.svgHost.appendChild(this.playheadLayer);
-      const rem = remainingBeats(this.piece);
-      const pct = Math.round((totalBeats(this.piece) / capacityBeats(this.piece)) * 100);
-      this.statusEl.textContent = this.piece.notes.length + ' \u4e2a\u97f3\u7b26 \u00b7 \u5df2\u7528 ' + pct + '% \u00b7 \u8fd8\u80fd\u518d\u5199\u7ea6 ' + rem.toFixed(1) + ' \u62cd';
-      (this.toolbar as any)._refreshCapacity?.(remainingBeatsInCurrentBar(this.piece), rem);
-      this.refreshCard();
-      this.updatePlayheadAndHighlight();
+    const finalizeCard = () => {
+      card.svgHost.appendChild(card.playheadLayer);
     };
 
-    // 首次初始化:锁定屏幕锚点,直接定高
-    if (this.staffAnchorScreen === null) {
-      this.svgHost.style.height = endH + 'px';
+    // 首次初始化:锁定屏幕锚点
+    if (card.staffAnchorScreen === null) {
+      card.svgHost.style.height = endH + 'px';
       if (svgEl) svgEl.style.transform = '';
       if (jg) jg.style.transform = '';
-      this.staffAnchorScreen = this.measureStaffYScreen();
-      this.lastLayout = this.layout;
-      this.lastNoteCount = this.piece.notes.length;
-      this.lastBeamGroups = computeBeams(this.piece).map(g => ({ startIdx: g.startIdx, endIdx: g.endIdx }));
-      finalize();
+      card.staffAnchorScreen = this.measureStaffYScreen(card);
+      card.lastLayout = lay;
+      card.lastNoteCount = piece.notes.length;
+      card.lastBeamGroups = computeBeams(piece).map(g => ({ startIdx: g.startIdx, endIdx: g.endIdx }));
+      finalizeCard();
       return;
     }
 
-    // height 不变:快速路径,不动画
     if (Math.abs(endH - startH) < 1) {
-      this.svgHost.style.height = endH + 'px';
+      card.svgHost.style.height = endH + 'px';
       if (svgEl) svgEl.style.transform = '';
       if (jg) jg.style.transform = '';
-      this.lastLayout = this.layout;
-      finalize();
-      this.applyNoteAnim(noteDelta, oldNextSlotX, oldSvgEl, svgEl, false);
-      this.lastNoteCount = this.piece.notes.length;
-      this.lastBeamGroups = computeBeams(this.piece).map(g => ({ startIdx: g.startIdx, endIdx: g.endIdx }));
+      card.lastLayout = lay;
+      finalizeCard();
+      if (isCardActive) this.applyNoteAnim(card, noteDelta, oldNextSlotX, oldSvgEl, svgEl, false);
+      card.lastNoteCount = piece.notes.length;
+      card.lastBeamGroups = computeBeams(piece).map(g => ({ startIdx: g.startIdx, endIdx: g.endIdx }));
       return;
     }
 
-    // ====== 统一动画:三路同步插值 ======
-    // 锁定五线谱屏幕目标(= 用户当前看到的位置)
+    // 统一动画:三路同步插值
     const targetScreen = Math.round(prevStaffYScreen);
-    this.staffAnchorScreen = targetScreen;
-    const hostTopDoc = this.svgHost.getBoundingClientRect().top + window.scrollY;
-    // T0:让新 SVG 在 startH(旧高)时五线谱屏幕 = target。
-    // SVG 渲染高 = layout.height(固定,setAttribute),五线谱在 SVG 内 y = 121+off(线性,preserveAspectRatio 拉伸
-    // 但 viewBox 高 = layout.height,故 (121+off)/layout.height * layout.height = 121+off)。
-    // staffScreenY = hostTopDoc - scrollY + svgT + (121 + off);t=0 时 scrollY=prevScrollY:
-    //   T0 = target - hostTopDoc + prevScrollY - 121 - off(仅 offDelta≠0 时需要 svg transform)
+    card.staffAnchorScreen = targetScreen;
+    const hostTopDoc = card.svgHost.getBoundingClientRect().top + window.scrollY;
     const T0 = offDelta !== 0 ? (targetScreen - hostTopDoc + prevScrollY - 121 - off) : 0;
-    const jpT0 = -jpDelta;   // 简谱初始偏移(从旧位置起步)
-    // 同步首帧:设 startH + T0 + jpT0(消除 innerHTML 替换瞬间的跳变)
-    this.svgHost.style.height = startH + 'px';
+    const jpT0 = -jpDelta;
+    card.svgHost.style.height = startH + 'px';
     if (svgEl) svgEl.style.transform = 'translateY(' + T0 + 'px)';
     if (jg) jg.style.transform = 'translateY(' + jpT0 + 'px)';
-    if (this.heightAnimFrame) cancelAnimationFrame(this.heightAnimFrame);
+    if (card.heightAnimFrame) cancelAnimationFrame(card.heightAnimFrame);
     const startT = performance.now();
-    this.heightAnimFrame = requestAnimationFrame((now: number) => {
-      this.heightTick(now, startT, startH, endH, T0, jpT0, prevScrollY, offDelta, jpExpand, svgEl, jg);
+    card.heightAnimFrame = requestAnimationFrame((now: number) => {
+      this.heightTick(card, now, startT, startH, endH, T0, jpT0, prevScrollY, offDelta, jpExpand, svgEl, jg);
     });
-    this.lastLayout = this.layout;
-    finalize();
-    this.applyNoteAnim(noteDelta, oldNextSlotX, oldSvgEl, svgEl, true);
-    this.lastNoteCount = this.piece.notes.length;
-    this.lastBeamGroups = computeBeams(this.piece).map(g => ({ startIdx: g.startIdx, endIdx: g.endIdx }));
+    card.lastLayout = lay;
+    finalizeCard();
+    if (isCardActive) this.applyNoteAnim(card, noteDelta, oldNextSlotX, oldSvgEl, svgEl, true);
+    card.lastNoteCount = piece.notes.length;
+    card.lastBeamGroups = computeBeams(piece).map(g => ({ startIdx: g.startIdx, endIdx: g.endIdx }));
   }
 
-  /** 测量五线谱 bottomLineY 当前屏幕 y(高度动画锚定 + 播放头等共用) */
-  private measureStaffYScreen(): number {
-    const svg = this.svgHost.querySelector('svg');
+  /** 测量某卡五线谱 bottomLineY 当前屏幕 y(高度动画锚定) */
+  private measureStaffYScreen(card: CardState): number {
+    const svg = card.svgHost.querySelector('svg');
     if (!svg) return 0;
     const sr = svg.getBoundingClientRect();
     const vb = (svg as SVGSVGElement).viewBox.baseVal;
@@ -969,48 +1027,39 @@ export class App {
    *  和弦尾音不在 BeamGroup(computeBeams 跳过 tail),需往前找同 chordId 的首音定位组。
    *  返回 {grp, beams, noteEls}:grp=组范围;beams=组内梁 polygon;noteEls=组内所有音符元素。
    *  grp=null 表示 lastIdx 不在任何连梁组里(非连梁时值或孤立音)。 */
-  private collectBeamGroupEls(lastIdx: number): { grp: { startIdx: number; endIdx: number } | null; beams: SVGElement[]; noteEls: SVGElement[] } {
-    const notes = this.piece.notes;
-    // 定位 lastIdx 在连梁组里的代表索引:和弦尾音 → 组内首音 idx
+  private collectBeamGroupEls(card: CardState, lastIdx: number): { grp: { startIdx: number; endIdx: number } | null; beams: SVGElement[]; noteEls: SVGElement[] } {
+    const notes = card.pieceView.notes;
     let probeIdx = lastIdx;
     const last = notes[lastIdx];
     if (last?.chordId) {
-      // 往前找同 chordId 的首音
       for (let i = lastIdx; i >= 0; i--) {
         if (notes[i].chordId === last.chordId && !(i > 0 && notes[i - 1].chordId === last.chordId)) {
           probeIdx = i; break;
         }
       }
     }
-    const groups = computeBeams(this.piece);
+    const groups = computeBeams(card.pieceView);
     const grp = indexBeamMap(groups).get(probeIdx);
     if (!grp) return { grp: null, beams: [], noteEls: [] };
-    // 组内所有梁 polygon 带 class beam-grp-${startIdx}
-    const beams = Array.from(this.svgHost.querySelectorAll(`.beam-grp-${grp.startIdx}`)) as SVGElement[];
-    // 组内所有音符元素(startIdx..endIdx 各 idx 的 [data-idx]):整组刷新,让老音符也参与透明变化
+    const beams = Array.from(card.svgHost.querySelectorAll(`.beam-grp-${grp.startIdx}`)) as SVGElement[];
     const noteEls: SVGElement[] = [];
     for (let i = grp.startIdx; i <= grp.endIdx; i++) {
-      noteEls.push(...Array.from(this.svgHost.querySelectorAll(`[data-idx="${i}"]`)) as SVGElement[]);
+      noteEls.push(...Array.from(card.svgHost.querySelectorAll(`[data-idx="${i}"]`)) as SVGElement[]);
     }
     return { grp: { startIdx: grp.startIdx, endIdx: grp.endIdx }, beams, noteEls };
   }
 
-  /** 从旧 svg 克隆「变化的连梁组」的老内容(梁 polygon + 组内音符),挂到 staff-group 做残影淡出。
-   *  连梁刷新时:老组(旧形状,如独立 flag)淡出 1→0,新组(新形状)淡入 0→1,交叉淡化。
-   *  范围用 lastBeamGroups(旧连梁组),而非新组 —— 新音加入会改变组结构,新组范围在旧 svg 里不存在。
-   *  oldSvgEl 是 innerHTML 替换前的旧 svg(已脱离 DOM 但引用还在)。 */
-  private cloneOldBeamGhost(oldSvgEl: SVGSVGElement | null): SVGElement[] {
-    if (!oldSvgEl || !this.lastBeamGroups.length) return [];
-    const staffGroup = this.svgHost.querySelector('.staff-group') as SVGGElement | null;
+  /** 从旧 svg 克隆「变化的连梁组」的老内容(梁 polygon + 组内音符),挂到 staff-group 做残影淡出。 */
+  private cloneOldBeamGhost(card: CardState, oldSvgEl: SVGSVGElement | null): SVGElement[] {
+    if (!oldSvgEl || !card.lastBeamGroups.length) return [];
+    const staffGroup = card.svgHost.querySelector('.staff-group') as SVGGElement | null;
     if (!staffGroup) return [];
     const oldStaff = oldSvgEl.querySelector('.staff-group');
     if (!oldStaff) return [];
-    // 收集旧连梁组覆盖的所有 idx(只限五线谱侧 staff-group,简谱侧无连梁)
     const idxSet = new Set<number>();
-    for (const g of this.lastBeamGroups) {
+    for (const g of card.lastBeamGroups) {
       for (let i = g.startIdx; i <= g.endIdx; i++) idxSet.add(i);
     }
-    // 选择器:旧 staff-group 内的梁 polygon + 这些 idx 的音符元素
     const sel: string[] = [`[class*="beam-grp-"]`];
     for (const i of idxSet) sel.push(`[data-idx="${i}"]`);
     const oldEls = Array.from(oldStaff.querySelectorAll(sel.join(','))) as SVGElement[];
@@ -1025,76 +1074,56 @@ export class App {
     return clones;
   }
 
-  /** 增删音过渡动画注入(innerHTML 替换后调用)。
-   *  - noteDelta>0(新增):末尾音符元素淡入(opacity+轻微上浮,120ms easeOutCubic)+连梁整组刷新
-   *  - noteDelta<0(删除):克隆旧 svg 为残影层淡出。但删除极端音触发高度回缩时跳过残影
-   *    (heightTick 的 viewBox transform 与残影层(旧坐标系)叠加会露馅,此时优先保证五线谱不动)
-   *  - 指示器位移:nextSlot 从旧位 slide 到新位,或 fade(按 indicatorMode)
-   *  所有动画统一 120ms easeOutCubic,与高度动画 heightTick 协调。 */
+  /** 增删音过渡动画注入(innerHTML 替换后调用,仅激活卡)。 */
   private applyNoteAnim(
-    noteDelta: number, oldNextSlotX: number | null,
+    card: CardState, noteDelta: number, oldNextSlotX: number | null,
     oldSvgEl: SVGSVGElement | null, newSvgEl: SVGSVGElement | null,
     heightChanging: boolean,
   ): void {
-    // 删除:克隆旧 svg 残影淡出。高度变化时跳过(避免与 heightTick transform 叠加露馅)
+    const piece = card.pieceView;
+    // 删除:克隆旧 svg 残影淡出。高度变化时跳过
     if (noteDelta < 0 && oldSvgEl && !heightChanging) {
       const ghost = oldSvgEl.cloneNode(true) as SVGSVGElement;
       ghost.classList.add('fade-ghost');
       ghost.removeAttribute('width'); ghost.removeAttribute('height');
       ghost.setAttribute('width', '100%');
-      // 残影高度用旧 viewBox 比例保持,宽度 100% 与新 svg 重叠
-      this.svgHost.appendChild(ghost);
-      // 强制重绘后触发淡出
+      card.svgHost.appendChild(ghost);
       requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          ghost.classList.add('fade-ghost-out');
-        });
+        requestAnimationFrame(() => { ghost.classList.add('fade-ghost-out'); });
       });
       const removeGhost = () => { ghost.remove(); };
       ghost.addEventListener('transitionend', removeGhost, { once: true });
-      // 兜底:transitionend 偶尔不触发(被中断),定时移除
       window.setTimeout(removeGhost, 200);
     }
 
-    // 新增:末尾音符元素淡入 + 纵向弹起(从 hover 原位上去再下来)。
-    // opacity(0.55→1)衔接 hover ghost 终态;translateY 用 sin 曲线(0→-AMP→0)先上后下,弹起感。
-    // 连梁场景:新音加入连梁组时,老组全部内容(梁+符头+符干+符尾)克隆残影淡出 + 新组整体淡入跳动。
     if (noteDelta > 0 && newSvgEl) {
-      const lastIdx = this.piece.notes.length - 1;
-      const els = Array.from(this.svgHost.querySelectorAll(`[data-idx="${lastIdx}"]`)) as SVGElement[];
-      const lastNote = this.piece.notes[lastIdx];
-      // tieRepeat 场景:新 tie 弧线随新音淡入
+      const lastIdx = piece.notes.length - 1;
+      const els = Array.from(card.svgHost.querySelectorAll(`[data-idx="${lastIdx}"]`)) as SVGElement[];
+      const lastNote = piece.notes[lastIdx];
       const tieEls = lastNote?.tieEnd
-        ? Array.from(this.svgHost.querySelectorAll('.tie-elem')) as SVGElement[]
+        ? Array.from(card.svgHost.querySelectorAll('.tie-elem')) as SVGElement[]
         : [];
-      // 连梁场景:末音属于连梁组 → 整组交叉淡化(老残影淡出 + 新组整体淡入跳动)
-      const beam = this.collectBeamGroupEls(lastIdx);
-      // 弹起跳动元素:连梁时整组(所有音符 + 梁 polygon)一起跳;非连梁时只有新音
+      const beam = this.collectBeamGroupEls(card, lastIdx);
       const jumpEls = beam.grp ? [...beam.noteEls, ...beam.beams] : els;
-      // 新音从 0.55 起(衔接 hover);连梁组的老音符/梁/tie 从 0 起(纯淡入,交叉淡化老残影)
-      const hoverLinkEls = els;            // 新音:opacity 0.55→1
+      const hoverLinkEls = els;
       const hoverSet = new Set<SVGElement>(els);
       const fadeInEls = [...tieEls, ...beam.beams, ...beam.noteEls].filter(el => !hoverSet.has(el as SVGElement));
-      // 连梁老残影:从 oldSvgEl 克隆旧连梁组内容(用 lastBeamGroups 旧范围),淡出 1→0
       const oldBeamEls = (beam.grp && beam.beams.length)
-        ? this.cloneOldBeamGhost(oldSvgEl)
+        ? this.cloneOldBeamGhost(card, oldSvgEl)
         : [];
 
-      // 初始态
       hoverLinkEls.forEach(el => { el.style.opacity = '0.55'; });
       fadeInEls.forEach(el => { el.style.opacity = '0'; });
-      // 弹起:jumpEls translateY 用 sin(0→-AMP→0),从原位上去再下来
       const AMP = 4;
       if (this.noteAnimFrame) cancelAnimationFrame(this.noteAnimFrame);
       const noteStart = performance.now();
       const noteTick = (now: number) => {
         const t = Math.min(1, (now - noteStart) / 120);
-        const eased = 1 - Math.pow(1 - t, 3);   // opacity 用 easeOutCubic
-        // translateY 弹起:0→-AMP→0(前半上升,后半回落)
+        const eased = 1 - Math.pow(1 - t, 3);
         const ty = -AMP * Math.sin(t * Math.PI);
         const linkOp = 0.55 + 0.45 * eased;
-        const fadeInOp = eased;   // 0→1
-        const fadeOutOp = 1 - eased;   // 1→0(老残影)
+        const fadeInOp = eased;
+        const fadeOutOp = 1 - eased;
         hoverLinkEls.forEach(el => { el.style.opacity = String(linkOp); });
         fadeInEls.forEach(el => { el.style.opacity = String(fadeInOp); });
         oldBeamEls.forEach(el => { el.style.opacity = String(fadeOutOp); });
@@ -1106,33 +1135,32 @@ export class App {
           hoverLinkEls.forEach(el => { el.style.opacity = ''; });
           jumpEls.forEach(el => { el.style.transform = ''; });
           fadeInEls.forEach(el => { el.style.opacity = ''; });
-          oldBeamEls.forEach(el => { el.remove(); });   // 移除老残影
+          oldBeamEls.forEach(el => { el.remove(); });
         }
       };
       this.noteAnimFrame = requestAnimationFrame(noteTick);
     }
 
-    // 指示器平移:nextSlot 从旧位 slide 到新位(统一只用平移动画)。
-    // 用 JS rAF 逐帧插值(SVG 元素的 CSS transform transition 不可靠会瞬间跳;与 heightTick 同款 easeOutCubic)。
-    const slot = this.svgHost.querySelector('.next-slot') as SVGRectElement | null;
-    if (slot && oldNextSlotX !== null && !this.layout.isFull) {
-      const dx = this.layout.nextSlotX - oldNextSlotX;
+    // 指示器平移:nextSlot 从旧位 slide 到新位
+    const lay = card.layout;
+    const slot = card.svgHost.querySelector('.next-slot') as SVGRectElement | null;
+    if (slot && oldNextSlotX !== null && lay && !lay.isFull) {
+      const dx = lay.nextSlotX - oldNextSlotX;
       if (Math.abs(dx) > 0.5) {
-        // 停掉呼吸动画,位移期间手动控制 transform
         slot.style.animation = 'none';
         slot.style.transform = `translateX(${-dx}px)`;
         if (this.slotAnimFrame) cancelAnimationFrame(this.slotAnimFrame);
         const slideStart = performance.now();
         const slideTick = (now: number) => {
           const t = Math.min(1, (now - slideStart) / 120);
-          const eased = 1 - Math.pow(1 - t, 3);   // easeOutCubic,与 heightTick 一致
+          const eased = 1 - Math.pow(1 - t, 3);
           slot.style.transform = `translateX(${-dx * (1 - eased)}px)`;
           if (t < 1) {
             this.slotAnimFrame = requestAnimationFrame(slideTick);
           } else {
             this.slotAnimFrame = null;
             slot.style.transform = '';
-            slot.style.animation = '';   // 恢复呼吸动画
+            slot.style.animation = '';
           }
         };
         this.slotAnimFrame = requestAnimationFrame(slideTick);
@@ -1148,7 +1176,7 @@ export class App {
    *  开环在测试页验证 dev=0(scrollY 和 svg transform 同步抵消,五线谱屏幕恒定)。
    *  注:之前尝试闭环 scrollY 补偿反而引入抖动(读 rect 时序与 rAF 不同步),已回退。 */
   private heightTick(
-    now: number, startT: number, startH: number, endH: number,
+    card: CardState, now: number, startT: number, startH: number, endH: number,
     T0: number, jpT0: number, prevScrollY: number, offDelta: number, jpExpand: number,
     svgEl: SVGSVGElement | null, jg: SVGGElement | null,
   ): void {
@@ -1156,10 +1184,8 @@ export class App {
     const eased = 1 - Math.pow(1 - t, 3);
     // 1) height 插值
     const curH = startH + (endH - startH) * eased;
-    this.svgHost.style.height = curH + 'px';
+    card.svgHost.style.height = curH + 'px';
     // 2) scrollY 同步(仅 offDelta≠0:高音顶扩时滚动,保持五线谱屏幕恒定)。
-    //    scrollY 只跟随「会让 svgHost 顶部移动的 height 增量」;底部简谱扩高(jpExpand)是 svgHost
-    //    自然向下长、不挪顶部,故从 (curH-startH) 中扣除 jpExpand(它随 eased 渐进,与 height 同步)。
     if (offDelta !== 0) {
       const curScrollY = prevScrollY + (curH - startH) - jpExpand * eased;
       window.scrollTo(0, Math.max(0, curScrollY));
@@ -1169,107 +1195,93 @@ export class App {
     // 4) jianpu-group transform: jpT0 → 0(简谱平滑过渡)
     if (jg) jg.style.transform = 'translateY(' + (jpT0 * (1 - eased)) + 'px)';
     if (t < 1) {
-      this.heightAnimFrame = requestAnimationFrame((n: number) =>
-        this.heightTick(n, startT, startH, endH, T0, jpT0, prevScrollY, offDelta, jpExpand, svgEl, jg));
+      card.heightAnimFrame = requestAnimationFrame((n: number) =>
+        this.heightTick(card, n, startT, startH, endH, T0, jpT0, prevScrollY, offDelta, jpExpand, svgEl, jg));
     } else {
-      this.heightAnimFrame = null;
+      card.heightAnimFrame = null;
       if (svgEl) svgEl.style.transform = '';
       if (jg) jg.style.transform = '';
     }
   }
 
   private updatePlayheadAndHighlight(): void {
-    const lay = this.layout;
-    const notes = this.piece.notes;
     const playing = this.playState !== 'stopped';
-
-    // 1. 高亮:先清除所有 .playing,再给当前音(含和弦组)加上
-    this.svgHost.querySelectorAll('.note-elem.playing, .jp-elem.playing').forEach(el => el.classList.remove('playing'));
-    if (playing && notes.length > 0) {
-      const idx = this.player.noteIndexAtBeat(this.currentBeat);
-      if (idx >= 0) {
-        this.playingIndex = idx;
-        // 收集需高亮的 idx:和弦组 = 同 chordId 所有声部;单音 = 仅 idx
-        const chordId = notes[idx].chordId;
-        const hiliteIdxs: number[] = [];
-        if (chordId) {
-          for (let i = 0; i < notes.length; i++) if (notes[i].chordId === chordId) hiliteIdxs.push(i);
-        } else {
-          hiliteIdxs.push(idx);
+    // 遍历每个卡片:清除高亮 + 按 staff 查当前音 + 高亮 + 定位播放头
+    for (const card of this.cards) {
+      const lay = card.layout;
+      const notes = card.pieceView.notes;
+      // 1. 清除该卡高亮
+      card.svgHost.querySelectorAll('.note-elem.playing, .jp-elem.playing').forEach(el => el.classList.remove('playing'));
+      // 2. 高亮当前音(按 staff 查 idx)
+      let idx = -1;
+      if (playing && notes.length > 0 && lay) {
+        idx = this.player.noteIndexAtBeatStaff(this.currentBeat, card.staff);
+        if (idx >= 0) {
+          if (card === this.activeCard) this.playingIndex = idx;
+          const chordId = notes[idx].chordId;
+          const hiliteIdxs: number[] = [];
+          if (chordId) {
+            for (let i = 0; i < notes.length; i++) if (notes[i].chordId === chordId) hiliteIdxs.push(i);
+          } else {
+            hiliteIdxs.push(idx);
+          }
+          const idxSet = new Set(hiliteIdxs);
+          card.svgHost.querySelectorAll<SVGElement>('[data-idx]').forEach(el => {
+            const di = parseInt(el.getAttribute('data-idx') || '-1', 10);
+            if (idxSet.has(di)) el.classList.add('playing');
+          });
         }
-        const idxSet = new Set(hiliteIdxs);
-        // 五线谱:每个 idx 的 note-elem;简谱:jp-elem data-idx 是首音,首音必在 idxSet 内
-        this.svgHost.querySelectorAll<SVGElement>('[data-idx]').forEach(el => {
-          const di = parseInt(el.getAttribute('data-idx') || '-1', 10);
-          if (idxSet.has(di)) el.classList.add('playing');
-        });
       }
-    } else {
-      this.playingIndex = -1;
-    }
-
-    // 2. 播放头定位(播放/暂停态)
-    if (!playing || notes.length === 0 || lay.noteX.length === 0 || !lay) {
-      this.playheadLayer.style.display = 'none';
-      return;
-    }
-    const idx = this.player.noteIndexAtBeat(this.currentBeat);
-    if (idx < 0) { this.playheadLayer.style.display = 'none'; return; }
-    this.playheadLayer.style.display = '';
-    const x0 = lay.noteX[idx];
-    const w = lay.noteSlotW[idx] || 24;
-    // 高度自适应:覆盖当前音(含和弦组)在五线谱侧的符头范围 + 简谱侧整行。
-    // 收集当前和弦组所有声部的 idx(单音则仅 idx),与上方高亮枚举同款。
-    const hiliteIdxs: number[] = [idx];
-    {
-      const chordId = notes[idx].chordId;
-      if (chordId) { hiliteIdxs.length = 0; for (let i = 0; i < notes.length; i++) if (notes[i].chordId === chordId) hiliteIdxs.push(i); }
-    }
-    // 五线谱侧:各声部 step → y(bottomLineY - step*staffSpace/2),取最高/最低符头 ± 半高。
-    // 跨八度和弦时符头跨度大,播放头纵向随之拉长,正好包住整组和弦的视觉占位。
-    const headHalf = lay.staffSpace * 0.6;   // 符头半高近似
-    let staffTop0 = Infinity, staffBot0 = -Infinity;
-    for (const di of hiliteIdxs) {
-      const n = notes[di];
-      if (n.midi === null) continue;
-      const step = resolvePitch(n.midi, this.piece.clef, this.piece.key, n.accidental).step;
-      const y = lay.bottomLineY - step * lay.staffSpace / 2;
-      staffTop0 = Math.min(staffTop0, y - headHalf);
-      staffBot0 = Math.max(staffBot0, y + headHalf);
-    }
-    // 简谱侧:整行(jianpuTop → jianpuBottom)。简谱区域已随声部数动态扩高(需求3),
-    // 故用 layout 的 jianpuTop/jianpuBottom 即可,无需单独算声部占高。
-    const pad = 6;
-    // 整体纵向范围:五线谱侧最高符头(或 staffTop)→ 简谱底,各留 pad
-    const y1 = (staffTop0 === Infinity ? lay.staffTop : staffTop0) - pad;
-    const y2 = lay.jianpuBottom + pad;
-    // SVG 在 svgHost 的 padding(8px 4px)内,playheadLayer 覆盖 padding box(inset:0)。
-    // 用 SVG 元素相对 svgHost 的偏移 + 尺寸定位播放头,精确对齐。
-    const svgEl = this.svgHost.querySelector('svg');
-    if (svgEl) {
-      const hostRect = this.svgHost.getBoundingClientRect();
-      const svgRect = svgEl.getBoundingClientRect();
-      const offsetX = ((svgRect.left - hostRect.left) / hostRect.width) * 100;
-      const offsetY = ((svgRect.top - hostRect.top) / hostRect.height) * 100;
-      const svgWPct = (svgRect.width / hostRect.width) * 100;
-      const svgHPct = (svgRect.height / hostRect.height) * 100;
-      const leftPct = offsetX + (x0 - w / 2) / lay.width * svgWPct;
-      const widthPct = w / lay.width * svgWPct;
-      const topPct = offsetY + y1 / lay.height * svgHPct;
-      const heightPct = (y2 - y1) / lay.height * svgHPct;
-      // 复用同一 div(懒创建),只改 style → CSS transition 生效(平移 + 宽高过渡)。
-      // 不再每帧 innerHTML 重建(重建会让 transition 失效、产生闪烁)。
-      if (!this.playheadEl || !this.playheadLayer.contains(this.playheadEl)) {
-        this.playheadEl = document.createElement('div');
-        this.playheadEl.className = 'pb-playhead';
-        this.playheadLayer.appendChild(this.playheadEl);
+      // 3. 播放头定位
+      if (!playing || notes.length === 0 || !lay || lay.noteX.length === 0 || idx < 0) {
+        card.playheadLayer.style.display = 'none';
+        continue;
       }
-      const el = this.playheadEl;
-      el.style.left = leftPct.toFixed(2) + '%';
-      el.style.top = topPct.toFixed(2) + '%';
-      el.style.width = widthPct.toFixed(2) + '%';
-      el.style.height = heightPct.toFixed(2) + '%';
+      card.playheadLayer.style.display = '';
+      const x0 = lay.noteX[idx];
+      const w = lay.noteSlotW[idx] || 24;
+      const hiliteIdxs: number[] = [idx];
+      {
+        const chordId = notes[idx].chordId;
+        if (chordId) { hiliteIdxs.length = 0; for (let i = 0; i < notes.length; i++) if (notes[i].chordId === chordId) hiliteIdxs.push(i); }
+      }
+      const headHalf = lay.staffSpace * 0.6;
+      let staffTop0 = Infinity;
+      for (const di of hiliteIdxs) {
+        const n = notes[di];
+        if (n.midi === null) continue;
+        const step = resolvePitch(n.midi, card.pieceView.clef, this.piece.key, n.accidental).step;
+        const y = lay.bottomLineY - step * lay.staffSpace / 2;
+        staffTop0 = Math.min(staffTop0, y - headHalf);
+      }
+      const pad = 6;
+      const y1 = (staffTop0 === Infinity ? lay.staffTop : staffTop0) - pad;
+      const y2 = lay.jianpuBottom + pad;
+      const svgEl = card.svgHost.querySelector('svg');
+      if (svgEl) {
+        const hostRect = card.svgHost.getBoundingClientRect();
+        const svgRect = svgEl.getBoundingClientRect();
+        const offsetX = ((svgRect.left - hostRect.left) / hostRect.width) * 100;
+        const offsetY = ((svgRect.top - hostRect.top) / hostRect.height) * 100;
+        const svgWPct = (svgRect.width / hostRect.width) * 100;
+        const svgHPct = (svgRect.height / hostRect.height) * 100;
+        const leftPct = offsetX + (x0 - w / 2) / lay.width * svgWPct;
+        const widthPct = w / lay.width * svgWPct;
+        const topPct = offsetY + y1 / lay.height * svgHPct;
+        const heightPct = (y2 - y1) / lay.height * svgHPct;
+        if (!card.playheadEl || !card.playheadLayer.contains(card.playheadEl)) {
+          card.playheadEl = document.createElement('div');
+          card.playheadEl.className = 'pb-playhead';
+          card.playheadLayer.appendChild(card.playheadEl);
+        }
+        const el = card.playheadEl;
+        el.style.left = leftPct.toFixed(2) + '%';
+        el.style.top = topPct.toFixed(2) + '%';
+        el.style.width = widthPct.toFixed(2) + '%';
+        el.style.height = heightPct.toFixed(2) + '%';
+      }
     }
+    if (!playing) this.playingIndex = -1;
   }
 }
 
