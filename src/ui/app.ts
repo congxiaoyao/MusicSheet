@@ -5,7 +5,7 @@ import { Note, Piece, DurationValue } from '../core/types';
 import { KEYS, resolvePitch } from '../core/theory';
 import { createPiece, appendNote, popNote, remainingBeats, remainingBeatsInCurrentBar, capacityBeats, totalBeats, noteStartBeats } from '../core/model';
 import { computeLayout } from '../render/layout';
-import { buildSVG, exportPNG } from '../render/export';
+import { buildSVG, exportPNG, buildGrandSVG } from '../render/export';
 import { ensureFontLoaded } from '../render/glyphs';
 import { clickYToMidi } from '../render/staff';
 import { computeBeams, indexBeamMap } from '../render/beam';
@@ -69,6 +69,11 @@ export class App {
   private toolbar!: HTMLElement;
   private playbackCard!: HTMLElement;
   private hover: HoverState | null = null;
+  /** 预览模式的显示选项(五线谱/简谱/两者) */
+  private previewMode: 'staff' | 'jianpu' | 'both' = 'both';
+  /** 预览模式的 DOM 宿主(只读双谱表) */
+  private previewHost: HTMLElement | null = null;
+  private previewPlayheadEl: HTMLElement | null = null;
 
   constructor(root: HTMLElement) {
     this.root = root;
@@ -168,6 +173,15 @@ export class App {
     for (const c of this.cards) c.svgHost.remove();
     this.cards = [];
     this.activeCard = null;
+    // 清旧预览卡
+    if (this.previewHost) { this.previewHost.remove(); this.previewHost = null; this.previewPlayheadEl = null; }
+    // 预览模式:单独的只读双谱表卡
+    if (this.viewMode === 'preview') {
+      this.previewHost = this.createPreviewHost();
+      this.stageWrap.insertBefore(this.previewHost, this.statusEl);
+      this.bindPreviewHost();
+      return;
+    }
     const staves: ('treble' | 'bass')[] = this.viewMode === 'bass' ? ['bass'] : this.viewMode === 'grand' ? ['treble', 'bass'] : ['treble'];
     for (const staff of staves) {
       const card = this.createCard(staff);
@@ -184,6 +198,117 @@ export class App {
     this.updateCardActiveVisual();
   }
 
+  /** 创建预览模式宿主(双谱表 + 右上角 radio 五线谱/简谱/两者 + 播放头层)。 */
+  private createPreviewHost(): HTMLElement {
+    const host = document.createElement('div');
+    host.className = 'svg-host preview-host';
+    return host;
+  }
+
+  /** 绑定预览卡点击/拖动 → seek(把点击 x 转 beat)。 */
+  private bindPreviewHost(): void {
+    if (!this.previewHost) return;
+    this.previewHost.addEventListener('mousedown', (e: MouseEvent) => {
+      const beat = this.beatFromPreviewX(e.clientX);
+      if (beat !== null) this.seek(beat);
+    });
+  }
+
+  /** 预览卡点击 x → beat(按 trebleLayout 的 barLines/noteX 换算)。 */
+  private beatFromPreviewX(clientX: number): number | null {
+    const lay = this.cards.length > 0 ? this.cards[0].layout : null;
+    if (!lay || !this.previewHost) return null;
+    const svg = this.previewHost.querySelector('svg');
+    if (!svg) return null;
+    const rect = svg.getBoundingClientRect();
+    const x = ((clientX - rect.left) / rect.width) * lay.width;
+    // x → beat:用 contentLeft..contentRight 映射到 0..capacityBeats
+    const bpb = lay.barLines.length > 1 ? (lay.barLines[1] - lay.barLines[0]) / (lay.width / lay.barLines.length) : 4;
+    void bpb;
+    // 简化:按 barLines 线性插值
+    const beats = this.player.getTotalBeats() || 1;
+    const ratio = Math.max(0, Math.min(1, (x - lay.contentLeft) / lay.contentWidth));
+    return ratio * beats;
+  }
+
+  /** 渲染预览模式:双谱表 buildGrandSVG + 播放头。 */
+  private renderPreview(): void {
+    if (!this.previewHost) return;
+    const width = Math.min(1200, Math.max(640, this.previewHost.clientWidth || 940));
+    const treblePiece = { ...this.piece, clef: 'treble' as const, notes: this.piece.treble };
+    const bassPiece = { ...this.piece, clef: 'bass' as const, notes: this.piece.bass };
+    const trebleLayout = computeLayout(treblePiece, width, this.tool.duration);
+    const bassLayout = computeLayout(bassPiece, width, this.tool.duration);
+    const playingT = this.playState !== 'stopped' ? this.player.noteIndexAtBeatStaff(this.currentBeat, 'treble') : -1;
+    const playingB = this.playState !== 'stopped' ? this.player.noteIndexAtBeatStaff(this.currentBeat, 'bass') : -1;
+    const { svg, height } = buildGrandSVG(treblePiece, bassPiece, trebleLayout, bassLayout, {
+      previewMode: this.previewMode, playingTrebleIdx: playingT, playingBassIdx: playingB,
+    });
+    this.previewHost.innerHTML = svg;
+    const svgEl = this.previewHost.querySelector('svg');
+    if (svgEl) {
+      svgEl.setAttribute('width', '100%');
+      svgEl.setAttribute('height', String(height));
+      svgEl.setAttribute('preserveAspectRatio', 'none');
+    }
+    // 重挂播放头层 + 预览 radio(innerHTML 替换会清掉它们)
+    const phl = document.createElement('div');
+    phl.className = 'playhead-layer';
+    phl.style.display = this.playState !== 'stopped' ? '' : 'none';
+    this.previewHost.appendChild(phl);
+    this.previewHost.appendChild(this.makePreviewRadio());
+    this.previewPlayheadEl = null;
+    this.updatePreviewPlayhead(trebleLayout);
+  }
+
+  /** 构造预览 radio(五线谱/简谱/两者)。每次 renderPreview 后重挂(innerHTML 清掉)。 */
+  private makePreviewRadio(): HTMLElement {
+    const radio = document.createElement('div');
+    radio.className = 'preview-radio';
+    for (const o of [{ v: 'staff', l: '五线谱' }, { v: 'jianpu', l: '简谱' }, { v: 'both', l: '两者' }] as const) {
+      const b = document.createElement('button');
+      b.className = 'seg-btn';
+      b.textContent = o.l;
+      if (this.previewMode === o.v) b.classList.add('active');
+      b.onclick = () => {
+        this.previewMode = o.v;
+        this.render();
+      };
+      radio.appendChild(b);
+    }
+    return radio;
+  }
+
+  /** 更新预览卡播放头(覆盖双谱表范围,按 beat 定位 x)。 */
+  private updatePreviewPlayhead(trebleLayout: ReturnType<typeof computeLayout>): void {
+    if (!this.previewHost) return;
+    const phl = this.previewHost.querySelector('.playhead-layer') as HTMLElement | null;
+    if (!phl) return;
+    if (this.playState === 'stopped') { phl.style.display = 'none'; return; }
+    phl.style.display = '';
+    const beats = this.player.getTotalBeats() || 1;
+    const ratio = Math.max(0, Math.min(1, this.currentBeat / beats));
+    const svg = this.previewHost.querySelector('svg');
+    if (!svg) return;
+    const hostRect = this.previewHost.getBoundingClientRect();
+    const svgRect = svg.getBoundingClientRect();
+    const offsetX = ((svgRect.left - hostRect.left) / hostRect.width) * 100;
+    const svgWPct = (svgRect.width / hostRect.width) * 100;
+    const x = trebleLayout.contentLeft + ratio * trebleLayout.contentWidth;
+    const leftPct = offsetX + x / trebleLayout.width * svgWPct;
+    const widthPct = 3 / trebleLayout.width * svgWPct;   // 窄竖条
+    if (!this.previewPlayheadEl || !phl.contains(this.previewPlayheadEl)) {
+      this.previewPlayheadEl = document.createElement('div');
+      this.previewPlayheadEl.className = 'pb-playhead';
+      phl.appendChild(this.previewPlayheadEl);
+    }
+    const el = this.previewPlayheadEl;
+    el.style.left = leftPct.toFixed(2) + '%';
+    el.style.top = '0%';
+    el.style.width = widthPct.toFixed(2) + '%';
+    el.style.height = '100%';
+  }
+
   /** 创建一个卡片(svgHost + playheadLayer + CardState)。pieceView = {..piece, clef, notes: 对应组}。 */
   private createCard(staff: 'treble' | 'bass'): CardState {
     const svgHost = document.createElement('div');
@@ -193,6 +318,13 @@ export class App {
     playheadLayer.className = 'playhead-layer';
     playheadLayer.style.display = 'none';
     svgHost.appendChild(playheadLayer);
+    // 双卡模式:加拖拽指示条(grand 模式 hover 显现,按住拖拽交换两卡顺序)
+    if (this.viewMode === 'grand') {
+      const handle = document.createElement('div');
+      handle.className = 'drag-handle';
+      handle.title = '拖拽交换顺序';
+      svgHost.appendChild(handle);
+    }
     const notes = staff === 'bass' ? this.piece.bass : this.piece.treble;
     return {
       staff, svgHost, playheadLayer, playheadEl: null,
@@ -422,6 +554,47 @@ export class App {
       this.downMidi = null;
       this.appendNoteWithPitch(midi);
     });
+
+    // 双卡模式:拖拽指示条 → 拖拽交换两卡 DOM 顺序(数据归属不变,只换视觉位置)
+    const handle = host.querySelector('.drag-handle') as HTMLElement | null;
+    if (handle) {
+      handle.addEventListener('mousedown', (e: MouseEvent) => {
+        e.preventDefault();
+        e.stopPropagation();   // 不触发卡片的 mousedown(避免切换激活/记录音高)
+        this.startCardDrag(card, e.clientY);
+      });
+    }
+  }
+
+  /** 拖拽卡片:按住指示条 → 跟随鼠标 → 松手时若进入另一卡区域则交换 DOM 顺序。 */
+  private startCardDrag(card: CardState, startY: number): void {
+    if (this.cards.length < 2) return;
+    const other = this.cards.find(c => c !== card);
+    if (!other) return;
+    card.svgHost.classList.add('dragging');
+    const onMove = (ev: MouseEvent) => {
+      const otherRect = other.svgHost.getBoundingClientRect();
+      const inOther = ev.clientY >= otherRect.top && ev.clientY <= otherRect.bottom;
+      other.svgHost.classList.toggle('drop-target', inOther);
+    };
+    const onUp = (ev: MouseEvent) => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      card.svgHost.classList.remove('dragging');
+      other.svgHost.classList.remove('drop-target');
+      const otherRect = other.svgHost.getBoundingClientRect();
+      if (ev.clientY >= otherRect.top && ev.clientY <= otherRect.bottom) {
+        // 交换 DOM 顺序(stageWrap 内两 svgHost 的位置)
+        const stage = this.stageWrap;
+        const a = card.svgHost, b = other.svgHost;
+        if (a.nextElementSibling === b) { stage.insertBefore(b, a); }
+        else { stage.insertBefore(a, b); }
+        this.render();
+      }
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    void startY;
   }
 
   /** 切换激活卡(grand 模式)。同步 piece.notes 指向新激活组 + 更新视觉。 */
@@ -907,6 +1080,17 @@ export class App {
 
   /** 渲染所有卡片 + 刷新状态栏/播放头。遍历 cards 调 renderCard。 */
   private render(): void {
+    // 预览模式:单独渲染双谱表预览卡,不走常规卡片流程
+    if (this.viewMode === 'preview') {
+      this.renderPreview();
+      const total = this.piece.treble.length + this.piece.bass.length;
+      const rem = remainingBeats(this.piece);
+      const pct = Math.round((totalBeats(this.piece) / capacityBeats(this.piece)) * 100);
+      this.statusEl.textContent = total + ' \u4e2a\u97f3\u7b26 \u00b7 \u5df2\u7528 ' + pct + '% \u00b7 \u9884\u89c8\u6a21\u5f0f';
+      (this.toolbar as any)._refreshCapacity?.(remainingBeatsInCurrentBar(this.piece), rem);
+      this.refreshCard();
+      return;
+    }
     // 同步每个 card 的 pieceView(切组/编辑后 piece 变了,pieceView 要重建)
     for (const c of this.cards) {
       const notes = c.staff === 'bass' ? this.piece.bass : this.piece.treble;
@@ -966,6 +1150,17 @@ export class App {
 
     const finalizeCard = () => {
       card.svgHost.appendChild(card.playheadLayer);
+      // 双卡模式重挂拖拽指示条(innerHTML 替换会清掉它)
+      if (this.viewMode === 'grand' && !card.svgHost.querySelector('.drag-handle')) {
+        const handle = document.createElement('div');
+        handle.className = 'drag-handle';
+        handle.title = '拖拽交换顺序';
+        handle.addEventListener('mousedown', (e: MouseEvent) => {
+          e.preventDefault(); e.stopPropagation();
+          this.startCardDrag(card, e.clientY);
+        });
+        card.svgHost.appendChild(handle);
+      }
     };
 
     // 首次初始化:锁定屏幕锚点
@@ -1206,6 +1401,11 @@ export class App {
 
   private updatePlayheadAndHighlight(): void {
     const playing = this.playState !== 'stopped';
+    // 预览模式:重新渲染(高亮靠 buildGrandSVG 的 playingIdx)+ 更新预览播放头
+    if (this.viewMode === 'preview') {
+      this.renderPreview();
+      return;
+    }
     // 遍历每个卡片:清除高亮 + 按 staff 查当前音 + 高亮 + 定位播放头
     for (const card of this.cards) {
       const lay = card.layout;

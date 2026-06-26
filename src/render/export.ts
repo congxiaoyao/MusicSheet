@@ -42,6 +42,35 @@ export function buildSVG(piece: Piece, layout: Layout, playingIndex: number, opt
   return svg;
 }
 
+/** 构造双谱表(treble + bass)预览 SVG:两组五线谱+简谱垂直堆叠,共用小节线宽度。
+ *  仅预览模式用:只读可视化 seekbar。previewMode 决定显示五线谱/简谱/两者。 */
+export function buildGrandSVG(
+  treblePiece: Piece, bassPiece: Piece,
+  trebleLayout: Layout, bassLayout: Layout,
+  opts: { previewMode: 'staff' | 'jianpu' | 'both'; playingTrebleIdx?: number; playingBassIdx?: number },
+): { svg: string; width: number; height: number } {
+  const showStaff = opts.previewMode !== 'jianpu';
+  const showJianpu = opts.previewMode !== 'staff';
+  const tInput: RenderInput = { piece: treblePiece, layout: trebleLayout, playingIndex: opts.playingTrebleIdx ?? -1, hover: null };
+  const bInput: RenderInput = { piece: bassPiece, layout: bassLayout, playingIndex: opts.playingBassIdx ?? -1, hover: null };
+  const tStaff = showStaff ? renderStaffSVG(tInput) : '';
+  const tJianpu = showJianpu ? renderJianpuSVG(tInput) : '';
+  const bStaff = showStaff ? renderStaffSVG(bInput) : '';
+  const bJianpu = showJianpu ? renderJianpuSVG(bInput) : '';
+  // 垂直堆叠:treble 组在上(含其 viewBoxYOffset 顶部扩展),bass 组在下。
+  // trebleLayout.height 是 treble 卡的总高(含顶部扩展+五线谱+简谱);bass 组紧接其下。
+  const width = Math.max(trebleLayout.width, bassLayout.width);
+  const tHeight = trebleLayout.height;
+  const bHeight = bassLayout.height;
+  const totalHeight = tHeight + bHeight;
+  // treble 组:从其 viewBox 起点开始;用 translate(0,0) + 自带坐标(viewBox 起点已在内容里)
+  const trebleGroup = `<g class="grand-treble" transform="translate(0, ${trebleLayout.viewBoxYOffset})">${showStaff ? `<g class="staff-group">${tStaff}</g>` : ''}${showJianpu ? `<g class="jianpu-group">${tJianpu}</g>` : ''}</g>`;
+  // bass 组:平移到 treble 高度之下(消除其 viewBoxYOffset 偏移,从 0 起)
+  const bassGroup = `<g class="grand-bass" transform="translate(0, ${tHeight + bassLayout.viewBoxYOffset})">${showStaff ? `<g class="staff-group">${bStaff}</g>` : ''}${showJianpu ? `<g class="jianpu-group">${bJianpu}</g>` : ''}</g>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${totalHeight}" viewBox="0 0 ${width} ${totalHeight}">${trebleGroup}${bassGroup}</svg>`;
+  return { svg, width, height: totalHeight };
+}
+
 let cachedFontDataUrl: string | null = null;
 
 async function loadFontAsDataUrl(): Promise<string> {

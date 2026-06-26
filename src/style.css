@@ -267,6 +267,58 @@ html, body {
   border-color: var(--accent);
   box-shadow: 0 0 0 2px var(--accent-soft);
 }
+/* 双卡拖拽指示条:卡片左侧浮现的竖条,hover 时显现,按住可拖拽交换两卡顺序 */
+.svg-host.dual {
+  position: relative;
+}
+.svg-host .drag-handle {
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 14px;
+  cursor: grab;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity var(--anim-dur) var(--ease-out-cubic);
+  z-index: 5;
+  border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+  background: linear-gradient(90deg, var(--accent-soft), transparent);
+}
+.svg-host.dual:hover .drag-handle {
+  opacity: 1;
+}
+.svg-host .drag-handle::before {
+  content: '';
+  width: 3px; height: 28px;
+  background: var(--accent);
+  border-radius: 2px;
+  opacity: 0.5;
+}
+.svg-host.dragging {
+  opacity: 0.4;
+}
+.svg-host.drop-target {
+  box-shadow: 0 0 0 3px var(--accent);
+}
+/* 预览模式宿主:双谱表只读卡,右上角 radio */
+.svg-host.preview-host {
+  cursor: pointer;
+}
+.preview-radio {
+  position: absolute;
+  top: 6px; right: 8px;
+  z-index: 10;
+  display: flex;
+  gap: 2px;
+  background: var(--bg);
+  border-radius: var(--radius-sm);
+  padding: 3px;
+}
+.preview-radio .seg-btn {
+  font-size: 12px;
+  padding: 3px 8px;
+}
 .svg-host svg { display: block; user-select: none; -webkit-user-select: none; position: absolute; top: 0; left: 0; width: 100%; touch-action: manipulation; }
 /* 播放头覆盖层:覆盖整个 svgHost(含 padding),内部 .pb-playhead 按百分比定位 */
 .playhead-layer {
