@@ -4,6 +4,7 @@
 // - 没有「任意光标」，下一个待输入位置永远是 notes.length
 
 import { beatsPerBar, durationBeats, Note, Piece } from './types';
+import { noteToJianpu } from './theory';
 
 export function createPiece(): Piece {
   return {
@@ -212,4 +213,51 @@ export function chordGroupOf(piece: Piece, idx: number): ChordRange | null {
     if (idx >= g.startIdx && idx <= g.endIdx) return g;
   }
   return null;
+}
+
+// ── 简谱和弦占高计算(layout 用来动态扩高简谱区域) ──────────
+// 几何常量须与 jianpu.ts:12 / 103-106 保持一致(DIGIT_FS、DOT_GAP、DOT_R 同源)。
+// 不依赖 layout(纯 piece 几何),故放在 model 层供 layout 调用,无循环依赖。
+const JP_DIGIT_FS = 26;
+const JP_DIGIT_HEIGHT = JP_DIGIT_FS * 0.72;    // 数字字形高(baseline→顶)
+const JP_DIGIT_DESCEND = JP_DIGIT_FS * 0.18;   // 数字下伸余量
+const JP_DOT_GAP = 6;                          // 八度点间距
+const JP_DOT_R = 2.2;                          // 八度点半径
+const JP_VOICE_GAP = 4;                        // 和弦声部间最小间隙
+const jpDotUpFromBase = (n: number) => JP_DIGIT_HEIGHT + 6 + (n - 1) * JP_DOT_GAP;
+const jpDotDnFromBase = (n: number) => JP_DIGIT_DESCEND + 6 + (n - 1) * JP_DOT_GAP;
+// 单声部相对 baseline 的上/下占高(供 layout 算默认 needHalf 下限)。
+const jpUpExtent = (octDots: number) => octDots > 0 ? jpDotUpFromBase(octDots) + JP_DOT_R : JP_DIGIT_HEIGHT;
+const jpDnExtent = (octDots: number) => {
+  const n = octDots < 0 ? -octDots : 0;
+  const dots = n > 0 ? jpDotDnFromBase(n) + JP_DOT_R : 0;
+  return Math.max(dots, JP_DIGIT_DESCEND);
+};
+
+/** 一组八度点(每个声部一个 octaveDots)的简谱纵向占高。复刻 jianpu.ts:151-152。
+ *  单声部 = upExtent + dnExtent;和弦 = Σ(各声部占高) + GAP*(声部数-1)。 */
+function jianpuGroupHeight(octDotsList: number[]): number {
+  const nM = octDotsList.length;
+  if (nM === 0) return 0;
+  const slotH = octDotsList.map(d => jpUpExtent(d) + jpDnExtent(d));
+  return slotH.reduce((a, b) => a + b, 0) + JP_VOICE_GAP * (nM - 1);
+}
+
+/** 全曲最大的简谱和弦占高(含单音)。layout 据此动态扩展简谱区域高度,
+ *  避免多声部和弦简谱被裁切(3 声部 totalH≈78px > 固定 74px 会裁)。
+ *  - 无音符/全休止时返回单音占高下限(layout 取 max(36, totalH/2),安全)。
+ *  - 依赖 noteToJianpu(纯函数),不 import layout,无循环依赖。 */
+export function computeMaxJianpuHeight(piece: Piece): number {
+  let maxH = jpUpExtent(0) + jpDnExtent(0);   // 单音默认占高
+  for (const g of chordGroups(piece)) {
+    const dots: number[] = [];
+    for (let k = g.startIdx; k <= g.endIdx; k++) {
+      const jp = noteToJianpu(piece.notes[k], piece.key);
+      if (jp) dots.push(jp.octaveDots);
+    }
+    if (dots.length === 0) continue;
+    const h = jianpuGroupHeight(dots);
+    if (h > maxH) maxH = h;
+  }
+  return maxH;
 }

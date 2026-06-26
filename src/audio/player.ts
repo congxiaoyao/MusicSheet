@@ -239,11 +239,11 @@ export class Player {
 
   // ── 公开控制 ──────────────────────────────────────
 
-  /** 从头播放 */
-  play(piece: Piece): void {
+  /** 从指定 beat 开始播放(默认从头)。停止态 seek 到中段后点播放,会从 seek 处继续。 */
+  play(piece: Piece, fromBeat = 0): void {
     this.piece = piece;
     this.recomputeSchedule(piece);
-    this.playFrom(0);
+    this.playFrom(Math.max(0, Math.min(fromBeat, this.totalBeats)));
   }
 
   /** 重算 schedule / totalBeats（不重启播放）。

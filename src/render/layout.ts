@@ -11,7 +11,7 @@
 
 import { Piece, DurationValue, durationBeats, noteValueBeats } from '../core/types';
 import { beatsPerBar } from '../core/types';
-import { noteStartBeats, capacityBeats, measureOfBeat, totalBeats } from '../core/model';
+import { noteStartBeats, capacityBeats, measureOfBeat, totalBeats, computeMaxJianpuHeight } from '../core/model';
 import { resolvePitch } from '../core/theory';
 import { advanceSS } from './glyphs';
 
@@ -186,9 +186,16 @@ export function computeLayout(piece: Piece, containerWidth: number, currentDurat
   if (lowLedgerStep !== null && lowLedgerY + PAD > staffBottom) {
     dynamicJianpuTop = lowLedgerY + PAD;
   }
-  const dynamicJianpuBaseline = dynamicJianpuTop + 36;
-  const dynamicJianpuBottom = dynamicJianpuTop + JIANPU_HEIGHT;
-  const height = baseHeight + viewBoxYOffset + (dynamicJianpuTop - jianpuTop);
+  // 简谱区域高度随和弦声部数动态扩展:多声部和弦简谱 totalH 可达 78~106px,
+  // 超过固定 JIANPU_HEIGHT(74) 会被裁切。锚定 jianpuTop 不变(不与五线谱重叠),
+  // baseline/bottom 随 needHalf 对称扩展(简谱数字以 baseline 为中心对称分布)。
+  // 下限 37:max(37, ceil(maxH/2))*2 = 74 与原 JIANPU_HEIGHT 一致(单音/2和弦/C3+G5 完全回归),
+  // 37 而非 36 是因原固定区域是 baseline=top+36 / bottom=top+74(上36下38,均值37)。
+  const maxJianpuH = computeMaxJianpuHeight(piece);
+  const needHalf = Math.max(37, Math.ceil(maxJianpuH / 2));
+  const dynamicJianpuBaseline = dynamicJianpuTop + needHalf;
+  const dynamicJianpuBottom = dynamicJianpuTop + needHalf * 2;
+  const height = baseHeight + viewBoxYOffset + (dynamicJianpuTop - jianpuTop) + (needHalf * 2 - JIANPU_HEIGHT);
 
   return {
     width, height, fontSize, staffSpace,

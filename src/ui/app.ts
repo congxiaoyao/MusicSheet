@@ -2,7 +2,7 @@
 // 录入模型：追加式（短信验证码）—— 只能往末尾加，只能从末尾删。
 
 import { Note, Piece, DurationValue } from '../core/types';
-import { KEYS } from '../core/theory';
+import { KEYS, resolvePitch } from '../core/theory';
 import { createPiece, appendNote, popNote, remainingBeats, remainingBeatsInCurrentBar, capacityBeats, totalBeats, noteStartBeats } from '../core/model';
 import { computeLayout, Layout } from '../render/layout';
 import { buildSVG, exportPNG } from '../render/export';
@@ -32,6 +32,8 @@ export class App {
   private svgHost!: HTMLElement;
   /** 播放头覆盖层:独立 DOM div,叠在 svgHost 上,由 currentBeat 驱动定位(onTick 时更新) */
   private playheadLayer!: HTMLElement;
+  /** 播放头方块(复用同一 div,只改 style,让 CSS transition 生效);懒创建于 playheadLayer 内 */
+  private playheadEl: HTMLElement | null = null;
   /** 五线谱屏幕锚点:首次 render 后锁定五线谱 bottomLineY 在屏幕上的 y。
    *  height 不变(hover/普通编辑)时走快速路径,五线谱物理位置天然不变,无需动画。
    *  height 变化(加/删极端音)时用 scrollY + svg/jianpu transform 三路同步插值,让五线谱屏幕恒定。 */
@@ -724,7 +726,8 @@ export class App {
       this.player.resume();
     } else {
       this.player.setBpm(this.bpm);
-      this.player.play(this.piece);
+      // 停止态:若已 seek 到中段(currentBeat>0),从 seek 处播放;否则从头。
+      this.player.play(this.piece, this.currentBeat);
     }
   }
 
@@ -864,7 +867,7 @@ export class App {
     const oldLayout = this.lastLayout ?? this.layout;
     const off = this.layout.viewBoxYOffset;
     const offDelta = off - oldLayout.viewBoxYOffset;   // 高音扩展量(正值=新扩展)
-    const jpDelta = this.layout.jianpuTop - oldLayout.jianpuTop;  // 简谱下移量(正值=下移)
+    const jpDelta = this.layout.jianpuBaseline - oldLayout.jianpuBaseline;  // 简谱数字下移量(正值=下移)
     // 读旧状态(innerHTML 前):prevStaffYScreen = 旧 SVG 五线谱屏幕 y(用户当前位置)
     const prevStaffYScreen = this.measureStaffYScreen();
     const prevScrollY = window.scrollY;
@@ -1201,36 +1204,64 @@ export class App {
     // 2. 播放头定位(播放/暂停态)
     if (!playing || notes.length === 0 || lay.noteX.length === 0 || !lay) {
       this.playheadLayer.style.display = 'none';
-      this.playheadLayer.innerHTML = '';
       return;
     }
     const idx = this.player.noteIndexAtBeat(this.currentBeat);
-    if (idx < 0) { this.playheadLayer.style.display = 'none'; this.playheadLayer.innerHTML = ''; return; }
+    if (idx < 0) { this.playheadLayer.style.display = 'none'; return; }
     this.playheadLayer.style.display = '';
     const x0 = lay.noteX[idx];
     const w = lay.noteSlotW[idx] || 24;
+    // 高度自适应:覆盖当前音(含和弦组)在五线谱侧的符头范围 + 简谱侧整行。
+    // 收集当前和弦组所有声部的 idx(单音则仅 idx),与上方高亮枚举同款。
+    const hiliteIdxs: number[] = [idx];
+    {
+      const chordId = notes[idx].chordId;
+      if (chordId) { hiliteIdxs.length = 0; for (let i = 0; i < notes.length; i++) if (notes[i].chordId === chordId) hiliteIdxs.push(i); }
+    }
+    // 五线谱侧:各声部 step → y(bottomLineY - step*staffSpace/2),取最高/最低符头 ± 半高。
+    // 跨八度和弦时符头跨度大,播放头纵向随之拉长,正好包住整组和弦的视觉占位。
+    const headHalf = lay.staffSpace * 0.6;   // 符头半高近似
+    let staffTop0 = Infinity, staffBot0 = -Infinity;
+    for (const di of hiliteIdxs) {
+      const n = notes[di];
+      if (n.midi === null) continue;
+      const step = resolvePitch(n.midi, this.piece.clef, this.piece.key, n.accidental).step;
+      const y = lay.bottomLineY - step * lay.staffSpace / 2;
+      staffTop0 = Math.min(staffTop0, y - headHalf);
+      staffBot0 = Math.max(staffBot0, y + headHalf);
+    }
+    // 简谱侧:整行(jianpuTop → jianpuBottom)。简谱区域已随声部数动态扩高(需求3),
+    // 故用 layout 的 jianpuTop/jianpuBottom 即可,无需单独算声部占高。
+    const pad = 6;
+    // 整体纵向范围:五线谱侧最高符头(或 staffTop)→ 简谱底,各留 pad
+    const y1 = (staffTop0 === Infinity ? lay.staffTop : staffTop0) - pad;
+    const y2 = lay.jianpuBottom + pad;
     // SVG 在 svgHost 的 padding(8px 4px)内,playheadLayer 覆盖 padding box(inset:0)。
-    // 播放头百分比相对 layout.width(SVG viewBox 宽),需把 SVG 的 padding 偏移算进去。
-    // SVG width=100%(填 content box),content box 宽 = svgHost clientWidth - 左右 padding。
-    // 简化:用 SVG 元素相对 svgHost 的偏移 + 尺寸定位播放头,精确对齐。
+    // 用 SVG 元素相对 svgHost 的偏移 + 尺寸定位播放头,精确对齐。
     const svgEl = this.svgHost.querySelector('svg');
     if (svgEl) {
       const hostRect = this.svgHost.getBoundingClientRect();
       const svgRect = svgEl.getBoundingClientRect();
-      // SVG 相对 svgHost 的左/上偏移(px)与宽高,转成百分比供 .pb-playhead 使用
       const offsetX = ((svgRect.left - hostRect.left) / hostRect.width) * 100;
       const offsetY = ((svgRect.top - hostRect.top) / hostRect.height) * 100;
       const svgWPct = (svgRect.width / hostRect.width) * 100;
       const svgHPct = (svgRect.height / hostRect.height) * 100;
-      // 播放头 left% = SVG偏移 + (noteX/viewBox宽)*SVG宽%
       const leftPct = offsetX + (x0 - w / 2) / lay.width * svgWPct;
       const widthPct = w / lay.width * svgWPct;
-      // top/height:覆盖五线谱顶到简谱底(y1=staffTop-8 → y2=jianpuBottom+8)
-      const y1 = lay.staffTop - 8;
-      const y2 = lay.jianpuBottom + 8;
       const topPct = offsetY + y1 / lay.height * svgHPct;
       const heightPct = (y2 - y1) / lay.height * svgHPct;
-      this.playheadLayer.innerHTML = `<div class="pb-playhead" style="left:${leftPct.toFixed(2)}%;top:${topPct.toFixed(2)}%;width:${widthPct.toFixed(2)}%;height:${heightPct.toFixed(2)}%"></div>`;
+      // 复用同一 div(懒创建),只改 style → CSS transition 生效(平移 + 宽高过渡)。
+      // 不再每帧 innerHTML 重建(重建会让 transition 失效、产生闪烁)。
+      if (!this.playheadEl || !this.playheadLayer.contains(this.playheadEl)) {
+        this.playheadEl = document.createElement('div');
+        this.playheadEl.className = 'pb-playhead';
+        this.playheadLayer.appendChild(this.playheadEl);
+      }
+      const el = this.playheadEl;
+      el.style.left = leftPct.toFixed(2) + '%';
+      el.style.top = topPct.toFixed(2) + '%';
+      el.style.width = widthPct.toFixed(2) + '%';
+      el.style.height = heightPct.toFixed(2) + '%';
     }
   }
 }

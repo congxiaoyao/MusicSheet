@@ -456,13 +456,16 @@ html, body {
   box-shadow: var(--shadow-md);
 }
 .pb-demo-stage .svg-host { background: #fcfcfd; }
-/* 播放头:DOM 覆盖层(app.ts playheadLayer)。旧的 SVG <rect.pb-playhead> 已弃用 */
+/* 播放头:DOM 覆盖层(app.ts playheadLayer)。旧的 SVG <rect.pb-playhead> 已弃用。
+   复用同一 div(只改 style.left/top/width/height)而非每帧 innerHTML 重建,
+   这样 transition 才生效(平移 + 宽高过渡)。 */
 .pb-playhead {
   position: absolute;
   background: rgba(79, 70, 229, 0.1);
   border-radius: 3px;
   pointer-events: none;
-  will-change: left, width;
+  will-change: left, width, top, height;
+  transition: left .18s ease, width .18s ease, top .18s ease, height .18s ease;
 }
 
 /* 符头/符干/符尾/附点高亮:运行时由 updateHighlight 切换 .playing class */
