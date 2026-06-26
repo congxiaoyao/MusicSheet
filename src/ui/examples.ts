@@ -43,6 +43,8 @@ export function twinkleExample(measureCount: number = 4): Piece {
     key: KEYS.C,
     time: { num: 4, den: 4 },
     measureCount,
-    notes,
+    notes,         // 活跃组视图(= treble,小星星是高音旋律)
+    treble: notes,
+    bass: [],
   };
 }

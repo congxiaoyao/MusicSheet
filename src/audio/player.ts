@@ -7,8 +7,8 @@
 // - seek/pause/resume：本质都是「从某 beat 重新调度」。pause 记录当前 beat 再停 osc，
 //   resume 从该 beat 重启；seek 直接 playFrom(beat)。
 
-import { durationBeats, Piece, beatsPerBar } from '../core/types';
-import { isChordTail, snapBeat, BEAT_EPS } from '../core/model';
+import { durationBeats, Note, Piece, beatsPerBar } from '../core/types';
+import { isChordTail, snapBeat, BEAT_EPS, totalBeatsOf } from '../core/model';
 
 export type PlayState = 'stopped' | 'playing' | 'paused';
 
@@ -20,7 +20,8 @@ export interface PlayerCallbacks {
 }
 
 interface SchedEntry {
-  index: number;          // notes 数组下标
+  index: number;          // 组内 notes 数组下标
+  staff: 'treble' | 'bass';  // 该音属于哪个谱表(双组并行播放)
   startBeat: number;
   endBeat: number;
   /** 实际发声时长（拍）。tie 链中起点音吃掉整链时长；链中 tieEnd 音为 0（不重新起振） */
@@ -83,8 +84,17 @@ export class Player {
   /** 计算时间轴：每个音的 [startBeat, endBeat] + tie 合并后的实际发声拍数。
    *  tie 规则：tieStart 音「吃掉」整条同音高链的时长（在其 voiceBeats 里累加链尾延音），
    *  链中的 tieEnd 音 voiceBeats=0（不重新起振）。时间轴本身仍按原始时值推进。 */
+  /** 计算播放调度表:treble/bass 两组并行(共用 beat 0 起点),合并按 startBeat 排序。
+   *  单卡模式下另一组为空,自然只播活跃组。tie 链在各组内独立(不跨组)。 */
   private computeSchedule(piece: Piece): SchedEntry[] {
-    const notes = piece.notes;
+    const treble = this.computeScheduleStaff(piece.treble, 'treble');
+    const bass = this.computeScheduleStaff(piece.bass, 'bass');
+    // 合并两组,按 startBeat 排序(同 beat 的两组同时调度)。稳定排序保持组内顺序。
+    return [...treble, ...bass].sort((a, b) => a.startBeat - b.startBeat);
+  }
+
+  /** 单组(单谱表)的 schedule 计算。复刻原单声部逻辑:和弦尾音不推进、tie 链合并。 */
+  private computeScheduleStaff(notes: Note[], staff: 'treble' | 'bass'): SchedEntry[] {
     // 先算每音 startBeat / endBeat。和弦(chord)尾音与首音同时:尾音 startBeat = 首音 startBeat,
     // 不推进时间轴 → 用 isChordTail 跳过推进。这样 playFrom 按 startBeat 调度时,和弦各声部同 t 触发。
     const raw: { start: number; end: number }[] = [];
@@ -104,7 +114,6 @@ export class Player {
 
     // tie 链:把「终点音」voiceBeats 清零、「起点音」吃掉整链时长。
     // 配对按「时间位 + 同 midi」(slots):前位 tieStart 声部 ↔ 后位 tieEnd 声部(同 midi 才连)。
-    // 这同时支持单音 tie(相邻同音高)与和弦 tie(复制组各声部与源组对应声部 midi 全等)。
     const slots: [number, number][] = [];
     for (let i = 0; i < notes.length;) {
       const cid = notes[i].chordId;
@@ -116,6 +125,7 @@ export class Player {
     // voiceBeats:先全部按原始时值
     const out: SchedEntry[] = notes.map((_, i) => ({
       index: i,
+      staff,
       startBeat: raw[i].start,
       endBeat: raw[i].end,
       voiceBeats: raw[i].end - raw[i].start,
@@ -163,10 +173,10 @@ export class Player {
     const secPerBeat = 60 / this.bpm;
     const originCtxTime = this.startCtxTime - this.startBeat * secPerBeat; // beat=0 对应的 ctx 时间
 
-    // 调度所有「在 beat 之后才结束」的音
+    // 调度所有「在 beat 之后才结束」的音(两组并行,按 staff 取对应组的音)
     for (const e of this.schedule) {
       if (e.endBeat <= this.startBeat) continue;       // 已完全过去
-      const n = this.piece.notes[e.index];
+      const n = this.piece[e.staff][e.index];
       if (n.midi === null || e.voiceBeats <= 0) continue; // 休止或 tie 静默段不发声
 
       // 该音实际起止（相对 origin）：被 seek 切开的音从 startBeat 处补发剩余部分
@@ -215,13 +225,27 @@ export class Player {
    *  区间比较带 BEAT_EPS 容忍:tuplet 累加让 endBeat 含 ~1e-16 误差,严格 < 会令
    *  beat=末音endBeat 时落空返回 -1(末音高亮丢失)。右边界用 < endBeat - EPS,
    *  与 tickLoop 的 beat>=totalBeats(snapBeat 后) 配合,末音区间能覆盖到结束。
+   *  双组并行:只返回「当前活跃组」(piece.notes 指向的组)的音,另一组的高亮由 App 多卡时单独算。
    *  public:供 App 在 onTick/seek 时算当前音高亮(单一数据源 currentBeat)。 */
   noteIndexAtBeat(beat: number): number {
+    const activeStaff = this.piece && this.piece.notes === this.piece.bass ? 'bass' : 'treble';
     for (const e of this.schedule) {
+      if (e.staff !== activeStaff) continue;
       if (beat >= e.startBeat - BEAT_EPS && beat < e.endBeat - BEAT_EPS) return e.index;
     }
-    // 落在所有区间之后(已到末尾)→ 返回末音,保持末音高亮直到 finish
-    return this.schedule.length ? this.schedule[this.schedule.length - 1].index : -1;
+    // 落在活跃组所有区间之后(该组已播完但另一组还在播)→ 返回该组末音,保持末音高亮
+    const actives = this.schedule.filter(e => e.staff === activeStaff);
+    return actives.length ? actives[actives.length - 1].index : -1;
+  }
+
+  /** 找 beat 在指定组(treble/bass)落在哪个音区间。供 App 双卡模式分别高亮两组用。
+   *  -1 表示该组无音或已播完且无末音可保持。 */
+  noteIndexAtBeatStaff(beat: number, staff: 'treble' | 'bass'): number {
+    const entries = this.schedule.filter(e => e.staff === staff);
+    for (const e of entries) {
+      if (beat >= e.startBeat - BEAT_EPS && beat < e.endBeat - BEAT_EPS) return e.index;
+    }
+    return entries.length ? entries[entries.length - 1].index : -1;
   }
 
   private finish(): void {
@@ -271,13 +295,13 @@ export class Player {
   /** 计算 schedule / totalBeats（play 与 rebuildSchedule 共用）。 */
   private recomputeSchedule(piece: Piece): void {
     this.schedule = this.computeSchedule(piece);
-    // totalBeats 吸附到小节网格:乐谱总拍数应是 bpb 整数倍,但末音 endBeat
-    // 因 tuplet 累加可能含 ~1e-16 误差(如 3.9999... 而非 4.0),会让 tickLoop
-    // 的 beat>=totalBeats 判定提前/延后、noteIndexAtBeat 在末音 endBeat 处落空。
+    // totalBeats = 两组并行播放的总长(max),吸附到小节网格(末音 endBeat 因 tuplet 累加
+    // 可能有 ~1e-16 误差,会让 tickLoop 的 beat>=totalBeats 判定提前/延后)。
     const bpb = beatsPerBar(piece.time);
-    const rawTotal = this.schedule.length
-      ? this.schedule[this.schedule.length - 1].endBeat
-      : 0;
+    const rawTotal = Math.max(
+      totalBeatsOf(piece.treble),
+      totalBeatsOf(piece.bass),
+    );
     this.totalBeats = snapBeat(rawTotal, bpb);
   }
 

@@ -59,7 +59,8 @@ export function deserialize(text: string): Piece {
   return validatePiece(f.piece);
 }
 
-/** 递归校验 Piece 结构，非法字段抛 Error。 */
+/** 递归校验 Piece 结构，非法字段抛 Error。
+ *  向后兼容:旧格式(只有 notes,无 treble/bass)→ notes 读入 treble 组,bass 空。 */
 function validatePiece(p: unknown): Piece {
   if (!p || typeof p !== 'object') throw new Error('乐谱数据格式错误');
   const o = p as Record<string, unknown>;
@@ -69,13 +70,22 @@ function validatePiece(p: unknown): Piece {
   if (typeof o.measureCount !== 'number' || o.measureCount < 1 || o.measureCount > 64 || !Number.isInteger(o.measureCount)) {
     throw new Error(`无效小节数: ${String(o.measureCount)}`);
   }
-  if (!Array.isArray(o.notes)) throw new Error('notes 不是数组');
+  // 双组(treble/bass):新格式。旧格式只有 notes → 兼容读入 treble。
+  const trebleRaw = Array.isArray(o.treble) ? o.treble : (Array.isArray(o.notes) ? o.notes : null);
+  const bassRaw = Array.isArray(o.bass) ? o.bass : null;
+  if (!trebleRaw && !bassRaw) throw new Error('缺少音符数据(treble/bass/notes 均无)');
+  const treble = trebleRaw ? (trebleRaw as unknown[]).map(validateNote) : [] as Note[];
+  const bass = bassRaw ? (bassRaw as unknown[]).map(validateNote) : [] as Note[];
+  // notes = 活跃组视图:按 clef 指向对应组(导入后 App 会按模式重指向,这里先按 clef 默认)
+  const notes = o.clef === 'bass' ? bass : treble;
   return {
     clef: o.clef as Clef,
     key: o.key as Piece['key'],
     time: o.time as Piece['time'],
-    measureCount: o.measureCount,
-    notes: (o.notes as unknown[]).map(validateNote),
+    measureCount: o.measureCount as number,
+    notes,
+    treble,
+    bass,
   };
 }
 

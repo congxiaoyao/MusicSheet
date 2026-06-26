@@ -7,23 +7,40 @@ import { beatsPerBar, durationBeats, Note, Piece } from './types';
 import { noteToJianpu } from './theory';
 
 export function createPiece(): Piece {
+  const treble: Note[] = [];
+  const bass: Note[] = [];
   return {
     clef: 'treble',
     key: { name: 'C', tonic: 0, sharps: [], flats: [] },
     time: { num: 4, den: 4 },
     measureCount: 2,
-    notes: [],
+    notes: treble,   // 活跃组视图:默认指向 treble(App 切模式时重指向)
+    treble,
+    bass,
   };
 }
 
-/** 总拍数（四分音符为单位）。和弦尾音不占额外时长(与首音同时),不累加。 */
+/** 总拍数（四分音符为单位）。和弦尾音不占额外时长(与首音同时),不累加。
+ *  注意:这是「当前活跃组」(piece.notes)的拍数。播放需要两组并行时,用 totalBeatsBoth。 */
 export function totalBeats(piece: Piece): number {
+  return totalBeatsOf(piece.notes);
+}
+
+/** 给定一组音符算总拍数(不含和弦尾音)。供 player 分别算 treble/bass 组用。 */
+export function totalBeatsOf(notes: Note[]): number {
   let sum = 0;
-  for (let i = 0; i < piece.notes.length; i++) {
-    if (isChordTail(piece.notes[i], i > 0 ? piece.notes[i - 1] : null)) continue;
-    sum += durationBeats(piece.notes[i]);
+  for (let i = 0; i < notes.length; i++) {
+    if (isChordTail(notes[i], i > 0 ? notes[i - 1] : null)) continue;
+    sum += durationBeats(notes[i]);
   }
   return sum;
+}
+
+/** 两组(treble+bass)并行播放的总拍数 = max(两组各自拍数)。
+ *  两组共享时间轴(都从 beat 0 起),短的一组播完后长的一组继续。
+ *  播放层(player)用这个;单卡编辑的进度条/容量用 totalBeats(活跃组)。 */
+export function totalBeatsBoth(piece: Piece): number {
+  return Math.max(totalBeatsOf(piece.treble), totalBeatsOf(piece.bass));
 }
 
 /** 当前音是否是和弦的「尾音」——同 chordId 且前一音也同 chordId。

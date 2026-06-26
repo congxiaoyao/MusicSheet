@@ -67,10 +67,17 @@ export interface Piece {
   clef: Clef;
   key: KeySig;
   time: TimeSig;
-  /** 总小节数（单行）。写满后不可再输入。 */
+  /** 总小节数（单行）。写满后不可再输入。两组(treble/bass)共享。 */
   measureCount: number;
-  /** 扁平的音符数组，按时间顺序（追加式录入） */
+  /** 扁平的音符数组，按时间顺序（追加式录入）。
+   *  渐进式重构:这是「当前活跃组」的视图别名,由 App 在切模式时指向 treble 或 bass。
+   *  渲染层(render/layout/staff/beam/jianpu)只读 notes,自动跟随活跃组,无需感知双组。
+   *  编辑层(appendNote/popNote)操作 notes = 操作活跃组。 */
   notes: Note[];
+  /** 高音谱表(右手)音符组。单卡高音模式时 notes 指向它。 */
+  treble: Note[];
+  /** 低音谱表(左手)音符组。单卡低音模式时 notes 指向它。 */
+  bass: Note[];
 }
 
 const DURATION_BASE: Record<DurationValue, number> = {
