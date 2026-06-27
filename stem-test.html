@@ -4,6 +4,12 @@
 <meta charset="UTF-8">
 <title>符干宽度验证 — 符干染红检查连接</title>
 <style>
+  /* Bravura 字体(符头/符尾/连梁字形依赖它,必须加载,否则符头画不出来) */
+  @font-face {
+    font-family: 'Bravura';
+    src: url('./bravura.woff2') format('woff2');
+    font-weight: normal; font-style: normal;
+  }
   body { font-family: system-ui, sans-serif; margin: 20px; background: #fafafa; }
   h2 { font-size: 15px; color: #475569; margin: 24px 0 8px; }
   .stage { background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px; }
@@ -26,6 +32,10 @@
   import { createPiece, appendNote } from './src/core/model.ts';
   import { computeLayout } from './src/render/layout.ts';
   import { buildSVG } from './src/render/export.ts';
+
+  // 等 Bravura 字体加载完再渲染(否则符头字形画不出来)
+  try { await document.fonts.load('46px Bravura'); } catch {}
+  await document.fonts.ready;
 
   const CK = { name: 'C', tonic: 0, sharps: [], flats: [] };
   const T44 = { num: 4, den: 4 };
