@@ -637,7 +637,7 @@ export class App {
   }
 
   /** 拖拽卡片:按住指示条 → 在原位留同高占位(防页面跳) + 卡片转 fixed 跟随鼠标 →
-   *  鼠标越过另一卡中线时实时交换 DOM(另一卡 transition 平滑让位) → 松手归位 + 动画。
+   *  鼠标越过另一卡中线时实时交换 DOM,另一卡用 FLIP 技术平滑滑动让位 → 松手归位。
    *  数据归属(treble/bass)不变,只换视觉排序。 */
   private startCardDrag(card: CardState, startY: number): void {
     if (this.cards.length < 2) return;
@@ -660,8 +660,6 @@ export class App {
     host.style.top = hostRect.top + 'px';
     host.style.zIndex = '50';
     host.style.pointerEvents = 'none';
-    // 另一卡加 transition,让交换时平滑滑动
-    other.svgHost.style.transition = 'transform var(--anim-dur) var(--ease-out-cubic)';
     const onMove = (ev: MouseEvent) => {
       host.style.top = (ev.clientY - grabOffsetY) + 'px';
       const otherRect = other.svgHost.getBoundingClientRect();
@@ -670,9 +668,20 @@ export class App {
       if (overMid !== lastMid) {
         lastMid = overMid;
         const stage = this.stageWrap;
-        const a = placeholder, b = other.svgHost;
-        // 移动占位(拖动卡跟随占位),另一卡用 transition 平滑滑到新位置
-        if (overMid) { stage.insertBefore(a, b); } else { stage.insertBefore(a, b.nextSibling); }
+        // FLIP 动画:记录另一卡交换前位置 → 移动 DOM → 算位移 → 反向 transform → 下帧归零
+        const firstTop = other.svgHost.getBoundingClientRect().top;
+        if (overMid) { stage.insertBefore(placeholder, other.svgHost); }
+        else { stage.insertBefore(placeholder, other.svgHost.nextSibling); }
+        const lastTop = other.svgHost.getBoundingClientRect().top;
+        const dy = lastTop - firstTop;
+        if (Math.abs(dy) > 0.5) {
+          other.svgHost.style.transition = 'none';
+          other.svgHost.style.transform = `translateY(${-dy}px)`;
+          // 强制回流后开 transition 归零(FLIP 的 Play)
+          void other.svgHost.offsetWidth;
+          other.svgHost.style.transition = 'transform var(--anim-dur) var(--ease-out-cubic)';
+          other.svgHost.style.transform = '';
+        }
       }
     };
     const onUp = () => {
