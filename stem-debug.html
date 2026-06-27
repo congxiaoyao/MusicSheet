@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>符头-符干切点调试 — noteheadBlack 轮廓分析</title>
+<!--
+  调试用：渲染超大 noteheadBlack(font-size=600)，叠加符干模拟 + 切点十字标记。
+  用于确认符干边缘对齐符头墨迹最外缘(切点)的位置正确性。
+
+  像素实测结果(font-size=600, ss=150)：
+    - 符头倾斜方向：\ (右高左低)
+    - 墨迹半宽 = 88px (= 0.597 × advance147.5)
+    - 右切点(最右列中点) y=376，偏中心 -24px (-15.7% 墨迹高)
+    - 左切点(最左列中点) y=424，偏中心 +24px (+15.7% 墨迹高)
+    - stemUp：符干右缘对齐墨迹右缘，底端在右切点(headY - 16%墨迹高)
+    - stemDown：符干左缘对齐墨迹左缘，顶端在左切点(headY + 16%墨迹高)
+
+  如需重新测量，修改下面常量或用 puppeteer 逐像素扫描。
+-->
+<style>
+  @font-face{font-family:'Bravura';src:url('./bravura.woff2') format('woff2');}
+  body{margin:0;background:#fff;font-family:system-ui}
+  svg{display:block}
+  .meta{padding:12px 20px;font-size:13px;color:#475569;line-height:1.6}
+</style>
+</head>
+<body>
+<div class="meta">
+  <b>符头-符干切点调试</b>：noteheadBlack 是倾斜椭圆(\\)。<br>
+  绿色=墨迹最外缘线+切点十字；深红=stemUp 模拟符干(右缘贴右缘，底端在右切点)；蓝色=stemDown 模拟符干(左缘贴左缘，顶端在左切点)。
+</div>
+<svg width="860" height="900" viewBox="0 0 860 900">
+  <!-- 常量(与像素实测一致) -->
+  <g id="stemup">
+    <text x="430" y="80" font-size="14" fill="#c00">stemUp（符干朝上）</text>
+    <text x="430" y="430" font-family="Bravura" font-size="600" text-anchor="middle" dominant-baseline="alphabetic" fill="#000">&#xE0A3;</text>
+    <!-- 模拟符干：右缘=墨迹右缘(430+88=518)，底端=右切点(y=406=430-24) -->
+    <rect x="482" y="186" width="36" height="220" fill="#c00" opacity="0.85"/>
+    <!-- 绿色切点参考 -->
+    <line x1="518" y1="186" x2="518" y2="650" stroke="#0a0" stroke-width="1" stroke-dasharray="2,2"/>
+    <line x1="493" y1="406" x2="543" y2="406" stroke="#0a0" stroke-width="2"/>
+    <line x1="518" y1="380" x2="518" y2="432" stroke="#0a0" stroke-width="2"/>
+    <line x1="405" y1="430" x2="455" y2="430" stroke="#000" stroke-width="0.8"/>
+    <line x1="430" y1="405" x2="430" y2="455" stroke="#000" stroke-width="0.8"/>
+  </g>
+</svg>
+<script type="module">
+// 等字体加载
+try { await document.fonts.load('600px Bravura'); } catch {}
+await document.fonts.ready;
+</script>
+</body>
+</html>

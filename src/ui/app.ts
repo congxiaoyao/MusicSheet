@@ -309,8 +309,9 @@ export class App {
     return radio;
   }
 
-  /** 更新预览卡播放头:复用常规卡片的自适应高度逻辑(staffTop→双谱表底),
-   *  按 currentBeat 在 contentWidth 上的比例定位 x。与 updatePlayheadAndHighlight 同款 pb-playhead。 */
+  /** 更新预览卡播放头:恒定宽度 + beat 线性定位(不依赖音符 idx,两组长度不同也正确,
+   *  因 beat 是全局时间轴且两组小节线 x 对齐)。高度覆盖双谱表(staffTop→bass底)。
+   *  停止态也显示(seek 定位用):停在 currentBeat 处,不随时间移动(tickLoop 不跑)。 */
   private updatePreviewPlayhead(
     trebleLayout: ReturnType<typeof computeLayout>,
     bassLayout: ReturnType<typeof computeLayout>,
@@ -319,8 +320,7 @@ export class App {
     if (!this.previewHost) return;
     const phl = this.previewHost.querySelector('.playhead-layer') as HTMLElement | null;
     if (!phl) return;
-    if (this.playState === 'stopped') { phl.style.display = 'none'; return; }
-    phl.style.display = '';
+    phl.style.display = '';   // 停止态也显示(seek 定位指示)
     const beats = this.player.getTotalBeats() || 1;
     const ratio = Math.max(0, Math.min(1, this.currentBeat / beats));
     const svg = this.previewHost.querySelector('svg');
@@ -331,11 +331,10 @@ export class App {
     const offsetY = ((svgRect.top - hostRect.top) / hostRect.height) * 100;
     const svgWPct = (svgRect.width / hostRect.width) * 100;
     const svgHPct = (svgRect.height / hostRect.height) * 100;
-    // 当前音 x(trebleLayout 的 noteX),按 currentBeat 找 idx
-    const idx = this.player.noteIndexAtBeatStaff(this.currentBeat, 'treble');
-    const w = idx >= 0 ? (trebleLayout.noteSlotW[idx] || 24) : 24;
-    const x0 = idx >= 0 ? trebleLayout.noteX[idx] : (trebleLayout.contentLeft + ratio * trebleLayout.contentWidth);
-    // 高度:覆盖双谱表(treble staffTop → bass jianpuBottom),与常规卡片一致 pad 6
+    // 恒宽:固定 24px(约一个音符槽宽),位置按 beat 线性映射到 contentWidth
+    const w = 24;
+    const x0 = trebleLayout.contentLeft + ratio * trebleLayout.contentWidth;
+    // 高度:覆盖双谱表(treble staffTop → bass jianpuBottom),pad 6
     const pad = 6;
     const y1 = trebleLayout.staffTop - pad;
     const y2 = trebleLayout.height + bassLayout.jianpuBottom + pad;
@@ -635,31 +634,50 @@ export class App {
     this.rebuildToolbar();
   }
 
-  /** 拖拽卡片:按住指示条 → 跟随鼠标 → 松手时若进入另一卡区域则交换 DOM 顺序。 */
+  /** 拖拽卡片:按住指示条 → 卡片转为跟随鼠标的拖动态(半透明+提升) →
+   *  鼠标越过另一卡中线时实时交换 DOM(主流条目拖拽:目标即时让位) → 松手结束。
+   *  数据归属(treble/bass)不变,只换视觉排序。 */
   private startCardDrag(card: CardState, startY: number): void {
     if (this.cards.length < 2) return;
     const other = this.cards.find(c => c !== card);
     if (!other) return;
-    card.svgHost.classList.add('dragging');
+    const host = card.svgHost;
+    const hostRect = host.getBoundingClientRect();
+    const grabOffsetY = startY - hostRect.top;   // 鼠标相对卡片顶的偏移(保持抓握点)
+    let lastMid = false;   // 上次是否已越过中线(防重复交换)
+    host.classList.add('dragging');
+    // 提升层级 + 固定宽度跟随(脱离流用 fixed,保持原宽)
+    host.style.position = 'fixed';
+    host.style.width = hostRect.width + 'px';
+    host.style.left = hostRect.left + 'px';
+    host.style.zIndex = '50';
+    host.style.pointerEvents = 'none';
     const onMove = (ev: MouseEvent) => {
+      // 跟随鼠标(保持抓握点)
+      host.style.top = (ev.clientY - grabOffsetY) + 'px';
+      // 越过另一卡中线 → 实时交换(让目标即时让位)
       const otherRect = other.svgHost.getBoundingClientRect();
-      const inOther = ev.clientY >= otherRect.top && ev.clientY <= otherRect.bottom;
-      other.svgHost.classList.toggle('drop-target', inOther);
+      const otherMid = otherRect.top + otherRect.height / 2;
+      const overMid = ev.clientY < otherMid;
+      if (overMid !== lastMid) {
+        lastMid = overMid;
+        const stage = this.stageWrap;
+        const a = host, b = other.svgHost;
+        // 始终把拖动卡放到另一卡的"鼠标侧":鼠标在上半 → a 在 b 前;下半 → a 在 b 后
+        if (overMid) { stage.insertBefore(a, b); } else { stage.insertBefore(a, b.nextSibling); }
+      }
     };
-    const onUp = (ev: MouseEvent) => {
+    const onUp = () => {
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
-      card.svgHost.classList.remove('dragging');
-      other.svgHost.classList.remove('drop-target');
-      const otherRect = other.svgHost.getBoundingClientRect();
-      if (ev.clientY >= otherRect.top && ev.clientY <= otherRect.bottom) {
-        // 交换 DOM 顺序(stageWrap 内两 svgHost 的位置)
-        const stage = this.stageWrap;
-        const a = card.svgHost, b = other.svgHost;
-        if (a.nextElementSibling === b) { stage.insertBefore(b, a); }
-        else { stage.insertBefore(a, b); }
-        this.render();
-      }
+      host.classList.remove('dragging');
+      host.style.position = '';
+      host.style.width = '';
+      host.style.left = '';
+      host.style.top = '';
+      host.style.zIndex = '';
+      host.style.pointerEvents = '';
+      this.render();
     };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
@@ -1074,8 +1092,9 @@ export class App {
       (this.playbackCard as any)._setProgress?.(beat);
       this.updatePlayheadAndHighlight();
     } else {
-      // 停止态:记录位置,不显示播放头(停止语义)。进度条同步显示位置。
+      // 停止态:记录位置,进度条同步显示。预览模式下也更新播放头(停止态 seek 定位指示)。
       (this.playbackCard as any)._setProgress?.(beat);
+      if (this.viewMode === 'preview') this.updatePlayheadAndHighlight();
     }
   }
 
@@ -1479,9 +1498,37 @@ export class App {
 
   private updatePlayheadAndHighlight(): void {
     const playing = this.playState !== 'stopped';
-    // 预览模式:重新渲染(高亮靠 buildGrandSVG 的 playingIdx)+ 更新预览播放头
+    // 预览模式:重新渲染双谱表 + 高亮当前拍两组音符 + 更新预览播放头
     if (this.viewMode === 'preview') {
       this.renderPreview();
+      if (this.previewHost && playing) {
+        // 清旧高亮
+        this.previewHost.querySelectorAll('.note-elem.playing, .jp-elem.playing').forEach(el => el.classList.remove('playing'));
+        // treble 组高亮
+        const tIdx = this.player.noteIndexAtBeatStaff(this.currentBeat, 'treble');
+        const bIdx = this.player.noteIndexAtBeatStaff(this.currentBeat, 'bass');
+        const tNotes = this.piece.treble;
+        const bNotes = this.piece.bass;
+        const hiTreble = new Set<number>();
+        if (tIdx >= 0) {
+          const cid = tNotes[tIdx]?.chordId;
+          if (cid) { for (let i = 0; i < tNotes.length; i++) if (tNotes[i].chordId === cid) hiTreble.add(i); }
+          else hiTreble.add(tIdx);
+        }
+        const hiBass = new Set<number>();
+        if (bIdx >= 0) {
+          const cid = bNotes[bIdx]?.chordId;
+          if (cid) { for (let i = 0; i < bNotes.length; i++) if (bNotes[i].chordId === cid) hiBass.add(i); }
+          else hiBass.add(bIdx);
+        }
+        // 预览卡内 .grand-treble 和 .grand-bass 两组各自的 [data-idx]
+        this.previewHost.querySelectorAll<SVGElement>('.grand-treble [data-idx]').forEach(el => {
+          if (hiTreble.has(parseInt(el.getAttribute('data-idx') || '-1', 10))) el.classList.add('playing');
+        });
+        this.previewHost.querySelectorAll<SVGElement>('.grand-bass [data-idx]').forEach(el => {
+          if (hiBass.has(parseInt(el.getAttribute('data-idx') || '-1', 10))) el.classList.add('playing');
+        });
+      }
       return;
     }
     // 遍历每个卡片:清除高亮 + 按 staff 查当前音 + 高亮 + 定位播放头

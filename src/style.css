@@ -304,12 +304,12 @@ html, body {
 .svg-host .drag-handle:active {
   cursor: grabbing;
 }
-/* 拖拽中:被拖卡变半透明,目标卡高亮可放置区 */
+/* 拖拽中:被拖卡提升(z-index)+ 阴影 + 轻微放大,跟随鼠标(fixed 定位由 JS 控制) */
 .svg-host.dragging {
-  opacity: 0.4;
-}
-.svg-host.drop-target {
-  box-shadow: 0 0 0 3px var(--accent);
+  opacity: 0.92;
+  box-shadow: var(--shadow-md), 0 8px 24px rgba(79, 70, 229, 0.2);
+  cursor: grabbing !important;
+  transform: scale(1.01);
 }
 /* 预览模式宿主:双谱表只读卡,右上角 radio */
 .svg-host.preview-host {
@@ -349,6 +349,13 @@ html, body {
   font-size: 1.25em;
   line-height: 1;
   font-family: 'Bravura Text', 'Noto Music', serif;
+  margin-right: 3px;
+}
+/* viewMode seg-btn 用 flex 让 glyph 和文字并排且间距合理 */
+.seg .seg-btn:not(:last-child) .view-glyph,
+.seg .seg-btn .view-glyph {
+  display: inline-block;
+  vertical-align: middle;
 }
 .svg-host svg { display: block; user-select: none; -webkit-user-select: none; position: absolute; top: 0; left: 0; width: 100%; touch-action: manipulation; }
 /* 播放头覆盖层:覆盖整个 svgHost(含 padding),内部 .pb-playhead 按百分比定位 */
