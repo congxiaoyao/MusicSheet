@@ -93,6 +93,10 @@ export class App {
   private previewPlayheadEl: HTMLElement | null = null;
   /** 预览模式 treble 布局(seek/playhead 坐标换算用,与常规卡片 layout 同款) */
   private previewLayout: ReturnType<typeof computeLayout> | null = null;
+  /** 预览模式 bass 布局(吸附 seek / 播放头跟随 bass 音用)。renderPreview 时同步刷新。 */
+  private previewBassLayout: ReturnType<typeof computeLayout> | null = null;
+  /** 预览模式双谱表总高(buildGrandSVG 返回值)。onTick 更新播放头时复用,避免每帧重建 SVG。 */
+  private previewTotalHeight = 0;
 
   constructor(root: HTMLElement) {
     this.root = root;
@@ -206,18 +210,23 @@ export class App {
 
     this.bindKeys();
     this.bindDragDrop();
+    // 全局 mouseup 复位 isMouseDown(只在构造器绑一次,避免 bindCard 每张卡都累积 window 监听器)。
+    window.addEventListener('mouseup', () => { this.isMouseDown = false; });
     this.render();
   }
 
   /** 按 viewMode 创建/重建卡片 DOM。treble/bass=1 卡,grand=2 卡,preview=预览卡(阶段5)。
    *  卡片 svgHost 挂在 stageWrap 内(statusEl 之前)。切模式时调用重建。 */
   private rebuildCards(): void {
-    // 清旧卡片 DOM
-    for (const c of this.cards) c.svgHost.remove();
+    // 清旧卡片 DOM(同时取消进行中的高度动画 rAF,避免回调操作游离 DOM)
+    for (const c of this.cards) {
+      if (c.heightAnimFrame !== null) cancelAnimationFrame(c.heightAnimFrame);
+      c.svgHost.remove();
+    }
     this.cards = [];
     this.activeCard = null;
     // 清旧预览卡 + 预览 radio 工具条(防反复切模式堆积)
-    if (this.previewHost) { this.previewHost.remove(); this.previewHost = null; this.previewPlayheadEl = null; }
+    if (this.previewHost) { this.previewHost.remove(); this.previewHost = null; this.previewPlayheadEl = null; this.previewLayout = null; this.previewBassLayout = null; this.previewTotalHeight = 0; }
     this.stageWrap.querySelectorAll('.preview-bar').forEach(el => el.remove());
     // 预览模式:radio 在卡片上方(不压谱子)+ 只读双谱表卡
     if (this.viewMode === 'preview') {
@@ -260,38 +269,64 @@ export class App {
   }
 
   /** 绑定预览卡点击/拖动 → seek(点击跳转 + 拖动连续 seek)。
-   *  radio 按钮(五线谱/简谱/两者)在 previewHost 内,其点击需排除(不触发 seek)。 */
+   *  radio 按钮(五线谱/简谱/两者)在 previewHost 内,其点击需排除(不触发 seek)。
+   *  window 的 mousemove/mouseup 采用"按下时绑定、抬起时解绑"模式,避免反复进出
+   *  预览模式时 window 监听器累积泄漏(旧实现每次 bindPreviewHost 都永久注册一份)。 */
   private bindPreviewHost(): void {
     if (!this.previewHost) return;
+    const host = this.previewHost;
     let dragging = false;
-    const onDown = (e: MouseEvent) => {
-      // radio 按钮区域不触发 seek
-      if ((e.target as HTMLElement).closest('.preview-radio')) return;
-      dragging = true;
-      const beat = this.beatFromPreviewX(e.clientX);
-      if (beat !== null) this.seek(beat);
-    };
     const onMove = (e: MouseEvent) => {
       if (!dragging) return;
       const beat = this.beatFromPreviewX(e.clientX);
       if (beat !== null) this.seek(beat);
     };
-    const onUp = () => { dragging = false; };
-    this.previewHost.addEventListener('mousedown', onDown);
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
+    const onUp = () => {
+      dragging = false;
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    host.addEventListener('mousedown', (e: MouseEvent) => {
+      // radio 按钮区域不触发 seek
+      if ((e.target as HTMLElement).closest('.preview-radio')) return;
+      dragging = true;
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', onUp);
+      const beat = this.beatFromPreviewX(e.clientX);
+      if (beat !== null) this.seek(beat);
+    });
   }
 
-  /** 预览卡点击 x → beat(线性映射到 svgHost 全宽,与播放头/进度条同基准)。 */
+  /** 预览卡点击 x → beat(吸附到两组中绝对最近的音符中心,与播放头同基准)。
+   *  双谱表下同一点击 x 对应两组各自一个最近音,取两组所有音符中中心 x 绝对最近者,
+   *  返回该音的起点 beat。点击落在所有音符 x 范围之外(空白区)→ 退化为 beat 线性兜底。
+   *  这样点击点与播放头落点用同一基准(noteX),不再出现"点击与落点对不上"的视觉错乱。 */
   private beatFromPreviewX(clientX: number): number | null {
     const lay = this.previewLayout;
+    const bassLay = this.previewBassLayout;
     if (!lay || !this.previewHost) return null;
     const svg = this.previewHost.querySelector('svg');
     if (!svg) return null;
     const rect = svg.getBoundingClientRect();
-    // 点击 x 相对 SVG 左边的比例 → beat(线性铺满 SVG 宽,与播放头 left% 同基准)
-    const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    // SVG 内部 x 坐标(与 layout.noteX 同基准:SVG 内部 px)
+    const svgX = (clientX - rect.left) / rect.width * lay.width;
     const beats = this.player.getTotalBeats() || 1;
+    // 收集两组所有音符,找中心 x 绝对最近者。bestDist=Infinity 表示尚未命中任何音。
+    let bestBeat = -1;
+    let bestDist = Infinity;
+    const trebleStarts = noteStartBeats({ ...this.piece, notes: this.piece.treble });
+    const bassStarts = noteStartBeats({ ...this.piece, notes: this.piece.bass });
+    const consider = (noteX: number[], starts: number[]) => {
+      for (let i = 0; i < noteX.length && i < starts.length; i++) {
+        const dist = Math.abs(noteX[i] - svgX);
+        if (dist < bestDist) { bestDist = dist; bestBeat = starts[i]; }
+      }
+    };
+    consider(lay.noteX, trebleStarts);
+    if (bassLay) consider(bassLay.noteX, bassStarts);
+    if (bestBeat >= 0) return Math.max(0, Math.min(bestBeat, beats));
+    // 两组全空(无音):线性兜底
+    const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
     return ratio * beats;
   }
 
@@ -309,6 +344,8 @@ export class App {
       previewMode: this.previewMode, playingTrebleIdx: playingT, playingBassIdx: playingB,
     });
     this.previewLayout = trebleLayout;   // 存布局供 seek/playhead 换算
+    this.previewBassLayout = bassLayout; // bass 布局供吸附 seek / 播放头跟随 bass 音
+    this.previewTotalHeight = height;    // 双谱表总高(供 onTick 更新播放头复用,避免重建 SVG)
     this.previewHost.innerHTML = svg;
     this.previewHost.style.height = (height + 16) + 'px';   // 容器高度容纳双谱表(含 padding)
     const svgEl = this.previewHost.querySelector('svg');
@@ -317,10 +354,10 @@ export class App {
       svgEl.setAttribute('height', String(height));
       svgEl.setAttribute('preserveAspectRatio', 'none');
     }
-    // 重挂播放头层(radio 已在卡片上方独立元素,不受 innerHTML 影响)
+    // 重挂播放头层(radio 已在卡片上方独立元素,不受 innerHTML 影响)。
+    // display 统一由 updatePreviewPlayhead 控制(停止态也显示,作 seek 定位指示)。
     const phl = document.createElement('div');
     phl.className = 'playhead-layer';
-    phl.style.display = this.playState !== 'stopped' ? '' : 'none';
     this.previewHost.appendChild(phl);
     this.previewPlayheadEl = null;
     this.updatePreviewPlayhead(trebleLayout, bassLayout, height);
@@ -371,8 +408,11 @@ export class App {
     const hostContentH = totalHeight + 16;   // 与 renderPreview 设的 style.height 一致
     const offsetY = (padTop / hostContentH) * 100;
     const svgHPct = (totalHeight / hostContentH) * 100;
-    // 横向定位:跟常规卡片一样用 noteX[idx] 精确对齐当前音符(不是 beat 线性)。
-    // 两组小节线 x 对齐,故用任一组 noteX[idx] 都正确。优先 treble,无音则用 bass。
+    // 横向定位:用 noteX[idx] 精确对齐当前发声的音符(与点击吸附同基准)。
+    // 两组小节线 x 对齐,任一组 noteX 都对应同一全局 beat 位置。跟随规则:
+    //   - 两组都在响 → 用 treble noteX(等价于 bass,两组同 beat 同 x)
+    //   - 仅 bass 在响(treble 已播完/间隙)→ 用 bass noteX,避免停在 treble 旧位
+    //   - 两组都无音(空白区)→ beat 线性兜底
     const tIdx = this.player.noteIndexAtBeatStaff(this.currentBeat, 'treble');
     const bIdx = this.player.noteIndexAtBeatStaff(this.currentBeat, 'bass');
     const w = 24;
@@ -383,8 +423,8 @@ export class App {
     } else if (bIdx >= 0 && bassLayout.noteX.length > bIdx) {
       x0 = bassLayout.noteX[bIdx];
     } else {
-      // 两组都无音(空白区):按 beat 线性兜底
-      const ratio = Math.max(0, Math.min(1, this.currentBeat / beats));
+      // 两组都无音(空白区):按 beat 线性兜底(beats=0 时 ratio=0,落在 contentLeft)
+      const ratio = beats > 0 ? Math.max(0, Math.min(1, this.currentBeat / beats)) : 0;
       x0 = trebleLayout.contentLeft + ratio * trebleLayout.contentWidth;
     }
     const leftPct = offsetX + (x0 - w / 2) / trebleLayout.width * svgWPct;
@@ -644,7 +684,7 @@ export class App {
       const { y, ok } = this.toSvgCoords(e, card);
       this.downMidi = ok && card.layout ? clickYToMidi(y, card.pieceView, card.layout) : null;
     });
-    window.addEventListener('mouseup', () => { this.isMouseDown = false; });
+    // 注:isMouseDown 的全局 mouseup 复位在构造器统一绑定(避免每张卡累积 window 监听器)。
 
     // mousemove → 悬停预览(仅激活卡)
     host.addEventListener('mousemove', (e: MouseEvent) => {
@@ -1591,9 +1631,11 @@ export class App {
 
   private updatePlayheadAndHighlight(): void {
     const playing = this.playState !== 'stopped';
-    // 预览模式:重新渲染双谱表 + 高亮当前拍两组音符 + 更新预览播放头
+    // 预览模式:只更新高亮 class + 播放头位置(不重建 SVG)。
+    //   乐谱 SVG 由 render()/radio切换/编辑后 调 renderPreview() 重建;onTick 每帧只切
+    //   class 与播放头 left/top/width/height %,避免每帧 innerHTML 全量重建双谱表(旧实现
+    //   在此调 renderPreview(),播放中每帧重建 SVG → 卡顿/闪烁/播放头跳变)。
     if (this.viewMode === 'preview') {
-      this.renderPreview();
       if (this.previewHost && playing) {
         // 清旧高亮
         this.previewHost.querySelectorAll('.note-elem.playing, .jp-elem.playing').forEach(el => el.classList.remove('playing'));
@@ -1621,6 +1663,10 @@ export class App {
         this.previewHost.querySelectorAll<SVGElement>('.grand-bass [data-idx]').forEach(el => {
           if (hiBass.has(parseInt(el.getAttribute('data-idx') || '-1', 10))) el.classList.add('playing');
         });
+      }
+      // 更新播放头位置(用 renderPreview 缓存的 layout/height,不重建 SVG)
+      if (this.previewLayout && this.previewBassLayout) {
+        this.updatePreviewPlayhead(this.previewLayout, this.previewBassLayout, this.previewTotalHeight);
       }
       return;
     }
