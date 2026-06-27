@@ -344,14 +344,19 @@ html, body {
   font-size: 12px;
   padding: 3px 8px;
 }
-/* 视图模式按钮:谱号符号放大(接近原谱号按钮的符号高度),与文字并排 */
+/* 视图模式按钮:谱号符号放大 + flex 居中(避免 vertical-align baseline 偏移) */
+.view-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
 .view-glyph {
-  font-size: 1.5em;
-  line-height: 1;
   font-family: 'Bravura Text', 'Noto Music', serif;
-  margin-right: 3px;
-  display: inline-block;
-  vertical-align: middle;
+  line-height: 1;
+}
+/* 谱号符号放大(𝄞𝄢),♪ 不放大 */
+.view-clef {
+  font-size: 1.4em;
 }
 .svg-host svg { display: block; user-select: none; -webkit-user-select: none; position: absolute; top: 0; left: 0; width: 100%; touch-action: manipulation; }
 /* 播放头覆盖层:覆盖整个 svgHost(含 padding),内部 .pb-playhead 按百分比定位 */

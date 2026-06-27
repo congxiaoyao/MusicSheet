@@ -226,11 +226,14 @@ export class App {
     return host;
   }
 
-  /** 绑定预览卡点击/拖动 → seek(点击跳转 + 拖动连续 seek)。 */
+  /** 绑定预览卡点击/拖动 → seek(点击跳转 + 拖动连续 seek)。
+   *  radio 按钮(五线谱/简谱/两者)在 previewHost 内,其点击需排除(不触发 seek)。 */
   private bindPreviewHost(): void {
     if (!this.previewHost) return;
     let dragging = false;
     const onDown = (e: MouseEvent) => {
+      // radio 按钮区域不触发 seek
+      if ((e.target as HTMLElement).closest('.preview-radio')) return;
       dragging = true;
       const beat = this.beatFromPreviewX(e.clientX);
       if (beat !== null) this.seek(beat);

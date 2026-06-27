@@ -369,15 +369,18 @@ export function buildToolbar(state: ToolState, cb: ToolbarCallbacks): HTMLElemen
   // 图标用音乐符号(谱号 ♩),innerHTML 让符号放大,与其他按钮风格统一。
   const viewWrap = document.createElement('div');
   viewWrap.className = 'seg';
-  const VIEW_OPTIONS: { v: ViewMode; glyph: string; text: string; title: string }[] = [
-    { v: 'treble', glyph: '𝄞', text: '高音', title: '高音谱(单卡)' },
-    { v: 'bass', glyph: '𝄢', text: '低音', title: '低音谱(单卡)' },
-    { v: 'grand', glyph: '𝄞𝄢', text: '双谱', title: '高低音谱(双卡可分别编辑)' },
+  const VIEW_OPTIONS: { v: ViewMode; glyph: string; clef?: boolean; text: string; title: string }[] = [
+    { v: 'treble', glyph: '𝄞', clef: true, text: '高音', title: '高音谱(单卡)' },
+    { v: 'bass', glyph: '𝄢', clef: true, text: '低音', title: '低音谱(单卡)' },
+    { v: 'grand', glyph: '𝄞𝄢', clef: true, text: '双谱', title: '高低音谱(双卡可分别编辑)' },
     { v: 'preview', glyph: '♪', text: '预览', title: '仅预览(双谱表可视化 seekbar)' },
   ];
   for (const o of VIEW_OPTIONS) {
     const b = segBtn('', o.title);
-    b.innerHTML = `<span class="view-glyph">${o.glyph}</span><span>${o.text}</span>`;
+    b.classList.add('view-btn');
+    // 谱号符号(𝄞𝄢)放大,♪ 保持普通大小;flex 居中避免 vertical-align 偏移
+    const glyphCls = o.clef ? 'view-glyph view-clef' : 'view-glyph';
+    b.innerHTML = `<span class="${glyphCls}">${o.glyph}</span><span>${o.text}</span>`;
     if (state.viewMode === o.v) b.classList.add('active');
     b.onclick = () => {
       state.viewMode = o.v;
