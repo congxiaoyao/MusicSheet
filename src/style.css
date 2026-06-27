@@ -344,16 +344,12 @@ html, body {
   font-size: 12px;
   padding: 3px 8px;
 }
-/* 视图模式按钮:谱号符号放大,与文字并排 */
+/* 视图模式按钮:谱号符号放大(接近原谱号按钮的符号高度),与文字并排 */
 .view-glyph {
-  font-size: 1.25em;
+  font-size: 1.5em;
   line-height: 1;
   font-family: 'Bravura Text', 'Noto Music', serif;
   margin-right: 3px;
-}
-/* viewMode seg-btn 用 flex 让 glyph 和文字并排且间距合理 */
-.seg .seg-btn:not(:last-child) .view-glyph,
-.seg .seg-btn .view-glyph {
   display: inline-block;
   vertical-align: middle;
 }

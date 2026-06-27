@@ -278,15 +278,6 @@ export function buildToolbar(state: ToolState, cb: ToolbarCallbacks): HTMLElemen
   setWrap.className = 'tb-group';
   setWrap.appendChild(label('设置'));
 
-  // 【对照用,无功能】原谱号按钮(高音 𝄞 / 低音 𝄢),仅供对照图标大小,确认后删除
-  const clefCmpWrap = document.createElement('div');
-  clefCmpWrap.className = 'seg';
-  const clefCmpT = segBtn('高音 𝄞', '对照用(无功能)');
-  const clefCmpB = segBtn('低音 𝄢', '对照用(无功能)');
-  clefCmpT.classList.add('active');
-  clefCmpWrap.append(clefCmpT, clefCmpB);
-  setWrap.appendChild(clefCmpWrap);
-
   // 调号：自定义下拉（原生 <select> 的弹出面板无法用 CSS 美化，所以自建）
   const keyDrop = document.createElement('div');
   keyDrop.className = 'dropdown';
