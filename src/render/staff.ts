@@ -25,6 +25,11 @@ const W_BARLINE = 0.16;
 const W_BARLINE_FINAL = 0.5;
 const W_LEDGER = 0.16;
 const W_STEM = 0.24;
+/** 符干宽度(px):W_STEM * staffSpace,最小 1.5px 兜底(极小谱表时保证可见)。
+ *  集中此公式(原 3 处 Math.max(1.5, W_STEM*ss) 重复),未来调整粗细/兜底只改这里。 */
+function stemWidth(ss: number): number {
+  return Math.max(1.5, W_STEM * ss);
+}
 
 export interface RenderInput {
   piece: Piece;
@@ -204,7 +209,7 @@ function computeStem(step: number, x: number, headHalfW: number, layout: Layout,
   stemUp: boolean; stemW: number; stemX: number; stemTop: number; stemBot: number;
 } {
   const ss = layout.staffSpace;
-  const stemW = Math.max(1.5, W_STEM * ss);
+  const stemW = stemWidth(ss);
   const inset = STEM_INSET * ss;
   const headY = stepToY(step, layout);
   if (beam) {
@@ -399,7 +404,7 @@ function renderBeams(groups: BeamGroup[], piece: Piece, layout: Layout): { svg: 
   const ss = layout.staffSpace;
   const ctxByIdx = new Map<number, BeamCtx>();
   let svg = '';
-  const stemW = Math.max(1.5, W_STEM * ss);
+  const stemW = stemWidth(ss);
   const headHalfW = advanceSS('noteheadBlack') / 2 * ss;
   const thick = BEAM_THICKNESS * ss;
 
@@ -767,7 +772,7 @@ function renderChordStems(piece: Piece, layout: Layout, beamIdx: Set<number>): {
   const groups = chordGroups(piece);
   let svg = '';
   const handled = new Set<number>();
-  const stemW = Math.max(1.5, W_STEM * ss);
+  const stemW = stemWidth(ss);
   const headHalfW = advanceSS('noteheadBlack') / 2 * ss;
   const stemLen = ss * 3.5;
   const inset = STEM_INSET * ss;
