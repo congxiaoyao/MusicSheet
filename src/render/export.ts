@@ -66,7 +66,7 @@ export function buildGrandSVG(
   const visTop = (lay: Layout) => showStaff ? lay.viewBoxYOffset : lay.jianpuTop;
   const visBottom = (lay: Layout) => showStaff ? (showJianpu ? lay.height : lay.jianpuTop) : lay.jianpuBottom;
   // 简谱模式上下加留白(简谱内容太贴近边缘)
-  const jpPad = showStaff && showJianpu ? 0 : (!showStaff ? 16 : 0);
+  const jpPad = showStaff && showJianpu ? 0 : (!showStaff ? 28 : 0);
   const tTop = visTop(trebleLayout) - jpPad;
   const tBot = visBottom(trebleLayout);
   const bTop = visTop(bassLayout) - jpPad;

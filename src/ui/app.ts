@@ -359,12 +359,18 @@ export class App {
     const beats = this.player.getTotalBeats() || 1;
     const svg = this.previewHost.querySelector('svg');
     if (!svg) return;
+    // 横向:用 getBoundingClientRect(SVG 宽不受高度 transition 影响,实时准)
     const hostRect = this.previewHost.getBoundingClientRect();
     const svgRect = svg.getBoundingClientRect();
     const offsetX = ((svgRect.left - hostRect.left) / hostRect.width) * 100;
-    const offsetY = ((svgRect.top - hostRect.top) / hostRect.height) * 100;
     const svgWPct = (svgRect.width / hostRect.width) * 100;
-    const svgHPct = (svgRect.height / hostRect.height) * 100;
+    // 纵向:不用 getBoundingClientRect(previewHost 有 height transition,切换瞬间测量到动画中
+    // 的旧高度导致播放头位置错乱)。改用 totalHeight(layout 值,即时正确)算比例。
+    // previewHost padding=8px 4px,SVG absolute top:0 贴 padding box 顶。
+    const padTop = 8;
+    const hostContentH = totalHeight + 16;   // 与 renderPreview 设的 style.height 一致
+    const offsetY = (padTop / hostContentH) * 100;
+    const svgHPct = (totalHeight / hostContentH) * 100;
     // 横向定位:跟常规卡片一样用 noteX[idx] 精确对齐当前音符(不是 beat 线性)。
     // 两组小节线 x 对齐,故用任一组 noteX[idx] 都正确。优先 treble,无音则用 bass。
     const tIdx = this.player.noteIndexAtBeatStaff(this.currentBeat, 'treble');
@@ -387,7 +393,7 @@ export class App {
     // 故变换后:treble staffTop 在 (staffTop - tTop) 处;bass jianpuBottom 在 (tVisH + (jianpuBottom - bBot)) 处。
     const showStaff = this.previewMode !== 'jianpu';
     const showJianpu = this.previewMode !== 'staff';
-    const jpPad = showStaff && showJianpu ? 0 : (!showStaff ? 16 : 0);
+    const jpPad = showStaff && showJianpu ? 0 : (!showStaff ? 28 : 0);
     const tTop = (showStaff ? trebleLayout.viewBoxYOffset : trebleLayout.jianpuTop) - jpPad;
     const tBot = showStaff ? (showJianpu ? trebleLayout.height : trebleLayout.jianpuTop) : trebleLayout.jianpuBottom;
     const tVisH = tBot - tTop;
