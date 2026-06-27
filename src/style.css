@@ -263,6 +263,10 @@ html, body {
 .svg-host.inactive {
   opacity: 0.55;
 }
+/* 非激活卡:隐藏 SMS 输入框(next-slot 待输入指示器) */
+.svg-host.inactive .next-slot {
+  display: none;
+}
 .svg-host.dual:not(.inactive) {
   border-color: var(--accent);
   box-shadow: 0 0 0 2px var(--accent-soft);
@@ -273,37 +277,64 @@ html, body {
 }
 .svg-host .drag-handle {
   position: absolute;
-  left: 0; top: 0; bottom: 0;
-  width: 14px;
+  left: 2px; top: 50%;
+  width: 10px; height: 36px;
+  transform: translateY(-50%);
   cursor: grab;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 3px;
   opacity: 0;
-  transition: opacity var(--anim-dur) var(--ease-out-cubic);
+  transition: opacity var(--anim-dur) var(--ease-out-cubic), background var(--anim-dur) var(--ease-out-cubic);
   z-index: 5;
-  border-radius: var(--radius-sm) 0 0 var(--radius-sm);
-  background: linear-gradient(90deg, var(--accent-soft), transparent);
+  border-radius: 5px;
+  background: var(--line-2);
 }
-.svg-host.dual:hover .drag-handle {
+/* 仅当鼠标 hover 在拖拽条本身时才显现(不是整个卡片) */
+.svg-host .drag-handle:hover {
   opacity: 1;
+  background: var(--accent-soft);
 }
-.svg-host .drag-handle::before {
+/* 拖拽条:6 个圆点的握柄纹理(常见的可拖拽视觉) */
+.svg-host .drag-handle::before,
+.svg-host .drag-handle::after {
   content: '';
-  width: 3px; height: 28px;
-  background: var(--accent);
-  border-radius: 2px;
-  opacity: 0.5;
+  width: 4px; height: 4px;
+  border-radius: 50%;
+  background: var(--muted);
 }
+.svg-host .drag-handle::before { box-shadow: 0 -7px 0 var(--muted), 0 7px 0 var(--muted); }
+.svg-host .drag-handle:active {
+  cursor: grabbing;
+}
+/* 拖拽中:被拖卡变半透明,目标卡高亮可放置区 */
 .svg-host.dragging {
-  opacity: 0.4;
+  opacity: 0.35;
 }
 .svg-host.drop-target {
   box-shadow: 0 0 0 3px var(--accent);
+  background: var(--accent-soft);
 }
 /* 预览模式宿主:双谱表只读卡,右上角 radio */
 .svg-host.preview-host {
   cursor: pointer;
+}
+/* 模式切换:卡片淡入(opacity + translateY 微动),120ms 统一节奏 */
+.svg-host.mode-enter {
+  animation: cardEnter var(--anim-dur) var(--ease-out-cubic);
+}
+@keyframes cardEnter {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.svg-host.inactive.mode-enter {
+  animation: cardEnterInactive var(--anim-dur) var(--ease-out-cubic);
+}
+@keyframes cardEnterInactive {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 0.55; transform: translateY(0); }
 }
 .preview-radio {
   position: absolute;
@@ -318,6 +349,12 @@ html, body {
 .preview-radio .seg-btn {
   font-size: 12px;
   padding: 3px 8px;
+}
+/* 视图模式按钮:谱号符号放大,与文字并排 */
+.view-glyph {
+  font-size: 1.25em;
+  line-height: 1;
+  font-family: 'Bravura Text', 'Noto Music', serif;
 }
 .svg-host svg { display: block; user-select: none; -webkit-user-select: none; position: absolute; top: 0; left: 0; width: 100%; touch-action: manipulation; }
 /* 播放头覆盖层:覆盖整个 svgHost(含 padding),内部 .pb-playhead 按百分比定位 */

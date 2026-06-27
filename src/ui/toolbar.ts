@@ -365,17 +365,19 @@ export function buildToolbar(state: ToolState, cb: ToolbarCallbacks): HTMLElemen
   }
   layoutWrap.appendChild(barWrap);
 
-  // 视图模式 radio(高音谱/低音谱/高低音谱/仅预览):控制显示几个卡片 + 预览模式
+  // 视图模式 radio(高音谱/低音谱/高低音谱/仅预览):控制显示几个卡片 + 预览模式。
+  // 图标用音乐符号(谱号 ♩),innerHTML 让符号放大,与其他按钮风格统一。
   const viewWrap = document.createElement('div');
   viewWrap.className = 'seg';
-  const VIEW_OPTIONS: { v: ViewMode; label: string; title: string }[] = [
-    { v: 'treble', label: '𝄞 高音', title: '高音谱(单卡)' },
-    { v: 'bass', label: '𝄢 低音', title: '低音谱(单卡)' },
-    { v: 'grand', label: '𝄞𝄢 双谱', title: '高低音谱(双卡可分别编辑)' },
-    { v: 'preview', label: '👁 预览', title: '仅预览(双谱表可视化 seekbar)' },
+  const VIEW_OPTIONS: { v: ViewMode; glyph: string; text: string; title: string }[] = [
+    { v: 'treble', glyph: '𝄞', text: '高音', title: '高音谱(单卡)' },
+    { v: 'bass', glyph: '𝄢', text: '低音', title: '低音谱(单卡)' },
+    { v: 'grand', glyph: '𝄞𝄢', text: '双谱', title: '高低音谱(双卡可分别编辑)' },
+    { v: 'preview', glyph: '♪', text: '预览', title: '仅预览(双谱表可视化 seekbar)' },
   ];
   for (const o of VIEW_OPTIONS) {
-    const b = segBtn(o.label, o.title);
+    const b = segBtn('', o.title);
+    b.innerHTML = `<span class="view-glyph">${o.glyph}</span><span>${o.text}</span>`;
     if (state.viewMode === o.v) b.classList.add('active');
     b.onclick = () => {
       state.viewMode = o.v;

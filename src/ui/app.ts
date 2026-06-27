@@ -17,6 +17,16 @@ import { twinkleExample } from './examples';
 
 interface HoverState { midi: number; x: number; }
 
+/** 按谱号独立的输入配置(切换激活态时各自保留/恢复)。
+ *  调号/拍号/小节数是全曲属性,不在这里(共享 piece.key/time/measureCount)。 */
+interface StaffToolConfig {
+  duration: DurationValue;
+  dotted: boolean;
+  accidental: 'sharp' | 'flat' | 'natural' | null;
+  tupletMode: TupletMode;
+  chordMode: boolean;
+}
+
 /** 单卡片状态(多谱表模式下 treble/bass 各一个 CardState)。
  *  封装原 App 的单卡字段:DOM 宿主、布局、高度动画锚点、增删/连梁状态。
  *  渲染层(render/bindCanvas/heightTick/playhead)通过 CardState 参数化,支持多卡。 */
@@ -38,6 +48,10 @@ interface CardState {
 export class App {
   private piece: Piece;
   private tool: ToolState;
+  /** 按谱号独立的输入配置:切换激活态时各自保留(duration/dotted/accidental/tuplet/chord)。
+   *  this.tool 的这5项始终 = 当前激活谱号的配置(切换时同步)。 */
+  private trebleTool: StaffToolConfig = { duration: 'quarter', dotted: false, accidental: null, tupletMode: 'off', chordMode: false };
+  private bassTool: StaffToolConfig = { duration: 'quarter', dotted: false, accidental: null, tupletMode: 'off', chordMode: false };
   /** 连音组(tuplet)输入进度：开启 tuplet 模式后，追踪当前组已输入第几个、共用 groupId。
    *  输入第 actual 个后关闭模式并清空。null 表示不在组输入中。 */
   private tupletProgress: { groupId: string; count: number; actual: number; normal: number } | null = null;
@@ -178,26 +192,31 @@ export class App {
     // 预览模式:单独的只读双谱表卡
     if (this.viewMode === 'preview') {
       this.previewHost = this.createPreviewHost();
+      this.previewHost.classList.add('mode-enter');
       this.stageWrap.insertBefore(this.previewHost, this.statusEl);
       this.bindPreviewHost();
+      setTimeout(() => this.previewHost?.classList.remove('mode-enter'), 130);
       return;
     }
     const staves: ('treble' | 'bass')[] = this.viewMode === 'bass' ? ['bass'] : this.viewMode === 'grand' ? ['treble', 'bass'] : ['treble'];
     for (const staff of staves) {
       const card = this.createCard(staff);
+      card.svgHost.classList.add('mode-enter');
       this.cards.push(card);
       this.stageWrap.insertBefore(card.svgHost, this.statusEl);
       this.bindCard(card);
     }
     this.activeCard = this.cards[0] ?? null;
-    // 激活态:piece.notes 指向激活卡的组(编辑层操作 piece.notes = 活跃组)
+    // 激活态:piece.notes 指向激活卡的组 + 加载该谱号的输入配置(工具栏按钮跟随)
     if (this.activeCard) {
       this.piece.notes = this.activeCard.staff === 'bass' ? this.piece.bass : this.piece.treble;
       this.piece.clef = this.activeCard.staff;
+      this.loadStaffConfig(this.activeCard.staff);
     }
     this.updateCardActiveVisual();
+    // 模式切换动画结束后移除 mode-enter(允许下次切换重新触发)
+    setTimeout(() => { for (const c of this.cards) c.svgHost.classList.remove('mode-enter'); }, 130);
   }
-
   /** 创建预览模式宿主(双谱表 + 右上角 radio 五线谱/简谱/两者 + 播放头层)。 */
   private createPreviewHost(): HTMLElement {
     const host = document.createElement('div');
@@ -245,6 +264,7 @@ export class App {
       previewMode: this.previewMode, playingTrebleIdx: playingT, playingBassIdx: playingB,
     });
     this.previewHost.innerHTML = svg;
+    this.previewHost.style.height = (height + 16) + 'px';   // 容器高度容纳双谱表(含 padding)
     const svgEl = this.previewHost.querySelector('svg');
     if (svgEl) {
       svgEl.setAttribute('width', '100%');
@@ -523,9 +543,11 @@ export class App {
 
     host.addEventListener('mousedown', (e: MouseEvent) => {
       this.isMouseDown = true;
-      // grand 模式:点非激活卡 → 切换激活(不输入,只激活)
+      // grand 模式:点非激活卡 → 仅切换激活,不记录音高(避免切换瞬间误输入音)
       if (this.viewMode === 'grand' && card !== this.activeCard) {
         this.setActiveCard(card);
+        this.downMidi = null;   // 切换激活的那次点击不输入
+        return;
       }
       const { y, ok } = this.toSvgCoords(e, card);
       this.downMidi = ok && card.layout ? clickYToMidi(y, card.pieceView, card.layout) : null;
@@ -566,6 +588,27 @@ export class App {
     }
   }
 
+  /** 把 this.tool 的输入配置(duration/dotted/accidental/tuplet/chord)存到对应谱号的配置。
+   *  切换激活态前调用(保存当前谱号的配置)。 */
+  private saveStaffConfig(staff: 'treble' | 'bass'): void {
+    const cfg: StaffToolConfig = {
+      duration: this.tool.duration, dotted: this.tool.dotted, accidental: this.tool.accidental,
+      tupletMode: this.tool.tupletMode, chordMode: this.tool.chordMode,
+    };
+    if (staff === 'bass') this.bassTool = cfg; else this.trebleTool = cfg;
+  }
+
+  /** 把谱号配置恢复到 this.tool + 重建工具栏(让按钮高亮跟随)。 */
+  private loadStaffConfig(staff: 'treble' | 'bass'): void {
+    const cfg = staff === 'bass' ? this.bassTool : this.trebleTool;
+    this.tool.duration = cfg.duration;
+    this.tool.dotted = cfg.dotted;
+    this.tool.accidental = cfg.accidental;
+    this.tool.tupletMode = cfg.tupletMode;
+    this.tool.chordMode = cfg.chordMode;
+    this.rebuildToolbar();
+  }
+
   /** 拖拽卡片:按住指示条 → 跟随鼠标 → 松手时若进入另一卡区域则交换 DOM 顺序。 */
   private startCardDrag(card: CardState, startY: number): void {
     if (this.cards.length < 2) return;
@@ -597,13 +640,19 @@ export class App {
     void startY;
   }
 
-  /** 切换激活卡(grand 模式)。同步 piece.notes 指向新激活组 + 更新视觉。 */
+  /** 切换激活卡(grand 模式)。保存旧谱号输入配置 + 恢复新谱号配置 +
+   *  同步 piece.notes 指向新激活组 + 更新视觉。 */
   private setActiveCard(card: CardState): void {
     if (card === this.activeCard) return;
+    // 保存当前谱号的输入配置,再加载目标谱号的(让工具栏按钮各自保留/恢复)
+    if (this.activeCard) this.saveStaffConfig(this.activeCard.staff);
     this.activeCard = card;
+    this.loadStaffConfig(card.staff);
     this.piece.notes = card.staff === 'bass' ? this.piece.bass : this.piece.treble;
     this.piece.clef = card.staff;
     this.hover = null;
+    this.currentChordId = null;   // 切谱号时清掉和弦构建态(不同谱号的和弦不延续)
+    this.tupletProgress = null;
     this.updateCardActiveVisual();
     this.render();
   }
@@ -836,6 +885,8 @@ export class App {
     if (oldViewMode !== this.viewMode) {
       this.rebuildCards();
     }
+    // 保存当前谱号的输入配置(duration/dotted/accidental/tuplet/chord)→ 该谱号独立保留
+    if (this.activeCard) this.saveStaffConfig(this.activeCard.staff);
     this.render();
   }
 
