@@ -83,6 +83,8 @@ export class App {
   private toolbar!: HTMLElement;
   private playbackCard!: HTMLElement;
   private hover: HoverState | null = null;
+  /** hover 试听音效开关(默认关)。 */
+  private hoverSound = false;
   /** 预览模式的显示选项(五线谱/简谱/两者) */
   private previewMode: 'staff' | 'jianpu' | 'both' = 'both';
   /** 预览模式的 DOM 宿主(只读双谱表) */
@@ -96,6 +98,8 @@ export class App {
     this.piece = createPiece();
     this.tool = defaultTool();
     this.viewMode = this.tool.viewMode;
+    /** hover 试听音效开关(默认关)。localStorage 持久化。 */
+    this.hoverSound = localStorage.getItem('hoverSound') === '1';
     this.fingering = loadFingering();
     this.show = loadShow();
     this.player = new Player({
@@ -138,6 +142,27 @@ export class App {
     header.innerHTML = `<h1>简谱翻译 <span class="dot">·</span> <em>MusicSheet</em></h1>
       <p class="hint">点击五线谱放音 → 下方实时显示简谱 · 类似短信验证码：只能往右追加，退格删除最后一个</p>`;
     this.root.appendChild(header);
+
+    // hint 行右侧:hover 试听音效开关(默认关)
+    const hintRow = document.createElement('div');
+    hintRow.className = 'hint-row';
+    hintRow.appendChild(spacer());
+    const hoverSoundBtn = document.createElement('button');
+    hoverSoundBtn.className = 'btn btn-ghost hover-sound-toggle';
+    hoverSoundBtn.type = 'button';
+    hoverSoundBtn.title = '开关:hover 时试听音效';
+    const updateHoverBtn = () => {
+      hoverSoundBtn.textContent = (this.hoverSound ? '🔊' : '🔇') + ' 悬停试听';
+      hoverSoundBtn.classList.toggle('active', this.hoverSound);
+    };
+    updateHoverBtn();
+    hoverSoundBtn.onclick = () => {
+      this.hoverSound = !this.hoverSound;
+      localStorage.setItem('hoverSound', this.hoverSound ? '1' : '0');
+      updateHoverBtn();
+    };
+    hintRow.appendChild(hoverSoundBtn);
+    this.root.appendChild(hintRow);
 
     this.toolbar = buildToolbar(this.tool, {
       onChange: () => this.onToolChange(),
@@ -739,6 +764,7 @@ export class App {
 
   private lastPreviewMidi: number | null = null;
   private maybePreview(midi: number): void {
+    if (!this.hoverSound) return;   // 默认关:只在用户开启时才 hover 试听
     if (this.lastPreviewMidi !== midi) {
       this.lastPreviewMidi = midi;
       this.player.preview(midi);
@@ -1148,18 +1174,17 @@ export class App {
   /** 构造给卡片的视图快照 */
   private playbackView(): PlaybackView {
     // totalBeats 统一用 totalBeatsBoth(两组 max),与 player.getTotalBeats() 一致。
-    // playingIndexBass:bass 组当前播放索引(双卡模式两组同时高亮);单卡/活跃=bass 时 -1。
-    const playingIndexBass = (this.playState !== 'stopped' && this.viewMode === 'grand')
-      ? this.player.noteIndexAtBeatStaff(this.currentBeat, 'bass')
-      : -1;
+    // playingIndexTreble/Bass:两组各自当前播放索引(键盘高亮用,与活跃组无关)。
+    const playing = this.playState !== 'stopped';
     return {
       piece: this.piece,
       playState: this.playState,
       bpm: this.bpm,
-      currentBeat: this.playState === 'stopped' ? 0 : this.currentBeat,
+      currentBeat: playing ? this.currentBeat : 0,
       totalBeats: totalBeatsBoth(this.piece),
       playingIndex: this.playingIndex,
-      playingIndexBass,
+      playingIndexTreble: playing ? this.player.noteIndexAtBeatStaff(this.currentBeat, 'treble') : -1,
+      playingIndexBass: playing ? this.player.noteIndexAtBeatStaff(this.currentBeat, 'bass') : -1,
       fingering: this.fingering,
       show: this.show,
     };

@@ -314,6 +314,8 @@ html, body {
 /* 预览模式宿主:双谱表只读卡,右上角 radio */
 .svg-host.preview-host {
   cursor: pointer;
+  transition: height var(--anim-dur) var(--ease-out-cubic);
+  overflow: hidden;
 }
 /* 模式切换:卡片淡入(opacity + translateY 微动),120ms 统一节奏 */
 .svg-host.mode-enter {

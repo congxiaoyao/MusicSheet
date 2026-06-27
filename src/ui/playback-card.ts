@@ -22,7 +22,9 @@ export interface PlaybackView {
   currentBeat: number;
   totalBeats: number;
   playingIndex: number;
-  /** 低音组当前播放索引(双谱表模式 treble+bass 两组同时高亮);-1=无/单卡模式。 */
+  /** 高音组当前播放索引(键盘高亮用,与活跃组无关)。 */
+  playingIndexTreble: number;
+  /** 低音组当前播放索引(键盘高亮用)。 */
   playingIndexBass: number;
   fingering: Fingering;
   show: ShowFlags;
@@ -362,17 +364,11 @@ export function buildPlaybackCard(
     return box;
   }
 
-  /** 计算当前应高亮的 midi 集合(treble 当前音 + 和弦组 + bass 当前音 + 和弦组)。
-   *  双谱表模式 playingIndexBass≥0 时,bass 组也高亮;单卡模式 playingIndexBass=-1 只 treble。 */
+  /** 计算当前应高亮的 midi 集合(treble+bass 两组当前音各 + 和弦组)。
+   *  playingIndexTreble/playingIndexBass 各自独立,与活跃组无关。 */
   function computeActiveMidis(): Set<number> {
     const v = getView();
     const set = new Set<number>();
-    const trebleNotes = v.piece.treble;
-    const bassNotes = v.piece.bass;
-    // treble 组(playingIndex 是 treble 组索引,当活跃组=treble 时;否则需用 pieceView)
-    // 简化:playingIndex 指向活跃组。双卡时活跃组可能是 treble 或 bass。
-    // 为正确联动两组,直接用 piece.treble/bass + currentBeat 在两组查当前音。
-    // 但 playback-card 无 player 引用,用 App 传来的 playingIndex(treble)+playingIndexBass。
     const collectGroup = (notes: Note[], idx: number) => {
       if (idx < 0 || idx >= notes.length) return;
       const head = notes[idx];
@@ -387,11 +383,8 @@ export function buildPlaybackCard(
         if (hm !== null) set.add(hm);
       }
     };
-    // playingIndex 指向活跃组。需要判断活跃组是 treble 还是 bass 来选对应 notes。
-    const activeIsBass = v.piece.notes === v.piece.bass;
-    collectGroup(activeIsBass ? bassNotes : trebleNotes, v.playingIndex);
-    // bass 组额外索引(双卡模式)
-    if (v.playingIndexBass >= 0) collectGroup(bassNotes, v.playingIndexBass);
+    collectGroup(v.piece.treble, v.playingIndexTreble);
+    collectGroup(v.piece.bass, v.playingIndexBass);
     return set;
   }
 

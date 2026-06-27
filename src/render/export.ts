@@ -58,20 +58,22 @@ export function buildGrandSVG(
   const bStaff = showStaff ? renderStaffSVG(bInput) : '';
   const bJianpu = showJianpu ? renderJianpuSVG(bInput) : '';
   // 垂直堆叠:treble 组在上,bass 组在下。按 previewMode 重新排版(去掉隐藏部分的间距)。
-  // 每组的可见高度:staff-only=到 jianpuTop;jianpu-only=jianpuTop→jianpuBottom;both=完整 height。
+  // 每组可见区的顶/底 y(在各自 layout 坐标系内):
+  //   staff-only:  top=viewBoxYOffset, bottom=jianpuTop(五线谱区)
+  //   jianpu-only: top=jianpuTop, bottom=jianpuBottom(简谱区)
+  //   both:        top=viewBoxYOffset, bottom=height(全部)
   const width = Math.max(trebleLayout.width, bassLayout.width);
-  // treble 可见区:y∈[viewBoxYOffset, tVisBottom],tVisBottom = staff-only?jianpuTop : height
-  const tVisTop = trebleLayout.viewBoxYOffset;
-  const tVisBottom = showStaff ? (showJianpu ? trebleLayout.height : trebleLayout.jianpuTop) : trebleLayout.jianpuBottom;
-  const tVisH = tVisBottom - tVisTop;
-  // bass 可见区(同理),紧接 treble 下方
-  const bVisBottom = showStaff ? (showJianpu ? bassLayout.height : bassLayout.jianpuTop) : bassLayout.jianpuBottom;
-  const bVisH = bVisBottom - bassLayout.viewBoxYOffset;
+  const visTop = (lay: Layout) => showStaff ? lay.viewBoxYOffset : lay.jianpuTop;
+  const visBottom = (lay: Layout) => showStaff ? (showJianpu ? lay.height : lay.jianpuTop) : lay.jianpuBottom;
+  const tTop = visTop(trebleLayout), tBot = visBottom(trebleLayout);
+  const bTop = visTop(bassLayout), bBot = visBottom(bassLayout);
+  const tVisH = tBot - tTop;
+  const bVisH = bBot - bTop;
   const totalHeight = tVisH + bVisH;
-  // treble 组:translate 抵消 viewBoxYOffset(让可见内容从 y=0 起)
-  const trebleGroup = `<g class="grand-treble" transform="translate(0, ${-tVisTop})">${showStaff ? `<g class="staff-group">${tStaff}</g>` : ''}${showJianpu ? `<g class="jianpu-group">${tJianpu}</g>` : ''}</g>`;
-  // bass 组:平移到 treble 可见高度之下,抵消其 viewBoxYOffset
-  const bassGroup = `<g class="grand-bass" transform="translate(0, ${tVisH - bassLayout.viewBoxYOffset})">${showStaff ? `<g class="staff-group">${bStaff}</g>` : ''}${showJianpu ? `<g class="jianpu-group">${bJianpu}</g>` : ''}</g>`;
+  // treble 组:translate 抵消可见区顶部(让可见内容从 y=0 起)
+  const trebleGroup = `<g class="grand-treble" transform="translate(0, ${-tTop})">${showStaff ? `<g class="staff-group">${tStaff}</g>` : ''}${showJianpu ? `<g class="jianpu-group">${tJianpu}</g>` : ''}</g>`;
+  // bass 组:平移到 treble 可见高度之下,抵消其可见区顶部
+  const bassGroup = `<g class="grand-bass" transform="translate(0, ${tVisH - bTop})">${showStaff ? `<g class="staff-group">${bStaff}</g>` : ''}${showJianpu ? `<g class="jianpu-group">${bJianpu}</g>` : ''}</g>`;
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${totalHeight}" viewBox="0 0 ${width} ${totalHeight}">${trebleGroup}${bassGroup}</svg>`;
   return { svg, width, height: totalHeight };
 }

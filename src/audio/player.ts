@@ -245,7 +245,8 @@ export class Player {
     for (const e of entries) {
       if (beat >= e.startBeat - BEAT_EPS && beat < e.endBeat - BEAT_EPS) return e.index;
     }
-    return entries.length ? entries[entries.length - 1].index : -1;
+    // 该组无区间匹配:beat 超过该组范围(短组播完)→ 返回 -1(清除该组高亮,不保持末音)
+    return -1;
   }
 
   private finish(): void {
