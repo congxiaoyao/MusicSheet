@@ -216,8 +216,9 @@ export class App {
     for (const c of this.cards) c.svgHost.remove();
     this.cards = [];
     this.activeCard = null;
-    // 清旧预览卡
+    // 清旧预览卡 + 预览 radio 工具条(防反复切模式堆积)
     if (this.previewHost) { this.previewHost.remove(); this.previewHost = null; this.previewPlayheadEl = null; }
+    this.stageWrap.querySelectorAll('.preview-bar').forEach(el => el.remove());
     // 预览模式:radio 在卡片上方(不压谱子)+ 只读双谱表卡
     if (this.viewMode === 'preview') {
       this.previewHost = this.createPreviewHost();
@@ -381,10 +382,25 @@ export class App {
       x0 = trebleLayout.contentLeft + ratio * trebleLayout.contentWidth;
     }
     const leftPct = offsetX + (x0 - w / 2) / trebleLayout.width * svgWPct;
-    // 高度:覆盖双谱表(treble staffTop → bass jianpuBottom),pad 6
+    // 高度:必须与 buildGrandSVG 的 visTop/visBottom 逻辑一致(用变换后的坐标系)。
+    // buildGrandSVG 对 treble 组 translate(-tTop),bass 组 translate(tVisH - bTop)。
+    // 故变换后:treble staffTop 在 (staffTop - tTop) 处;bass jianpuBottom 在 (tVisH + (jianpuBottom - bBot)) 处。
+    const showStaff = this.previewMode !== 'jianpu';
+    const showJianpu = this.previewMode !== 'staff';
+    const jpPad = showStaff && showJianpu ? 0 : (!showStaff ? 16 : 0);
+    const tTop = (showStaff ? trebleLayout.viewBoxYOffset : trebleLayout.jianpuTop) - jpPad;
+    const tBot = showStaff ? (showJianpu ? trebleLayout.height : trebleLayout.jianpuTop) : trebleLayout.jianpuBottom;
+    const tVisH = tBot - tTop;
+    const bTop = (showStaff ? bassLayout.viewBoxYOffset : bassLayout.jianpuTop) - jpPad;
+    const bBot = (showStaff ? (showJianpu ? bassLayout.height : bassLayout.jianpuTop) : bassLayout.jianpuBottom) + jpPad;
+    // 变换后坐标系里的播放头覆盖范围。
+    // 简谱模式:五线谱不可见,y1 用简谱区顶(jianpuTop 变换后 = jpPad);
+    // 五线谱/两者模式:y1 用五线谱 staffTop 变换后位置。
     const pad = 6;
-    const y1 = trebleLayout.staffTop - pad;
-    const y2 = trebleLayout.height + bassLayout.jianpuBottom + pad;
+    const y1 = showStaff
+      ? (trebleLayout.staffTop - tTop) - pad
+      : (trebleLayout.jianpuTop - tTop) - pad;   // 简谱模式:tTop=jianpuTop-jpPad,故 jianpuTop-tTop = jpPad
+    const y2 = tVisH + (bBot - bTop) + pad;
     const topPct = offsetY + y1 / totalHeight * svgHPct;
     const heightPct = (y2 - y1) / totalHeight * svgHPct;
     if (!this.previewPlayheadEl || !phl.contains(this.previewPlayheadEl)) {

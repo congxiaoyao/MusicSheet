@@ -65,8 +65,12 @@ export function buildGrandSVG(
   const width = Math.max(trebleLayout.width, bassLayout.width);
   const visTop = (lay: Layout) => showStaff ? lay.viewBoxYOffset : lay.jianpuTop;
   const visBottom = (lay: Layout) => showStaff ? (showJianpu ? lay.height : lay.jianpuTop) : lay.jianpuBottom;
-  const tTop = visTop(trebleLayout), tBot = visBottom(trebleLayout);
-  const bTop = visTop(bassLayout), bBot = visBottom(bassLayout);
+  // 简谱模式上下加留白(简谱内容太贴近边缘)
+  const jpPad = showStaff && showJianpu ? 0 : (!showStaff ? 16 : 0);
+  const tTop = visTop(trebleLayout) - jpPad;
+  const tBot = visBottom(trebleLayout);
+  const bTop = visTop(bassLayout) - jpPad;
+  const bBot = visBottom(bassLayout) + jpPad;
   const tVisH = tBot - tTop;
   const bVisH = bBot - bTop;
   const totalHeight = tVisH + bVisH;
