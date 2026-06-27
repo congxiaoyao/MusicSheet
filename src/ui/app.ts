@@ -72,6 +72,7 @@ export class App {
   /** 新音淡入动画的 rAF id(JS 逐帧 opacity,避免 CSS transition 与 heightTick rAF 交错失效)。 */
   private noteAnimFrame: number | null = null;
   private statusEl!: HTMLElement;
+  private statusTextEl!: HTMLElement;
   private stageWrap!: HTMLElement;
   private bpm = 100;
   private playingIndex = -1;
@@ -143,27 +144,6 @@ export class App {
       <p class="hint">点击五线谱放音 → 下方实时显示简谱 · 类似短信验证码：只能往右追加，退格删除最后一个</p>`;
     this.root.appendChild(header);
 
-    // hint 行右侧:hover 试听音效开关(默认关)
-    const hintRow = document.createElement('div');
-    hintRow.className = 'hint-row';
-    hintRow.appendChild(spacer());
-    const hoverSoundBtn = document.createElement('button');
-    hoverSoundBtn.className = 'btn btn-ghost hover-sound-toggle';
-    hoverSoundBtn.type = 'button';
-    hoverSoundBtn.title = '开关:hover 时试听音效';
-    const updateHoverBtn = () => {
-      hoverSoundBtn.textContent = (this.hoverSound ? '🔊' : '🔇') + ' 悬停试听';
-      hoverSoundBtn.classList.toggle('active', this.hoverSound);
-    };
-    updateHoverBtn();
-    hoverSoundBtn.onclick = () => {
-      this.hoverSound = !this.hoverSound;
-      localStorage.setItem('hoverSound', this.hoverSound ? '1' : '0');
-      updateHoverBtn();
-    };
-    hintRow.appendChild(hoverSoundBtn);
-    this.root.appendChild(hintRow);
-
     this.toolbar = buildToolbar(this.tool, {
       onChange: () => this.onToolChange(),
       onRest: () => this.appendRest(),
@@ -176,6 +156,28 @@ export class App {
     this.stageWrap.className = 'stage';
     this.statusEl = document.createElement('div');
     this.statusEl.className = 'status';
+    // status 行内左侧:hover 试听音效开关(无文案,图标用 speaker SVG)
+    const hoverSoundBtn = document.createElement('button');
+    hoverSoundBtn.className = 'hover-sound-toggle';
+    hoverSoundBtn.type = 'button';
+    hoverSoundBtn.title = '悬停时试听音效';
+    const speakerOn = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>';
+    const speakerOff = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>';
+    const updateHoverBtn = () => {
+      hoverSoundBtn.innerHTML = this.hoverSound ? speakerOn : speakerOff;
+      hoverSoundBtn.classList.toggle('active', this.hoverSound);
+    };
+    updateHoverBtn();
+    hoverSoundBtn.onclick = () => {
+      this.hoverSound = !this.hoverSound;
+      localStorage.setItem('hoverSound', this.hoverSound ? '1' : '0');
+      updateHoverBtn();
+    };
+    this.statusEl.appendChild(hoverSoundBtn);
+    const statusText = document.createElement('span');
+    statusText.className = 'status-text';
+    this.statusEl.appendChild(statusText);
+    this.statusTextEl = statusText;
     this.stageWrap.appendChild(this.statusEl);
     this.root.appendChild(this.stageWrap);
 
@@ -216,10 +218,15 @@ export class App {
     this.activeCard = null;
     // 清旧预览卡
     if (this.previewHost) { this.previewHost.remove(); this.previewHost = null; this.previewPlayheadEl = null; }
-    // 预览模式:单独的只读双谱表卡
+    // 预览模式:radio 在卡片上方(不压谱子)+ 只读双谱表卡
     if (this.viewMode === 'preview') {
       this.previewHost = this.createPreviewHost();
       this.previewHost.classList.add('mode-enter');
+      // radio 放卡片上方(独立元素,不叠在 SVG 上)
+      const radioBar = document.createElement('div');
+      radioBar.className = 'preview-bar';
+      radioBar.appendChild(this.makePreviewRadio());
+      this.stageWrap.insertBefore(radioBar, this.statusEl);
       this.stageWrap.insertBefore(this.previewHost, this.statusEl);
       this.bindPreviewHost();
       setTimeout(() => this.previewHost?.classList.remove('mode-enter'), 130);
@@ -309,12 +316,11 @@ export class App {
       svgEl.setAttribute('height', String(height));
       svgEl.setAttribute('preserveAspectRatio', 'none');
     }
-    // 重挂播放头层 + 预览 radio(innerHTML 替换会清掉它们)
+    // 重挂播放头层(radio 已在卡片上方独立元素,不受 innerHTML 影响)
     const phl = document.createElement('div');
     phl.className = 'playhead-layer';
     phl.style.display = this.playState !== 'stopped' ? '' : 'none';
     this.previewHost.appendChild(phl);
-    this.previewHost.appendChild(this.makePreviewRadio());
     this.previewPlayheadEl = null;
     this.updatePreviewPlayhead(trebleLayout, bassLayout, height);
   }
@@ -1234,7 +1240,7 @@ export class App {
 
   private flashTimer: number | undefined;
   private flash(msg: string): void {
-    this.statusEl.textContent = msg;
+    this.statusTextEl.textContent = msg;
     this.statusEl.classList.add('show', 'flash');
     window.clearTimeout(this.flashTimer);
     this.flashTimer = window.setTimeout(() => { this.statusEl.classList.remove('show', 'flash'); this.render(); }, 1600);
@@ -1248,7 +1254,7 @@ export class App {
       const total = this.piece.treble.length + this.piece.bass.length;
       const rem = remainingBeats(this.piece);
       const pct = Math.round((totalBeats(this.piece) / capacityBeats(this.piece)) * 100);
-      this.statusEl.textContent = total + ' \u4e2a\u97f3\u7b26 \u00b7 \u5df2\u7528 ' + pct + '% \u00b7 \u9884\u89c8\u6a21\u5f0f';
+      this.statusTextEl.textContent = total + ' \u4e2a\u97f3\u7b26 \u00b7 \u5df2\u7528 ' + pct + '% \u00b7 \u9884\u89c8\u6a21\u5f0f';
       (this.toolbar as any)._refreshCapacity?.(remainingBeatsInCurrentBar(this.piece), rem);
       this.refreshCard();
       return;
@@ -1263,7 +1269,7 @@ export class App {
     const total = this.piece.treble.length + this.piece.bass.length;
     const rem = remainingBeats(this.piece);
     const pct = Math.round((totalBeats(this.piece) / capacityBeats(this.piece)) * 100);
-    this.statusEl.textContent = total + ' \u4e2a\u97f3\u7b26 \u00b7 \u5df2\u7528 ' + pct + '% \u00b7 \u8fd8\u80fd\u518d\u5199\u7ea6 ' + rem.toFixed(1) + ' \u62cd';
+    this.statusTextEl.textContent = total + ' \u4e2a\u97f3\u7b26 \u00b7 \u5df2\u7528 ' + pct + '% \u00b7 \u8fd8\u80fd\u518d\u5199\u7ea6 ' + rem.toFixed(1) + ' \u62cd';
     (this.toolbar as any)._refreshCapacity?.(remainingBeatsInCurrentBar(this.piece), rem);
     this.refreshCard();
     this.updatePlayheadAndHighlight();

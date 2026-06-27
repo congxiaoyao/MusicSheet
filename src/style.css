@@ -332,10 +332,13 @@ html, body {
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 0.55; transform: translateY(0); }
 }
+/* 预览模式 radio 工具条(卡片上方,不压谱子) */
+.preview-bar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 4px;
+}
 .preview-radio {
-  position: absolute;
-  top: 6px; right: 8px;
-  z-index: 10;
   display: flex;
   gap: 2px;
   background: var(--bg);
@@ -373,11 +376,30 @@ html, body {
   margin-top: 12px;
   font-size: 12.5px;
   color: var(--muted);
-  text-align: right;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   min-height: 16px;
   font-variant-numeric: tabular-nums;
   transition: color 0.2s;
 }
+.status-text { flex: 1; text-align: right; }
+/* hover 试听音效开关(无文案,纯图标) */
+.hover-sound-toggle {
+  background: none;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  width: 28px; height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--muted);
+  flex-shrink: 0;
+  transition: all 0.15s;
+}
+.hover-sound-toggle:hover { border-color: var(--accent); color: var(--accent); }
+.hover-sound-toggle.active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
 .status.show { color: var(--accent); font-weight: 600; }
 .status.flash { animation: flashPulse 1.6s ease; }
 @keyframes flashPulse { 0% { opacity: 1; } 70% { opacity: 1; } 100% { opacity: 0.6; } }
