@@ -96,10 +96,15 @@ function whiteKeyOffset(baseWhiteMidi: number, n: number): number {
 }
 
 /** 以中央 C(60) 为中心、向两侧对称扩展白键，直到覆盖乐谱音域。
- *  最低保底范围 C3(48) ~ C5(84)：无论乐谱音域多窄，至少覆盖这两个八度。 */
+ *  最低保底范围 C3(48) ~ C5(84)：无论乐谱音域多窄，至少覆盖这两个八度。
+ *  双谱表模式:同时考虑 treble+bass 两组音符算音域。 */
 function whiteKeyRange(piece: Piece): number[] {
-  const midis = piece.notes.map(n => n.midi).filter((m): m is number => m !== null);
-  // C3 / C5 距 C4 的白键跨度（各 7 个白键）
+  // 合并活跃组 + 两组的所有 midi(预览/双卡模式覆盖高低音全部音符)
+  const midis = [
+    ...piece.notes.map(n => n.midi),
+    ...piece.treble.map(n => n.midi),
+    ...piece.bass.map(n => n.midi),
+  ].filter((m): m is number => m !== null);
   const MIN_WING = 7;
   let needAbove = MIN_WING, needBelow = MIN_WING;
   if (midis.length) {
@@ -359,8 +364,8 @@ export function buildPlaybackCard(
     });
     box.appendChild(kb);
     keyboardKb = kb;
-    // 签名:音域 + show 设置,变化才重建
-    keyboardSig = `${whites.length}|${v.show.octave ? 1 : 0}${v.show.name ? 1 : 0}${v.show.solfege ? 1 : 0}|${v.piece.clef}`;
+    // 签名:音域 + show 设置 + 两组音符数(双谱表新增 bass 音符要重建),变化才重建
+    keyboardSig = `${whites.length}|${v.show.octave ? 1 : 0}${v.show.name ? 1 : 0}${v.show.solfege ? 1 : 0}|${v.piece.clef}|${v.piece.treble.length},${v.piece.bass.length}`;
     return box;
   }
 
@@ -403,7 +408,7 @@ export function buildPlaybackCard(
   function maybeRebuildKeyboard(): void {
     const v = getView();
     const whites = whiteKeyRange(v.piece);
-    const sig = `${whites.length}|${v.show.octave ? 1 : 0}${v.show.name ? 1 : 0}${v.show.solfege ? 1 : 0}|${v.piece.clef}`;
+    const sig = `${whites.length}|${v.show.octave ? 1 : 0}${v.show.name ? 1 : 0}${v.show.solfege ? 1 : 0}|${v.piece.clef}|${v.piece.treble.length},${v.piece.bass.length}`;
     if (sig !== keyboardSig) {
       const newBox = buildKeyboard();
       keyboardBox.replaceWith(newBox);
