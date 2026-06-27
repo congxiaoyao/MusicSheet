@@ -95,8 +95,6 @@ export class App {
   private previewLayout: ReturnType<typeof computeLayout> | null = null;
   /** 预览模式 bass 布局(吸附 seek / 播放头跟随 bass 音用)。renderPreview 时同步刷新。 */
   private previewBassLayout: ReturnType<typeof computeLayout> | null = null;
-  /** 预览模式双谱表总高(buildGrandSVG 返回值)。onTick 更新播放头时复用,避免每帧重建 SVG。 */
-  private previewTotalHeight = 0;
 
   constructor(root: HTMLElement) {
     this.root = root;
@@ -226,7 +224,7 @@ export class App {
     this.cards = [];
     this.activeCard = null;
     // 清旧预览卡 + 预览 radio 工具条(防反复切模式堆积)
-    if (this.previewHost) { this.previewHost.remove(); this.previewHost = null; this.previewPlayheadEl = null; this.previewLayout = null; this.previewBassLayout = null; this.previewTotalHeight = 0; }
+    if (this.previewHost) { this.previewHost.remove(); this.previewHost = null; this.previewPlayheadEl = null; this.previewLayout = null; this.previewBassLayout = null; }
     this.stageWrap.querySelectorAll('.preview-bar').forEach(el => el.remove());
     // 预览模式:radio 在卡片上方(不压谱子)+ 只读双谱表卡
     if (this.viewMode === 'preview') {
@@ -345,7 +343,6 @@ export class App {
     });
     this.previewLayout = trebleLayout;   // 存布局供 seek/playhead 换算
     this.previewBassLayout = bassLayout; // bass 布局供吸附 seek / 播放头跟随 bass 音
-    this.previewTotalHeight = height;    // 双谱表总高(供 onTick 更新播放头复用,避免重建 SVG)
     this.previewHost.innerHTML = svg;
     this.previewHost.style.height = (height + 16) + 'px';   // 容器高度容纳双谱表(含 padding)
     const svgEl = this.previewHost.querySelector('svg');
@@ -360,7 +357,7 @@ export class App {
     phl.className = 'playhead-layer';
     this.previewHost.appendChild(phl);
     this.previewPlayheadEl = null;
-    this.updatePreviewPlayhead(trebleLayout, bassLayout, height);
+    this.updatePreviewPlayhead(trebleLayout, bassLayout);
   }
 
   /** 构造预览 radio(五线谱/简谱/两者)。每次 renderPreview 后重挂(innerHTML 清掉)。 */
@@ -381,19 +378,32 @@ export class App {
     return radio;
   }
 
-  /** 更新预览卡播放头:恒定宽度 + beat 线性定位(不依赖音符 idx,两组长度不同也正确,
-   *  因 beat 是全局时间轴且两组小节线 x 对齐)。高度覆盖双谱表(staffTop→bass底)。
+  /** 用 layout 几何(而非 player.schedule)解析"beat 当前落在哪组哪个音"。
+   *  返回该音在 noteX 数组中的 idx;返回 -1 表示 beat 超出该组音符范围。
+   *  之所以不用 player.noteIndexAtBeatStaff:它在停止态 schedule 为空时恒返回 -1,
+   *  导致停止态 seek 后播放头走错误的线性兜底(问题1/4根因)。layout.noteX + noteStartBeats
+   *  只要谱面有音就有效,停止态/播放态一致,且与点击吸附用同一套几何基准。 */
+  private noteIndexAtBeatLayout(beat: number, noteX: number[], starts: number[]): number {
+    if (noteX.length === 0 || starts.length === 0) return -1;
+    // 找最后一个 startBeat <= beat 的音(beat 落在该音的 [start_i, start_{i+1}) 区间内,
+    // 即该音正在发声)。末音之后(starts[last] 之后)也算该音在响(保持末音指示)。
+    let idx = -1;
+    for (let i = 0; i < starts.length; i++) {
+      if (starts[i] <= beat + 1e-9) idx = i; else break;
+    }
+    return idx;
+  }
+
+  /** 更新预览卡播放头:横向跟随当前发声音符(noteX),纵向顶满预览区(preview-host)上下两端。
    *  停止态也显示(seek 定位用):停在 currentBeat 处,不随时间移动(tickLoop 不跑)。 */
   private updatePreviewPlayhead(
     trebleLayout: ReturnType<typeof computeLayout>,
     bassLayout: ReturnType<typeof computeLayout>,
-    totalHeight: number,
   ): void {
     if (!this.previewHost) return;
     const phl = this.previewHost.querySelector('.playhead-layer') as HTMLElement | null;
     if (!phl) return;
     phl.style.display = '';   // 停止态也显示(seek 定位指示)
-    const beats = this.player.getTotalBeats() || 1;
     const svg = this.previewHost.querySelector('svg');
     if (!svg) return;
     // 横向:用 getBoundingClientRect(SVG 宽不受高度 transition 影响,实时准)
@@ -401,54 +411,34 @@ export class App {
     const svgRect = svg.getBoundingClientRect();
     const offsetX = ((svgRect.left - hostRect.left) / hostRect.width) * 100;
     const svgWPct = (svgRect.width / hostRect.width) * 100;
-    // 纵向:不用 getBoundingClientRect(previewHost 有 height transition,切换瞬间测量到动画中
-    // 的旧高度导致播放头位置错乱)。改用 totalHeight(layout 值,即时正确)算比例。
-    // previewHost padding=8px 4px,SVG absolute top:0 贴 padding box 顶。
-    const padTop = 8;
-    const hostContentH = totalHeight + 16;   // 与 renderPreview 设的 style.height 一致
-    const offsetY = (padTop / hostContentH) * 100;
-    const svgHPct = (totalHeight / hostContentH) * 100;
-    // 横向定位:用 noteX[idx] 精确对齐当前发声的音符(与点击吸附同基准)。
-    // 两组小节线 x 对齐,任一组 noteX 都对应同一全局 beat 位置。跟随规则:
-    //   - 两组都在响 → 用 treble noteX(等价于 bass,两组同 beat 同 x)
-    //   - 仅 bass 在响(treble 已播完/间隙)→ 用 bass noteX,避免停在 treble 旧位
+    // 横向定位:用 layout.noteX + noteStartBeats 自行解析 beat 落在哪组哪个音(不依赖
+    // player.schedule,停止态也正确)。两组小节线 x 对齐,任一组 noteX 都对应同一全局 beat。
+    //   - 任一组有音在响 → 用该组 noteX[idx](两组都在响取 treble,几何等价)
     //   - 两组都无音(空白区)→ beat 线性兜底
-    const tIdx = this.player.noteIndexAtBeatStaff(this.currentBeat, 'treble');
-    const bIdx = this.player.noteIndexAtBeatStaff(this.currentBeat, 'bass');
+    const trebleStarts = noteStartBeats({ ...this.piece, notes: this.piece.treble });
+    const bassStarts = noteStartBeats({ ...this.piece, notes: this.piece.bass });
+    const tIdx = this.noteIndexAtBeatLayout(this.currentBeat, trebleLayout.noteX, trebleStarts);
+    const bIdx = this.noteIndexAtBeatLayout(this.currentBeat, bassLayout.noteX, bassStarts);
     const w = 24;
     const widthPct = w / trebleLayout.width * svgWPct;
     let x0: number;
-    if (tIdx >= 0 && trebleLayout.noteX.length > tIdx) {
+    if (tIdx >= 0) {
       x0 = trebleLayout.noteX[tIdx];
-    } else if (bIdx >= 0 && bassLayout.noteX.length > bIdx) {
+    } else if (bIdx >= 0) {
       x0 = bassLayout.noteX[bIdx];
     } else {
-      // 两组都无音(空白区):按 beat 线性兜底(beats=0 时 ratio=0,落在 contentLeft)
-      const ratio = beats > 0 ? Math.max(0, Math.min(1, this.currentBeat / beats)) : 0;
+      // 两组都无音(空白区/谱面前后):按 beat 线性铺到谱面内容区。beats 用两组实际拍数 max,
+      // 避免停止态 totalBeats=0 导致 ratio 异常。
+      const beats = Math.max(totalBeatsBoth(this.piece), this.player.getTotalBeats()) || 1;
+      const ratio = Math.max(0, Math.min(1, this.currentBeat / beats));
       x0 = trebleLayout.contentLeft + ratio * trebleLayout.contentWidth;
     }
     const leftPct = offsetX + (x0 - w / 2) / trebleLayout.width * svgWPct;
-    // 高度:必须与 buildGrandSVG 的 visTop/visBottom 逻辑一致(用变换后的坐标系)。
-    // buildGrandSVG 对 treble 组 translate(-tTop),bass 组 translate(tVisH - bTop)。
-    // 故变换后:treble staffTop 在 (staffTop - tTop) 处;bass jianpuBottom 在 (tVisH + (jianpuBottom - bBot)) 处。
-    const showStaff = this.previewMode !== 'jianpu';
-    const showJianpu = this.previewMode !== 'staff';
-    const jpPad = showStaff && showJianpu ? 0 : (!showStaff ? 28 : 0);
-    const tTop = (showStaff ? trebleLayout.viewBoxYOffset : trebleLayout.jianpuTop) - jpPad;
-    const tBot = showStaff ? (showJianpu ? trebleLayout.height : trebleLayout.jianpuTop) : trebleLayout.jianpuBottom;
-    const tVisH = tBot - tTop;
-    const bTop = (showStaff ? bassLayout.viewBoxYOffset : bassLayout.jianpuTop) - jpPad;
-    const bBot = (showStaff ? (showJianpu ? bassLayout.height : bassLayout.jianpuTop) : bassLayout.jianpuBottom) + jpPad;
-    // 变换后坐标系里的播放头覆盖范围。
-    // 简谱模式:五线谱不可见,y1 用简谱区顶(jianpuTop 变换后 = jpPad);
-    // 五线谱/两者模式:y1 用五线谱 staffTop 变换后位置。
-    const pad = 6;
-    const y1 = showStaff
-      ? (trebleLayout.staffTop - tTop) - pad
-      : (trebleLayout.jianpuTop - tTop) - pad;   // 简谱模式:tTop=jianpuTop-jpPad,故 jianpuTop-tTop = jpPad
-    const y2 = tVisH + (bBot - bTop) + pad;
-    const topPct = offsetY + y1 / totalHeight * svgHPct;
-    const heightPct = (y2 - y1) / totalHeight * svgHPct;
+    // 高度:播放头顶到预览卡(preview-host,淡灰色背景区)上下两端。playhead-layer 用 inset:0
+    // 覆盖 host padding box,故 top:0/height:100% 即覆盖整个淡灰色可见区。这样播放头在
+    // 五线谱/简谱/两者 各模式下都贯通整个预览区,视觉醒目且无需随 mode 重算 y 范围。
+    const topPct = 0;
+    const heightPct = 100;
     if (!this.previewPlayheadEl || !phl.contains(this.previewPlayheadEl)) {
       this.previewPlayheadEl = document.createElement('div');
       this.previewPlayheadEl.className = 'pb-playhead';
@@ -1313,6 +1303,12 @@ export class App {
     // 预览模式:单独渲染双谱表预览卡,不走常规卡片流程
     if (this.viewMode === 'preview') {
       this.renderPreview();
+      // 刷新预览 radio 的 active 状态(radio 在 rebuildCards 时创建,onclick 只调 render
+      // 不重建 radio → 切换后 active 停留旧值。此处每次 render 同步一次 active class)。
+      this.stageWrap.querySelectorAll('.preview-bar .seg-btn').forEach((btn, i) => {
+        const modes = ['staff', 'jianpu', 'both'] as const;
+        btn.classList.toggle('active', modes[i] === this.previewMode);
+      });
       const total = this.piece.treble.length + this.piece.bass.length;
       const rem = remainingBeats(this.piece);
       const pct = Math.round((totalBeats(this.piece) / capacityBeats(this.piece)) * 100);
@@ -1635,13 +1631,18 @@ export class App {
     //   乐谱 SVG 由 render()/radio切换/编辑后 调 renderPreview() 重建;onTick 每帧只切
     //   class 与播放头 left/top/width/height %,避免每帧 innerHTML 全量重建双谱表(旧实现
     //   在此调 renderPreview(),播放中每帧重建 SVG → 卡顿/闪烁/播放头跳变)。
+    //   高亮/播放头横向定位统一用 layout.noteX + noteStartBeats 自行解析 beat→音 idx,
+    //   不依赖 player.schedule(停止态 schedule 为空会恒返回 -1,导致 seek 后高亮/播放头错乱)。
     if (this.viewMode === 'preview') {
-      if (this.previewHost && playing) {
+      if (this.previewHost) {
         // 清旧高亮
         this.previewHost.querySelectorAll('.note-elem.playing, .jp-elem.playing').forEach(el => el.classList.remove('playing'));
-        // treble 组高亮
-        const tIdx = this.player.noteIndexAtBeatStaff(this.currentBeat, 'treble');
-        const bIdx = this.player.noteIndexAtBeatStaff(this.currentBeat, 'bass');
+        // 用 layout 几何解析当前 beat 落在两组各哪个音(停止态/播放态一致)
+        const tLay = this.previewLayout, bLay = this.previewBassLayout;
+        const tStarts = noteStartBeats({ ...this.piece, notes: this.piece.treble });
+        const bStarts = noteStartBeats({ ...this.piece, notes: this.piece.bass });
+        const tIdx = tLay ? this.noteIndexAtBeatLayout(this.currentBeat, tLay.noteX, tStarts) : -1;
+        const bIdx = bLay ? this.noteIndexAtBeatLayout(this.currentBeat, bLay.noteX, bStarts) : -1;
         const tNotes = this.piece.treble;
         const bNotes = this.piece.bass;
         const hiTreble = new Set<number>();
@@ -1657,6 +1658,7 @@ export class App {
           else hiBass.add(bIdx);
         }
         // 预览卡内 .grand-treble 和 .grand-bass 两组各自的 [data-idx]
+        // (playing 或停止态 seek 都显示高亮,便于定位)
         this.previewHost.querySelectorAll<SVGElement>('.grand-treble [data-idx]').forEach(el => {
           if (hiTreble.has(parseInt(el.getAttribute('data-idx') || '-1', 10))) el.classList.add('playing');
         });
@@ -1664,9 +1666,9 @@ export class App {
           if (hiBass.has(parseInt(el.getAttribute('data-idx') || '-1', 10))) el.classList.add('playing');
         });
       }
-      // 更新播放头位置(用 renderPreview 缓存的 layout/height,不重建 SVG)
+      // 更新播放头位置(用 renderPreview 缓存的 layout,不重建 SVG)
       if (this.previewLayout && this.previewBassLayout) {
-        this.updatePreviewPlayhead(this.previewLayout, this.previewBassLayout, this.previewTotalHeight);
+        this.updatePreviewPlayhead(this.previewLayout, this.previewBassLayout);
       }
       return;
     }
