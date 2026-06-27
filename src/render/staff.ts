@@ -32,10 +32,11 @@ const W_STEM = 0.24;
 function stemWidth(ss: number): number {
   return Math.max(1.5, W_STEM * ss);
 }
-/** 符头墨迹半宽占 advance 的比例(像素实测 font-size=600:墨迹半宽88 / advance147.5)。
- *  noteheadBlack 是倾斜椭圆,墨迹比 advance 宽;用此比例算符干位置才能贴墨迹最外缘(切点),
- *  避免符头下半漏出符干。0.5(advance/2)偏窄会让符干内缩露出。 */
-const INK_HALF_W_RATIO = 0.597;
+/** 符头墨迹半宽 = advanceSS × 此比例 × ss。
+ *  像素实测(font-size=600, ss=150):墨迹半宽 88px = 0.587×ss。
+ *  advanceSS(noteheadBlack)=1.18,1.18×R=0.587 → R=0.497。
+ *  noteheadBlack 倾斜椭圆,墨迹半宽占 advance 的 0.497(≈advance/2,因 SMuFL advance 含字间距)。 */
+const INK_HALF_W_RATIO = 0.497;
 
 export interface RenderInput {
   piece: Piece;
@@ -816,13 +817,13 @@ function renderChordStems(piece: Piece, layout: Layout, beamIdx: Set<number>): {
     // 符干外缘对齐符头墨迹最外缘(与 computeStem/renderBeams 一致)
     const stemX = stemUp ? x + headHalfW - stemW : x - headHalfW;
     // 符干要贯穿所有符头:竖线覆盖整个和弦的垂直跨度。
-    // up: 底端=最低音符头(step最小,y最大)的切点,顶端=最高音符头 y - stemLen
+    // up: 底端=最低音符头(step最小,y最大)的右切点(偏上,headY-tangentOff),顶端=最高音 y - stemLen
     //      (顶端从最高音再往上延伸标准长度,竖线自然贯穿最低→最高→顶端)
-    // down: 顶端=最高音符头(step最大,y最小)的切点,底端=最低音符头 y + stemLen
+    // down: 顶端=最高音符头(step最大,y最小)的左切点(偏下,headY+tangentOff),底端=最低音 y + stemLen
     const maxY = stepToY(Math.min(...steps), layout);   // 最低音 y 最大(最靠下)
     const minY = stepToY(Math.max(...steps), layout);   // 最高音 y 最小(最靠上)
-    const stemTop = stemUp ? minY - stemLen : minY - tangentOff;
-    const stemBot = stemUp ? maxY + tangentOff : maxY + stemLen;
+    const stemTop = stemUp ? minY - stemLen : minY + tangentOff;
+    const stemBot = stemUp ? maxY - tangentOff : maxY + stemLen;
     svg += rect(stemX, stemTop, stemW, stemBot - stemTop, elemOpts);
 
     // flag:整组和弦共用一根(取首音时值,组内一致)
