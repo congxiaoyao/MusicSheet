@@ -30,6 +30,10 @@ const W_STEM = 0.24;
 function stemWidth(ss: number): number {
   return Math.max(1.5, W_STEM * ss);
 }
+/** 符头墨迹半宽占 advance 的比例(像素实测 font-size=600:墨迹半宽88 / advance147.5)。
+ *  noteheadBlack 是倾斜椭圆,墨迹比 advance 宽;用此比例算符干位置才能贴墨迹最外缘(切点),
+ *  避免符头下半漏出符干。0.5(advance/2)偏窄会让符干内缩露出。 */
+const INK_HALF_W_RATIO = 0.597;
 
 export interface RenderInput {
   piece: Piece;
@@ -288,8 +292,11 @@ function renderNote(note: Note, x: number, piece: Piece, layout: Layout, noteIdx
     }
   }
 
-  // 符头墨迹半宽（用 SMuFL advance 的一半）：noteheadBlack/Half ≈ 1.18ss
-  const headHalfW = (note.duration === 'whole' ? advanceSS('noteheadWhole') : advanceSS('noteheadBlack')) / 2 * ss;
+  // 符头墨迹半宽。noteheadBlack 是倾斜椭圆(\),墨迹比 advance 宽(实测半宽=0.597·advance,
+  // 不是 advance/2)。用墨迹半宽才能让符干边缘贴符头墨迹最外缘(切点),避免符头下半部分漏出符干。
+  // 像素验证(font-size=600): 墨迹半宽 88px vs advance半宽 73.7px, 比例 0.597。
+  const headAdvance = note.duration === 'whole' ? advanceSS('noteheadWhole') : advanceSS('noteheadBlack');
+  const headHalfW = headAdvance * INK_HALF_W_RATIO * ss;
 
   // 临时记号（符头左侧）— 临时记号不参与高亮(保持黑色)
   const accHalfW = (pitch.accidental === 'sharp' ? advanceSS('accidentalSharp')

@@ -263,8 +263,9 @@ html, body {
 .svg-host.inactive {
   opacity: 0.55;
 }
-/* 非激活卡:隐藏 SMS 输入框(next-slot 待输入指示器) */
-.svg-host.inactive .next-slot {
+/* 非激活卡 + 预览卡:隐藏 SMS 输入框(next-slot 待输入指示器) */
+.svg-host.inactive .next-slot,
+.svg-host.preview-host .next-slot {
   display: none;
 }
 .svg-host.dual:not(.inactive) {
@@ -277,45 +278,38 @@ html, body {
 }
 .svg-host .drag-handle {
   position: absolute;
-  left: 2px; top: 50%;
-  width: 10px; height: 36px;
-  transform: translateY(-50%);
+  left: 0; top: 0; bottom: 0;
+  width: 14px;
   cursor: grab;
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 3px;
   opacity: 0;
-  transition: opacity var(--anim-dur) var(--ease-out-cubic), background var(--anim-dur) var(--ease-out-cubic);
+  transition: opacity var(--anim-dur) var(--ease-out-cubic);
   z-index: 5;
-  border-radius: 5px;
-  background: var(--line-2);
+  border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+  background: linear-gradient(90deg, var(--accent-soft), transparent);
 }
 /* 仅当鼠标 hover 在拖拽条本身时才显现(不是整个卡片) */
 .svg-host .drag-handle:hover {
   opacity: 1;
-  background: var(--accent-soft);
 }
-/* 拖拽条:6 个圆点的握柄纹理(常见的可拖拽视觉) */
-.svg-host .drag-handle::before,
-.svg-host .drag-handle::after {
+.svg-host .drag-handle::before {
   content: '';
-  width: 4px; height: 4px;
-  border-radius: 50%;
-  background: var(--muted);
+  width: 3px; height: 28px;
+  background: var(--accent);
+  border-radius: 2px;
+  opacity: 0.5;
 }
-.svg-host .drag-handle::before { box-shadow: 0 -7px 0 var(--muted), 0 7px 0 var(--muted); }
 .svg-host .drag-handle:active {
   cursor: grabbing;
 }
 /* 拖拽中:被拖卡变半透明,目标卡高亮可放置区 */
 .svg-host.dragging {
-  opacity: 0.35;
+  opacity: 0.4;
 }
 .svg-host.drop-target {
   box-shadow: 0 0 0 3px var(--accent);
-  background: var(--accent-soft);
 }
 /* 预览模式宿主:双谱表只读卡,右上角 radio */
 .svg-host.preview-host {

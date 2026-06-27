@@ -88,6 +88,8 @@ export class App {
   /** 预览模式的 DOM 宿主(只读双谱表) */
   private previewHost: HTMLElement | null = null;
   private previewPlayheadEl: HTMLElement | null = null;
+  /** 预览模式 treble 布局(seek/playhead 坐标换算用,与常规卡片 layout 同款) */
+  private previewLayout: ReturnType<typeof computeLayout> | null = null;
 
   constructor(root: HTMLElement) {
     this.root = root;
@@ -224,27 +226,34 @@ export class App {
     return host;
   }
 
-  /** 绑定预览卡点击/拖动 → seek(把点击 x 转 beat)。 */
+  /** 绑定预览卡点击/拖动 → seek(点击跳转 + 拖动连续 seek)。 */
   private bindPreviewHost(): void {
     if (!this.previewHost) return;
-    this.previewHost.addEventListener('mousedown', (e: MouseEvent) => {
+    let dragging = false;
+    const onDown = (e: MouseEvent) => {
+      dragging = true;
       const beat = this.beatFromPreviewX(e.clientX);
       if (beat !== null) this.seek(beat);
-    });
+    };
+    const onMove = (e: MouseEvent) => {
+      if (!dragging) return;
+      const beat = this.beatFromPreviewX(e.clientX);
+      if (beat !== null) this.seek(beat);
+    };
+    const onUp = () => { dragging = false; };
+    this.previewHost.addEventListener('mousedown', onDown);
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
   }
 
-  /** 预览卡点击 x → beat(按 trebleLayout 的 barLines/noteX 换算)。 */
+  /** 预览卡点击 x → beat(用预览模式保存的 previewLayout 换算,与常规卡片同款坐标)。 */
   private beatFromPreviewX(clientX: number): number | null {
-    const lay = this.cards.length > 0 ? this.cards[0].layout : null;
+    const lay = this.previewLayout;
     if (!lay || !this.previewHost) return null;
     const svg = this.previewHost.querySelector('svg');
     if (!svg) return null;
     const rect = svg.getBoundingClientRect();
     const x = ((clientX - rect.left) / rect.width) * lay.width;
-    // x → beat:用 contentLeft..contentRight 映射到 0..capacityBeats
-    const bpb = lay.barLines.length > 1 ? (lay.barLines[1] - lay.barLines[0]) / (lay.width / lay.barLines.length) : 4;
-    void bpb;
-    // 简化:按 barLines 线性插值
     const beats = this.player.getTotalBeats() || 1;
     const ratio = Math.max(0, Math.min(1, (x - lay.contentLeft) / lay.contentWidth));
     return ratio * beats;
@@ -263,6 +272,7 @@ export class App {
     const { svg, height } = buildGrandSVG(treblePiece, bassPiece, trebleLayout, bassLayout, {
       previewMode: this.previewMode, playingTrebleIdx: playingT, playingBassIdx: playingB,
     });
+    this.previewLayout = trebleLayout;   // 存布局供 seek/playhead 换算
     this.previewHost.innerHTML = svg;
     this.previewHost.style.height = (height + 16) + 'px';   // 容器高度容纳双谱表(含 padding)
     const svgEl = this.previewHost.querySelector('svg');
@@ -278,7 +288,7 @@ export class App {
     this.previewHost.appendChild(phl);
     this.previewHost.appendChild(this.makePreviewRadio());
     this.previewPlayheadEl = null;
-    this.updatePreviewPlayhead(trebleLayout);
+    this.updatePreviewPlayhead(trebleLayout, bassLayout, height);
   }
 
   /** 构造预览 radio(五线谱/简谱/两者)。每次 renderPreview 后重挂(innerHTML 清掉)。 */
@@ -299,8 +309,13 @@ export class App {
     return radio;
   }
 
-  /** 更新预览卡播放头(覆盖双谱表范围,按 beat 定位 x)。 */
-  private updatePreviewPlayhead(trebleLayout: ReturnType<typeof computeLayout>): void {
+  /** 更新预览卡播放头:复用常规卡片的自适应高度逻辑(staffTop→双谱表底),
+   *  按 currentBeat 在 contentWidth 上的比例定位 x。与 updatePlayheadAndHighlight 同款 pb-playhead。 */
+  private updatePreviewPlayhead(
+    trebleLayout: ReturnType<typeof computeLayout>,
+    bassLayout: ReturnType<typeof computeLayout>,
+    totalHeight: number,
+  ): void {
     if (!this.previewHost) return;
     const phl = this.previewHost.querySelector('.playhead-layer') as HTMLElement | null;
     if (!phl) return;
@@ -313,10 +328,21 @@ export class App {
     const hostRect = this.previewHost.getBoundingClientRect();
     const svgRect = svg.getBoundingClientRect();
     const offsetX = ((svgRect.left - hostRect.left) / hostRect.width) * 100;
+    const offsetY = ((svgRect.top - hostRect.top) / hostRect.height) * 100;
     const svgWPct = (svgRect.width / hostRect.width) * 100;
-    const x = trebleLayout.contentLeft + ratio * trebleLayout.contentWidth;
-    const leftPct = offsetX + x / trebleLayout.width * svgWPct;
-    const widthPct = 3 / trebleLayout.width * svgWPct;   // 窄竖条
+    const svgHPct = (svgRect.height / hostRect.height) * 100;
+    // 当前音 x(trebleLayout 的 noteX),按 currentBeat 找 idx
+    const idx = this.player.noteIndexAtBeatStaff(this.currentBeat, 'treble');
+    const w = idx >= 0 ? (trebleLayout.noteSlotW[idx] || 24) : 24;
+    const x0 = idx >= 0 ? trebleLayout.noteX[idx] : (trebleLayout.contentLeft + ratio * trebleLayout.contentWidth);
+    // 高度:覆盖双谱表(treble staffTop → bass jianpuBottom),与常规卡片一致 pad 6
+    const pad = 6;
+    const y1 = trebleLayout.staffTop - pad;
+    const y2 = trebleLayout.height + bassLayout.jianpuBottom + pad;
+    const leftPct = offsetX + (x0 - w / 2) / trebleLayout.width * svgWPct;
+    const widthPct = w / trebleLayout.width * svgWPct;
+    const topPct = offsetY + y1 / totalHeight * svgHPct;
+    const heightPct = (y2 - y1) / totalHeight * svgHPct;
     if (!this.previewPlayheadEl || !phl.contains(this.previewPlayheadEl)) {
       this.previewPlayheadEl = document.createElement('div');
       this.previewPlayheadEl.className = 'pb-playhead';
@@ -324,9 +350,9 @@ export class App {
     }
     const el = this.previewPlayheadEl;
     el.style.left = leftPct.toFixed(2) + '%';
-    el.style.top = '0%';
+    el.style.top = topPct.toFixed(2) + '%';
     el.style.width = widthPct.toFixed(2) + '%';
-    el.style.height = '100%';
+    el.style.height = heightPct.toFixed(2) + '%';
   }
 
   /** 创建一个卡片(svgHost + playheadLayer + CardState)。pieceView = {..piece, clef, notes: 对应组}。 */
@@ -881,12 +907,13 @@ export class App {
         this.refreshCard();
       }
     }
-    // 切视图模式:重建卡片布局(单卡↔双卡↔预览)。数据(treble/bass 组)保留不清空。
+    // 先保存当前谱号的输入配置(必须在 rebuildCards 之前,否则切模式时 loadStaffConfig
+    // 读到的是旧配置),再重建卡片。数据(treble/bass 组)保留不清空。
+    if (this.activeCard) this.saveStaffConfig(this.activeCard.staff);
+    // 切视图模式:重建卡片布局(单卡↔双卡↔预览),重建时会 loadStaffConfig(新激活卡)
     if (oldViewMode !== this.viewMode) {
       this.rebuildCards();
     }
-    // 保存当前谱号的输入配置(duration/dotted/accidental/tuplet/chord)→ 该谱号独立保留
-    if (this.activeCard) this.saveStaffConfig(this.activeCard.staff);
     this.render();
   }
 
