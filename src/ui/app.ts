@@ -3,7 +3,7 @@
 
 import { Note, Piece, DurationValue } from '../core/types';
 import { KEYS, resolvePitch } from '../core/theory';
-import { createPiece, appendNote, popNote, remainingBeats, remainingBeatsInCurrentBar, capacityBeats, totalBeats, noteStartBeats } from '../core/model';
+import { createPiece, appendNote, popNote, remainingBeats, remainingBeatsInCurrentBar, capacityBeats, totalBeats, totalBeatsBoth, noteStartBeats } from '../core/model';
 import { computeLayout } from '../render/layout';
 import { buildSVG, exportPNG, buildGrandSVG } from '../render/export';
 import { ensureFontLoaded } from '../render/glyphs';
@@ -246,16 +246,16 @@ export class App {
     window.addEventListener('mouseup', onUp);
   }
 
-  /** 预览卡点击 x → beat(用预览模式保存的 previewLayout 换算,与常规卡片同款坐标)。 */
+  /** 预览卡点击 x → beat(线性映射到 svgHost 全宽,与播放头/进度条同基准)。 */
   private beatFromPreviewX(clientX: number): number | null {
     const lay = this.previewLayout;
     if (!lay || !this.previewHost) return null;
     const svg = this.previewHost.querySelector('svg');
     if (!svg) return null;
     const rect = svg.getBoundingClientRect();
-    const x = ((clientX - rect.left) / rect.width) * lay.width;
+    // 点击 x 相对 SVG 左边的比例 → beat(线性铺满 SVG 宽,与播放头 left% 同基准)
+    const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
     const beats = this.player.getTotalBeats() || 1;
-    const ratio = Math.max(0, Math.min(1, (x - lay.contentLeft) / lay.contentWidth));
     return ratio * beats;
   }
 
@@ -331,15 +331,17 @@ export class App {
     const offsetY = ((svgRect.top - hostRect.top) / hostRect.height) * 100;
     const svgWPct = (svgRect.width / hostRect.width) * 100;
     const svgHPct = (svgRect.height / hostRect.height) * 100;
-    // 恒宽:固定 24px(约一个音符槽宽),位置按 beat 线性映射到 contentWidth
+    // 恒宽:固定 24px(约一个音符槽宽)。
+    // 位置:按 beat 线性映射到 svgHost 全宽(0%→100%),与放音区进度条同基准(两者都从容器最左线性)。
+    // 不用 contentLeft(谱号偏移)否则与进度条不同步。
     const w = 24;
-    const x0 = trebleLayout.contentLeft + ratio * trebleLayout.contentWidth;
+    const widthPct = w / trebleLayout.width * svgWPct;
+    // left% = SVG偏移 + ratio * svgWPct(线性铺满 SVG 宽),减半宽居中
+    const leftPct = offsetX + ratio * svgWPct - widthPct / 2;
     // 高度:覆盖双谱表(treble staffTop → bass jianpuBottom),pad 6
     const pad = 6;
     const y1 = trebleLayout.staffTop - pad;
     const y2 = trebleLayout.height + bassLayout.jianpuBottom + pad;
-    const leftPct = offsetX + (x0 - w / 2) / trebleLayout.width * svgWPct;
-    const widthPct = w / trebleLayout.width * svgWPct;
     const topPct = offsetY + y1 / totalHeight * svgHPct;
     const heightPct = (y2 - y1) / totalHeight * svgHPct;
     if (!this.previewPlayheadEl || !phl.contains(this.previewPlayheadEl)) {
@@ -634,8 +636,8 @@ export class App {
     this.rebuildToolbar();
   }
 
-  /** 拖拽卡片:按住指示条 → 卡片转为跟随鼠标的拖动态(半透明+提升) →
-   *  鼠标越过另一卡中线时实时交换 DOM(主流条目拖拽:目标即时让位) → 松手结束。
+  /** 拖拽卡片:按住指示条 → 在原位留同高占位(防页面跳) + 卡片转 fixed 跟随鼠标 →
+   *  鼠标越过另一卡中线时实时交换 DOM(另一卡 transition 平滑让位) → 松手归位 + 动画。
    *  数据归属(treble/bass)不变,只换视觉排序。 */
   private startCardDrag(card: CardState, startY: number): void {
     if (this.cards.length < 2) return;
@@ -643,41 +645,54 @@ export class App {
     if (!other) return;
     const host = card.svgHost;
     const hostRect = host.getBoundingClientRect();
-    const grabOffsetY = startY - hostRect.top;   // 鼠标相对卡片顶的偏移(保持抓握点)
-    let lastMid = false;   // 上次是否已越过中线(防重复交换)
+    const grabOffsetY = startY - hostRect.top;
+    let lastMid = false;
+    // 1) 原位占位:同高透明占位,撑住原位置(防页面高度跳变)
+    const placeholder = document.createElement('div');
+    placeholder.style.height = hostRect.height + 'px';
+    placeholder.className = 'card-placeholder';
+    host.parentNode!.insertBefore(placeholder, host);
+    // 2) 卡片转 fixed 跟随(脱离流,占位顶替)
     host.classList.add('dragging');
-    // 提升层级 + 固定宽度跟随(脱离流用 fixed,保持原宽)
     host.style.position = 'fixed';
     host.style.width = hostRect.width + 'px';
     host.style.left = hostRect.left + 'px';
+    host.style.top = hostRect.top + 'px';
     host.style.zIndex = '50';
     host.style.pointerEvents = 'none';
+    // 另一卡加 transition,让交换时平滑滑动
+    other.svgHost.style.transition = 'transform var(--anim-dur) var(--ease-out-cubic)';
     const onMove = (ev: MouseEvent) => {
-      // 跟随鼠标(保持抓握点)
       host.style.top = (ev.clientY - grabOffsetY) + 'px';
-      // 越过另一卡中线 → 实时交换(让目标即时让位)
       const otherRect = other.svgHost.getBoundingClientRect();
       const otherMid = otherRect.top + otherRect.height / 2;
       const overMid = ev.clientY < otherMid;
       if (overMid !== lastMid) {
         lastMid = overMid;
         const stage = this.stageWrap;
-        const a = host, b = other.svgHost;
-        // 始终把拖动卡放到另一卡的"鼠标侧":鼠标在上半 → a 在 b 前;下半 → a 在 b 后
+        const a = placeholder, b = other.svgHost;
+        // 移动占位(拖动卡跟随占位),另一卡用 transition 平滑滑到新位置
         if (overMid) { stage.insertBefore(a, b); } else { stage.insertBefore(a, b.nextSibling); }
       }
     };
     const onUp = () => {
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
-      host.classList.remove('dragging');
+      // 卡片归位:去掉 fixed,放回占位位置,然后移除占位
       host.style.position = '';
       host.style.width = '';
       host.style.left = '';
       host.style.top = '';
       host.style.zIndex = '';
       host.style.pointerEvents = '';
+      host.classList.remove('dragging');
+      stageWrap_insertAfter(host, placeholder);
+      placeholder.remove();
+      other.svgHost.style.transition = '';
       this.render();
+    };
+    const stageWrap_insertAfter = (el: Node, ref: Node) => {
+      if (ref.parentNode) ref.parentNode.insertBefore(el, ref);
     };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
@@ -1111,14 +1126,14 @@ export class App {
 
   /** 构造给卡片的视图快照 */
   private playbackView(): PlaybackView {
-    // 用 totalBeats()(跳过和弦尾音),与 player 的 schedule 一致。
-    // 旧实现 reduce(durationBeats) 没跳尾音,含和弦的乐谱进度比例会偏大。
+    // totalBeats 统一用 totalBeatsBoth(两组 max),与 player.getTotalBeats() 一致,
+    // 确保放音区进度条与预览/卡片播放头、player 实际播放长度三者同步。
     return {
       piece: this.piece,
       playState: this.playState,
       bpm: this.bpm,
       currentBeat: this.playState === 'stopped' ? 0 : this.currentBeat,
-      totalBeats: totalBeats(this.piece),
+      totalBeats: totalBeatsBoth(this.piece),
       playingIndex: this.playingIndex,
       fingering: this.fingering,
       show: this.show,
