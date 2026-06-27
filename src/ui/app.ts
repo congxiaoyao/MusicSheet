@@ -325,7 +325,6 @@ export class App {
     if (!phl) return;
     phl.style.display = '';   // 停止态也显示(seek 定位指示)
     const beats = this.player.getTotalBeats() || 1;
-    const ratio = Math.max(0, Math.min(1, this.currentBeat / beats));
     const svg = this.previewHost.querySelector('svg');
     if (!svg) return;
     const hostRect = this.previewHost.getBoundingClientRect();
@@ -334,13 +333,23 @@ export class App {
     const offsetY = ((svgRect.top - hostRect.top) / hostRect.height) * 100;
     const svgWPct = (svgRect.width / hostRect.width) * 100;
     const svgHPct = (svgRect.height / hostRect.height) * 100;
-    // 恒宽:固定 24px(约一个音符槽宽)。
-    // 位置:按 beat 线性映射到 svgHost 全宽(0%→100%),与放音区进度条同基准(两者都从容器最左线性)。
-    // 不用 contentLeft(谱号偏移)否则与进度条不同步。
+    // 横向定位:跟常规卡片一样用 noteX[idx] 精确对齐当前音符(不是 beat 线性)。
+    // 两组小节线 x 对齐,故用任一组 noteX[idx] 都正确。优先 treble,无音则用 bass。
+    const tIdx = this.player.noteIndexAtBeatStaff(this.currentBeat, 'treble');
+    const bIdx = this.player.noteIndexAtBeatStaff(this.currentBeat, 'bass');
     const w = 24;
     const widthPct = w / trebleLayout.width * svgWPct;
-    // left% = SVG偏移 + ratio * svgWPct(线性铺满 SVG 宽),减半宽居中
-    const leftPct = offsetX + ratio * svgWPct - widthPct / 2;
+    let x0: number;
+    if (tIdx >= 0 && trebleLayout.noteX.length > tIdx) {
+      x0 = trebleLayout.noteX[tIdx];
+    } else if (bIdx >= 0 && bassLayout.noteX.length > bIdx) {
+      x0 = bassLayout.noteX[bIdx];
+    } else {
+      // 两组都无音(空白区):按 beat 线性兜底
+      const ratio = Math.max(0, Math.min(1, this.currentBeat / beats));
+      x0 = trebleLayout.contentLeft + ratio * trebleLayout.contentWidth;
+    }
+    const leftPct = offsetX + (x0 - w / 2) / trebleLayout.width * svgWPct;
     // 高度:覆盖双谱表(treble staffTop → bass jianpuBottom),pad 6
     const pad = 6;
     const y1 = trebleLayout.staffTop - pad;
@@ -349,7 +358,7 @@ export class App {
     const heightPct = (y2 - y1) / totalHeight * svgHPct;
     if (!this.previewPlayheadEl || !phl.contains(this.previewPlayheadEl)) {
       this.previewPlayheadEl = document.createElement('div');
-      this.previewPlayheadEl.className = 'pb-playhead preview-ph';
+      this.previewPlayheadEl.className = 'pb-playhead';
       phl.appendChild(this.previewPlayheadEl);
     }
     const el = this.previewPlayheadEl;
@@ -1138,8 +1147,11 @@ export class App {
 
   /** 构造给卡片的视图快照 */
   private playbackView(): PlaybackView {
-    // totalBeats 统一用 totalBeatsBoth(两组 max),与 player.getTotalBeats() 一致,
-    // 确保放音区进度条与预览/卡片播放头、player 实际播放长度三者同步。
+    // totalBeats 统一用 totalBeatsBoth(两组 max),与 player.getTotalBeats() 一致。
+    // playingIndexBass:bass 组当前播放索引(双卡模式两组同时高亮);单卡/活跃=bass 时 -1。
+    const playingIndexBass = (this.playState !== 'stopped' && this.viewMode === 'grand')
+      ? this.player.noteIndexAtBeatStaff(this.currentBeat, 'bass')
+      : -1;
     return {
       piece: this.piece,
       playState: this.playState,
@@ -1147,6 +1159,7 @@ export class App {
       currentBeat: this.playState === 'stopped' ? 0 : this.currentBeat,
       totalBeats: totalBeatsBoth(this.piece),
       playingIndex: this.playingIndex,
+      playingIndexBass,
       fingering: this.fingering,
       show: this.show,
     };
