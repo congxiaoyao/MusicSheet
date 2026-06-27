@@ -422,7 +422,14 @@ export class App {
     const w = 24;
     const widthPct = w / trebleLayout.width * svgWPct;
     let x0: number;
-    if (tIdx >= 0) {
+    if (tIdx >= 0 && bIdx >= 0) {
+      // 两组都在响:跟随 noteX 更靠右(进度更靠后)的那组音。两组小节线 x 对齐但各自音符
+      // 中心 x 可能不同,取更靠右者能让播放头跟随节奏更密/更靠后的那组,避免某一组只有
+      // 一个长音时播放头僵住(如 treble 1四分 + bass 2八分,应跟随 bass 在两八分间跳动)。
+      const tx = trebleLayout.noteX[tIdx];
+      const bx = bassLayout.noteX[bIdx];
+      x0 = Math.max(tx, bx);
+    } else if (tIdx >= 0) {
       x0 = trebleLayout.noteX[tIdx];
     } else if (bIdx >= 0) {
       x0 = bassLayout.noteX[bIdx];
