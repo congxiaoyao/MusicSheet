@@ -568,6 +568,11 @@ html, body {
   border-radius: 3px;
   pointer-events: none;
   will-change: left, width, top, height;
+  transition: left .18s ease, width .18s ease, top .18s ease, height .18s ease;
+}
+/* 预览模式播放头:去掉平移动画(按帧精确跳,不滞后音符) */
+.pb-playhead.preview-ph {
+  transition: none;
 }
 
 /* 符头/符干/符尾/附点高亮:运行时由 updateHighlight 切换 .playing class */

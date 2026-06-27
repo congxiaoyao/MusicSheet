@@ -349,7 +349,7 @@ export class App {
     const heightPct = (y2 - y1) / totalHeight * svgHPct;
     if (!this.previewPlayheadEl || !phl.contains(this.previewPlayheadEl)) {
       this.previewPlayheadEl = document.createElement('div');
-      this.previewPlayheadEl.className = 'pb-playhead';
+      this.previewPlayheadEl.className = 'pb-playhead preview-ph';
       phl.appendChild(this.previewPlayheadEl);
     }
     const el = this.previewPlayheadEl;
