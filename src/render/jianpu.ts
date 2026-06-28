@@ -263,9 +263,9 @@ export function renderJianpuSVG(input: RenderInput): string {
     s += path(`M ${x1.toFixed(1)} ${arcY.toFixed(1)} Q ${mx.toFixed(1)} ${my.toFixed(1)} ${x2.toFixed(1)} ${arcY.toFixed(1)}`, '#1f2430', 1.2);
   }
 
-  // 下一个待输入位置在简谱行的对应圆角矩形指示器（宽度随时值变化；写满不显示）
+  // 下一个待输入位置在简谱行的对应圆角矩形指示器(宽度与五线谱 nextSlot 一致:符头宽+左右padding)
   if (!layout.isFull) {
-    const slotW = Math.max(22, Math.min(layout.nextSlotW, layout.staffSpace * 4));
+    const slotW = layout.noteHeadHalf * 2;
     s += `<rect x="${(layout.nextSlotX - slotW / 2).toFixed(1)}" y="${(layout.jianpuTop + 8).toFixed(1)}" width="${slotW.toFixed(1)}" height="${(layout.jianpuBottom - layout.jianpuTop - 16).toFixed(1)}" fill="none" stroke="#1f2430" stroke-width="1.4" rx="5" class="next-slot"/>`;
   }
 

@@ -356,7 +356,8 @@ function renderNote(note: Note, x: number, piece: Piece, layout: Layout, noteIdx
  *  无填充，仅边框做呼吸动画（stroke-opacity 由 CSS 驱动）。 */
 function renderNextSlot(layout: Layout): string {
   if (layout.isFull) return '';
-  const w = Math.min(layout.nextSlotW, layout.staffSpace * 6);
+  // 框宽 = 2*noteHeadHalf(符头宽+左右padding),以 nextSlotX 为中心 → 框左沿落在拍位起点(小节线)。
+  const w = layout.noteHeadHalf * 2;
   const h = (layout.staffBottom - layout.staffTop) + layout.staffSpace;
   const x = layout.nextSlotX - w / 2;
   const y = layout.staffTop - layout.staffSpace / 2;

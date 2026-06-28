@@ -379,19 +379,22 @@ export class App {
   }
 
   /** 用 layout 几何(而非 player.schedule)解析"beat 当前落在哪组哪个音"。
-   *  返回该音在 noteX 数组中的 idx;返回 -1 表示 beat 超出该组音符范围。
-   *  之所以不用 player.noteIndexAtBeatStaff:它在停止态 schedule 为空时恒返回 -1,
-   *  导致停止态 seek 后播放头走错误的线性兜底(问题1/4根因)。layout.noteX + noteStartBeats
+   *  返回该音在 noteX 数组中的 idx;返回 -1 表示该 beat 不在该组任何音的实际发声区间内
+   *  (如该组较短,beat 已超过其末音的结束拍)。严格判断 [start, start+dur) 区间,使短组
+   *  播完后不被误判为"仍在响",从而播放头能继续跟随另一组(修复"播完短组播放头不动")。
+   *  之所以不用 player.noteIndexAtBeatStaff:停止态 schedule 为空时恒返回 -1,
+   *  导致停止态 seek 后播放头走错误的线性兜底。layout.noteX + noteStartBeats
    *  只要谱面有音就有效,停止态/播放态一致,且与点击吸附用同一套几何基准。 */
-  private noteIndexAtBeatLayout(beat: number, noteX: number[], starts: number[]): number {
+  private noteIndexAtBeatLayout(beat: number, noteX: number[], starts: number[], notes: Note[]): number {
     if (noteX.length === 0 || starts.length === 0) return -1;
-    // 找最后一个 startBeat <= beat 的音(beat 落在该音的 [start_i, start_{i+1}) 区间内,
-    // 即该音正在发声)。末音之后(starts[last] 之后)也算该音在响(保持末音指示)。
-    let idx = -1;
+    // 找最后一个 startBeat <= beat 的音,再确认 beat 仍在该音实际持续区间 [start, start+dur) 内。
+    // 和弦尾音 startBeat=首音 startBeat,dur 照算(尾音与首音同时响,区间重合无影响)。
     for (let i = 0; i < starts.length; i++) {
-      if (starts[i] <= beat + 1e-9) idx = i; else break;
+      if (starts[i] > beat + 1e-9) break;   // 后面的音起点已超过 beat,停止
+      const dur = durationBeats(notes[i]);
+      if (beat < starts[i] + dur - 1e-9) return i;   // beat 仍在该音发声区间内
     }
-    return idx;
+    return -1;   // beat 超过该组所有音的发声区间(短组已播完)
   }
 
   /** 更新预览卡播放头:横向跟随当前发声音符(noteX),纵向顶满预览区(preview-host)上下两端。
@@ -417,10 +420,10 @@ export class App {
     //   - 两组都无音(空白区)→ beat 线性兜底
     const trebleStarts = noteStartBeats({ ...this.piece, notes: this.piece.treble });
     const bassStarts = noteStartBeats({ ...this.piece, notes: this.piece.bass });
-    const tIdx = this.noteIndexAtBeatLayout(this.currentBeat, trebleLayout.noteX, trebleStarts);
-    const bIdx = this.noteIndexAtBeatLayout(this.currentBeat, bassLayout.noteX, bassStarts);
-    // 播放头固定窄宽(只盖符头,与主卡一致 staffSpace*1.4),不再覆盖整个时值 slot。
-    const w = trebleLayout.staffSpace * 1.4;
+    const tIdx = this.noteIndexAtBeatLayout(this.currentBeat, trebleLayout.noteX, trebleStarts, this.piece.treble);
+    const bIdx = this.noteIndexAtBeatLayout(this.currentBeat, bassLayout.noteX, bassStarts, this.piece.bass);
+    // 播放头宽 = 2*noteHeadHalf(符头宽+左右padding),与主卡/sms框一致,以 noteX 为中心盖住符头。
+    const w = trebleLayout.noteHeadHalf * 2;
     const widthPct = w / trebleLayout.width * svgWPct;
     let x0: number;
     if (tIdx >= 0 && bIdx >= 0) {
@@ -1649,12 +1652,12 @@ export class App {
         this.previewHost.querySelectorAll('.note-elem.playing, .jp-elem.playing').forEach(el => el.classList.remove('playing'));
         // 用 layout 几何解析当前 beat 落在两组各哪个音(停止态/播放态一致)
         const tLay = this.previewLayout, bLay = this.previewBassLayout;
-        const tStarts = noteStartBeats({ ...this.piece, notes: this.piece.treble });
-        const bStarts = noteStartBeats({ ...this.piece, notes: this.piece.bass });
-        const tIdx = tLay ? this.noteIndexAtBeatLayout(this.currentBeat, tLay.noteX, tStarts) : -1;
-        const bIdx = bLay ? this.noteIndexAtBeatLayout(this.currentBeat, bLay.noteX, bStarts) : -1;
         const tNotes = this.piece.treble;
         const bNotes = this.piece.bass;
+        const tStarts = noteStartBeats({ ...this.piece, notes: tNotes });
+        const bStarts = noteStartBeats({ ...this.piece, notes: bNotes });
+        const tIdx = tLay ? this.noteIndexAtBeatLayout(this.currentBeat, tLay.noteX, tStarts, tNotes) : -1;
+        const bIdx = bLay ? this.noteIndexAtBeatLayout(this.currentBeat, bLay.noteX, bStarts, bNotes) : -1;
         const hiTreble = new Set<number>();
         if (tIdx >= 0) {
           const cid = tNotes[tIdx]?.chordId;
@@ -1715,9 +1718,8 @@ export class App {
       }
       card.playheadLayer.style.display = '';
       const x0 = lay.noteX[idx];
-      // 播放头固定窄宽(只盖符头,不再用 noteSlotW 覆盖整个时值 slot)。
-      // 符头锚定拍位起点后,色块盖在符头上即可,时值长度由符干/连线体现。
-      const w = lay.staffSpace * 1.4;
+      // 播放头宽 = 2*noteHeadHalf(符头宽+左右padding),与 sms 待输入框一致,以 noteX 为中心盖住符头。
+      const w = lay.noteHeadHalf * 2;
       const hiliteIdxs: number[] = [idx];
       {
         const chordId = notes[idx].chordId;

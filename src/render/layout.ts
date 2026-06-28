@@ -48,6 +48,9 @@ export interface Layout {
   /** 下一个待输入位置：中心 x 与格子宽度 */
   nextSlotX: number;
   nextSlotW: number;
+  /** 符头中心相对拍位起点的偏移(= 符头几何半宽 + 小节内 padding)。
+   *  sms 待输入框宽 = 2*noteHeadHalf 时,框以 nextSlotX 为中心、左沿自动落在拍位起点(小节线)。 */
+  noteHeadHalf: number;
   /** 是否已写满（写满后不显示指示器） */
   isFull: boolean;
 
@@ -60,10 +63,13 @@ export interface Layout {
 // 故 FONT = 4 × SS = 92，使字形按标准比例渲染。
 const FONT = 46;   // 字号减半(原92):等比缩放五线谱,缓解16/32分音符横向拥挤
 const SS = FONT / 4;   // = 23，真实 staff space（线间距）
-// 符头几何半宽(用于"符头锚定拍位起点"排版:noteX = 拍位起点 + NOTE_HEAD_HALF)。
-// 用 advanceSS('noteheadBlack')/2 与 staff.ts 符头几何中心一致(非墨迹最外缘)。
-// 这样同 beat 起点的不同时值音(如四分+八分1)符头中心严格垂直对齐,演奏读谱一目了然。
-const NOTE_HEAD_HALF = advanceSS('noteheadBlack') / 2 * SS;
+// 小节内左留白:符头不贴小节线/拍位起点,留出舒适间距(传统乐谱式)。
+// 这个 padding 同时是 sms 待输入框的左右内边距 —— 框宽 = 符头宽 + 2*NOTE_PAD,
+// 框以 nextSlotX(=拍位起点+NOTE_HEAD_HALF)为中心居中,故框左沿自动落在拍位起点(小节线)。
+const NOTE_PAD = 0.5 * SS;
+// 符头中心相对拍位起点的偏移 = 符头几何半宽 + 小节内 padding。
+// noteX = 拍位起点 + NOTE_HEAD_HALF。同 beat 起点的不同时值音符头中心严格垂直对齐。
+const NOTE_HEAD_HALF = advanceSS('noteheadBlack') / 2 * SS + NOTE_PAD;
 const PAD_LEFT = 8;    // 五线谱横线/起始线的左边缘(顶格,仅极小留白防贴死)
 const PAD_RIGHT = 12;  // 随谱表等比缩小(原24)
 const STAFF_TOP = 75;    // 谱表顶端y:字号减半后需容纳朝上符干(stdLen=3.5ss≈40px)+梁厚度+clamp阈值,原58导致梁被裁顶
@@ -210,7 +216,7 @@ export function computeLayout(piece: Piece, containerWidth: number, currentDurat
     clefX, keyStartX, timeSigX, hasKey: keyCount > 0,
     barLines,
     noteX, noteSlotW,
-    nextSlotX, nextSlotW, isFull,
+    nextSlotX, nextSlotW, noteHeadHalf: NOTE_HEAD_HALF, isFull,
     jianpuTop: dynamicJianpuTop, jianpuBaseline: dynamicJianpuBaseline, jianpuBottom: dynamicJianpuBottom,
   };
 }
