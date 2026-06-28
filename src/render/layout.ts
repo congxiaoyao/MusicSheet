@@ -73,6 +73,10 @@ const NOTE_HEAD_HALF = advanceSS('noteheadBlack') / 2 * SS + NOTE_PAD;
 // 符头墨迹半宽(最外缘到中心的距离)。与 staff.ts 的 INK_HALF_W_RATIO(0.497) 一致,加少量冗余
 // 防字体渲染差异。用于 positionInBar 自适应偏移:保证符头右缘(noteX + NOTE_INK_HALF)不超小节线。
 const NOTE_INK_HALF = advanceSS('noteheadBlack') * 0.497 * SS + 1.5;
+// 终止线(最后小节右线)墨迹左缘相对其数学坐标 barLines[N] 的左偏移。
+// 终止线 = 粗线(在 barLines[N]) + 左侧 0.75ss 处细线;墨迹最左缘 = 左侧细线左缘
+// = barLines[N] - 0.75ss - 细线半宽(0.16ss/2)。用于 positionInBar 避免符头压终止线。
+const FINAL_BAR_INSET = (0.75 + 0.16 / 2) * SS;
 const PAD_LEFT = 8;    // 五线谱横线/起始线的左边缘(顶格,仅极小留白防贴死)
 const PAD_RIGHT = 12;  // 随谱表等比缩小(原24)
 const STAFF_TOP = 75;    // 谱表顶端y:字号减半后需容纳朝上符干(stdLen=3.5ss≈40px)+梁厚度+clamp阈值,原58导致梁被裁顶
@@ -244,13 +248,16 @@ function positionInBar(notes: Piece['notes'], startBeat: number, barIdx: number,
   // 改为锚定拍位起点+符头半宽,保证同 beat 起点的音符头对齐。
   const slotW = slotWidthFor(note.duration, bpb, barWidth);
   // 符头偏移:默认 NOTE_HEAD_HALF(拍位起点+符头半宽,同beat对齐+离开小节线)。
-  // 自适应:保证符头右缘(noteX + NOTE_INK_HALF)不超出本小节右线(下小节左线):
-  //   拍位起点 + beatInBar/bpb*barWidth + offset + NOTE_INK_HALF ≤ barLines[barIdx+1]
-  //   → offset ≤ barWidth*(1 - beatInBar/bpb) - NOTE_INK_HALF
-  // 短时值末音(如32分末音 beatInBar≈3.875)剩余空间小,offset 自动减小,符头右缘贴线不超。
+  // 自适应:保证符头右缘(noteX + NOTE_INK_HALF)不超出本小节右线墨迹:
+  //   普通小节线(细线):右线在 barLines[barIdx+1],墨迹左缘≈数学坐标(细线窄,可忽略)
+  //   终止线(最后小节右线):粗线+左侧0.75ss处细线,墨迹左缘 = barLines[N] - (0.75ss + 细线半宽)
+  //     故最后小节的右界要比数学坐标再左移 FINAL_BAR_INSET,避免符头压终止线左侧细线。
+  // offset ≤ (右界 - 拍位起点) - NOTE_INK_HALF
+  // 短时值末音剩余空间小,offset 自动减小,符头右缘贴线不超。
   // 正常音剩余空间充足,offset 取满 NOTE_HEAD_HALF,与同beat其他音对齐。
-  // 实测:仅最后1个32分音偏移减小(其余31个不变),视觉几乎无感。
-  const roomToBarEnd = barWidth * (1 - beatInBar / bpb) - NOTE_INK_HALF;
+  const isLastBar = barIdx >= barLines.length - 2;
+  const rightBound = barLines[barIdx + 1] - (isLastBar ? FINAL_BAR_INSET : 0);
+  const roomToBarEnd = (rightBound - barLines[barIdx]) * (1 - beatInBar / bpb) - NOTE_INK_HALF;
   const offset = Math.min(NOTE_HEAD_HALF, roomToBarEnd);
   const x = barLines[barIdx] + beatInBar / bpb * barWidth + offset;
   return { x, slotW };
