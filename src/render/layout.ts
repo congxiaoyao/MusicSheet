@@ -60,6 +60,10 @@ export interface Layout {
 // 故 FONT = 4 × SS = 92，使字形按标准比例渲染。
 const FONT = 46;   // 字号减半(原92):等比缩放五线谱,缓解16/32分音符横向拥挤
 const SS = FONT / 4;   // = 23，真实 staff space（线间距）
+// 符头几何半宽(用于"符头锚定拍位起点"排版:noteX = 拍位起点 + NOTE_HEAD_HALF)。
+// 用 advanceSS('noteheadBlack')/2 与 staff.ts 符头几何中心一致(非墨迹最外缘)。
+// 这样同 beat 起点的不同时值音(如四分+八分1)符头中心严格垂直对齐,演奏读谱一目了然。
+const NOTE_HEAD_HALF = advanceSS('noteheadBlack') / 2 * SS;
 const PAD_LEFT = 8;    // 五线谱横线/起始线的左边缘(顶格,仅极小留白防贴死)
 const PAD_RIGHT = 12;  // 随谱表等比缩小(原24)
 const STAFF_TOP = 75;    // 谱表顶端y:字号减半后需容纳朝上符干(stdLen=3.5ss≈40px)+梁厚度+clamp阈值,原58导致梁被裁顶
@@ -154,7 +158,8 @@ export function computeLayout(piece: Piece, containerWidth: number, currentDurat
     ? (chordAnchorBeat !== undefined && chordAnchorDuration ? chordAnchorDuration : currentDuration)
     : 'quarter';
   const nextSlotW = isFull ? 0 : slotWidthFor(nextDur, bpb, barWidth);
-  const nextSlotX = barLines[nextBarIdx] + nextBeatInBar / bpb * barWidth + nextSlotW / 2;
+  // 与 noteX 同基准(锚定拍位起点+符头半宽,非 slotW/2 居中):空谱时待输入位与首个音符头重合。
+  const nextSlotX = barLines[nextBarIdx] + nextBeatInBar / bpb * barWidth + NOTE_HEAD_HALF;
 
   const jianpuTop = staffBottom + JIANPU_GAP;
   const baseHeight = jianpuTop + JIANPU_HEIGHT + 20;
@@ -210,7 +215,10 @@ export function computeLayout(piece: Piece, containerWidth: number, currentDurat
   };
 }
 
-/** 把某个音符放进它所在的小节：按「时值占比」居中。
+/** 把某个音符放进它所在的小节：符头锚定「拍位起点 + 符头半宽」(传统乐谱式)。
+ *  noteX = 拍位起点(小节内) + NOTE_HEAD_HALF。这样同 beat 起点的不同时值音
+ *  (如 treble 四分 + bass 八分1)符头中心严格垂直对齐,演奏读谱一目了然。
+ *  slotW 仍按时值占比算(供播放头宽度/简谱临时记号偏移用),但不参与 noteX 计算。
  *  兜底：若音符的 beatInBar 超出小节容量(超拍数据)，clamp 到小节内，
  *  防止音符漂到下一小节视觉区/压小节线。可能和相邻音符挤一起，但至少在小节框内。 */
 function positionInBar(notes: Piece['notes'], startBeat: number, barIdx: number, barWidth: number, bpb: number, noteIdx: number, barLines: number[]): { x: number; slotW: number } {
@@ -219,10 +227,10 @@ function positionInBar(notes: Piece['notes'], startBeat: number, barIdx: number,
   // clamp beatInBar 到 [0, bpb - dur]：超拍时不让音符漂出当前小节
   const rawBeatInBar = startBeat - barIdx * bpb;
   const beatInBar = Math.min(Math.max(0, rawBeatInBar), Math.max(0, bpb - dur));
-  // slotW 用 slotWidthFor(与 nextSlot 一致,保证 noteX 与 nextSlotX 对齐):
-  // 短时值(32分)纯时值占比 slotW 过窄,需 SLOT_MIN 兜底,否则 noteX[0] ≠ 空谱 nextSlotX 导致符头偏移。
+  // slotW 用 slotWidthFor(保留供播放头宽度/简谱临时记号偏移用),但 noteX 不再用 slotW/2 居中,
+  // 改为锚定拍位起点+符头半宽,保证同 beat 起点的音符头对齐。
   const slotW = slotWidthFor(note.duration, bpb, barWidth);
-  const x = barLines[barIdx] + beatInBar / bpb * barWidth + slotW / 2;
+  const x = barLines[barIdx] + beatInBar / bpb * barWidth + NOTE_HEAD_HALF;
   return { x, slotW };
 }
 

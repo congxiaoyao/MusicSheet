@@ -419,7 +419,8 @@ export class App {
     const bassStarts = noteStartBeats({ ...this.piece, notes: this.piece.bass });
     const tIdx = this.noteIndexAtBeatLayout(this.currentBeat, trebleLayout.noteX, trebleStarts);
     const bIdx = this.noteIndexAtBeatLayout(this.currentBeat, bassLayout.noteX, bassStarts);
-    const w = 24;
+    // 播放头固定窄宽(只盖符头,与主卡一致 staffSpace*1.4),不再覆盖整个时值 slot。
+    const w = trebleLayout.staffSpace * 1.4;
     const widthPct = w / trebleLayout.width * svgWPct;
     let x0: number;
     if (tIdx >= 0 && bIdx >= 0) {
@@ -1714,7 +1715,9 @@ export class App {
       }
       card.playheadLayer.style.display = '';
       const x0 = lay.noteX[idx];
-      const w = lay.noteSlotW[idx] || 24;
+      // 播放头固定窄宽(只盖符头,不再用 noteSlotW 覆盖整个时值 slot)。
+      // 符头锚定拍位起点后,色块盖在符头上即可,时值长度由符干/连线体现。
+      const w = lay.staffSpace * 1.4;
       const hiliteIdxs: number[] = [idx];
       {
         const chordId = notes[idx].chordId;
