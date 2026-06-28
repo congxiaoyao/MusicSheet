@@ -279,7 +279,10 @@ export function buildPlaybackCard(
     const rect = trackEl.getBoundingClientRect();
     const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
     const v = getView();
-    return ratio * v.totalBeats;
+    // 与刻度/进度同基准:相对容量(measures*bpb)而非已输入拍数。这样点进度条任意位置都
+    // 对应到实际小节/拍位,且 seek 到的 beat 在播放时与刻度对齐。
+    const capacity = Math.max(1, v.piece.measureCount) * beatsPerBar(v.piece.time);
+    return ratio * capacity;
   }
   function bindSeek(track: HTMLElement): void {
     const onDown = (e: MouseEvent) => {
@@ -432,24 +435,29 @@ export function buildPlaybackCard(
     if (v.totalBeats <= 0) { fillEl.style.width = '0%'; thumbEl.style.left = '0%'; return; }
     const measures = Math.max(1, v.piece.measureCount);
     const bpb = beatsPerBar(v.piece.time);
+    // 刻度分母用「容量拍数」(measures*bpb)而非 totalBeats(已输入拍数)。
+    // 否则输入少时 totalBeats 很小,小节刻度 beat/totalBeats 会炸到几百%(如4/1=400%),
+    // left:400% 的元素撑开整个页面 → 输入第一个音后页面横向变宽(兼容性 bug)。
+    // 容量框架固定,刻度始终均匀铺满进度条。
+    const capacity = measures * bpb;
     // 小节刻度按实际拍位
     for (let m = 0; m <= measures; m++) {
       const beat = bpb * m;
-      if (beat > v.totalBeats + 1e-6 && m === measures) break;
-      const ratio = beat / v.totalBeats * 100;
+      if (beat > capacity + 1e-6) break;
+      const ratio = beat / capacity * 100;
       const tick = h('div', 'pb-tick'); tick.style.left = `${ratio}%`; trackEl.appendChild(tick);
       if (m < measures) {
         const lbl = h('div', 'pb-tick-label', String(m + 1));
-        lbl.style.left = `${(beat + bpb / 2) / v.totalBeats * 100}%`;
+        lbl.style.left = `${(beat + bpb / 2) / capacity * 100}%`;
         trackEl.appendChild(lbl);
       }
     }
-    // 音符点
+    // 音符点(相对容量定位:显示在它实际所属的小节/拍位,与刻度对齐)
     const starts = noteStartBeats(v.piece);
     starts.forEach((b, i) => {
       const dot = h('div', 'pb-note-dot');
       if (i <= v.playingIndex) dot.classList.add('played');
-      dot.style.left = `${b / v.totalBeats * 100}%`;
+      dot.style.left = `${b / capacity * 100}%`;
       trackEl.appendChild(dot);
     });
   }
@@ -457,8 +465,10 @@ export function buildPlaybackCard(
   /** 细粒度：只推进进度条 + 时间文字（rAF 高频回调用，不重渲染键盘/SVG） */
   function setProgress(beat: number): void {
     const v = getView();
-    const total = v.totalBeats;
-    const ratio = total > 0 ? Math.max(0, Math.min(1, beat / total)) : 0;
+    // 进度相对容量(measures*bpb),与刻度/音符点/seek 同基准。播放完内容时进度停在实际
+    // 内容末尾(未填满则不到100%),刻度始终铺满完整小节框架,二者对齐。
+    const total = Math.max(1, v.piece.measureCount) * beatsPerBar(v.piece.time);
+    const ratio = Math.max(0, Math.min(1, beat / total));
     fillEl.style.width = `${ratio * 100}%`;
     thumbEl.style.left = `${ratio * 100}%`;
     nowLabel.textContent = fmtTime(beat * 60 / v.bpm);
@@ -485,8 +495,9 @@ export function buildPlaybackCard(
     // bpm
     bpmInput.value = String(v.bpm);
     bpmVal.textContent = `${v.bpm} BPM`;
-    // 总时长
-    totalLabel.textContent = fmtTime(v.totalBeats * 60 / v.bpm);
+    // 总时长(用容量拍数,与进度/刻度同基准:完整小节框架的时长)
+    const cap = Math.max(1, v.piece.measureCount) * beatsPerBar(v.piece.time);
+    totalLabel.textContent = fmtTime(cap * 60 / v.bpm);
     // 进度
     setProgress(v.currentBeat);
     redrawTrackTicks();
