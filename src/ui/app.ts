@@ -1752,7 +1752,9 @@ export class App {
         const offsetY = ((svgRect.top - hostRect.top) / hostRect.height) * 100;
         const svgWPct = (svgRect.width / hostRect.width) * 100;
         const svgHPct = (svgRect.height / hostRect.height) * 100;
-        const leftPct = offsetX + (x0 - w / 2) / lay.width * svgWPct;
+        // 播放头左缘对齐符头左缘(noteX - NOTE_HEAD_HALF=拍位起点),向右延伸 slotW。
+        // 与符头/sms待输入框左对齐拍位起点一致,视觉统一(而非以noteX居中)。
+        const leftPct = offsetX + (x0 - lay.noteHeadHalf) / lay.width * svgWPct;
         const widthPct = w / lay.width * svgWPct;
         const topPct = offsetY + y1 / lay.height * svgHPct;
         const heightPct = (y2 - y1) / lay.height * svgHPct;
