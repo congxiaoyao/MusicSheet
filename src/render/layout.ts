@@ -128,7 +128,11 @@ export function computeLayout(piece: Piece, containerWidth: number, currentDurat
   const prefixW = CLEF_GAP + CLEF_W + keyW + keyToTime + TIMESIG_W;  // CLEF_GAP=谱号离起始线间距
 
   const contentLeft = PAD_LEFT + prefixW + GAP_AFTER_PREFIX;
-  const contentRight = width - PAD_RIGHT;
+  // contentRight 扣除终止线占的宽度:终止线=粗线(在barLines[N])+左侧0.75ss处细线,
+  // 左侧细线伸入内容区,会压到最后小节末尾的音符。把这块宽度从 contentRight 预留出去,
+  // contentWidth 缩小 → barWidth 缩小 → 所有音符(含最后小节)自动左移避开终止线区域。
+  // 这样 positionInBar 无需特判终止线,数学模型统一用 barWidth。
+  const contentRight = width - PAD_RIGHT - FINAL_BAR_INSET;
   const contentWidth = contentRight - contentLeft;
   const prefixRight = contentLeft - GAP_AFTER_PREFIX * 0.5;
   const bpb = beatsPerBar(piece.time);
@@ -248,16 +252,12 @@ function positionInBar(notes: Piece['notes'], startBeat: number, barIdx: number,
   // 改为锚定拍位起点+符头半宽,保证同 beat 起点的音符头对齐。
   const slotW = slotWidthFor(note.duration, bpb, barWidth);
   // 符头偏移:默认 NOTE_HEAD_HALF(拍位起点+符头半宽,同beat对齐+离开小节线)。
-  // 自适应:保证符头右缘(noteX + NOTE_INK_HALF)不超出本小节右线墨迹:
-  //   普通小节线(细线):右线在 barLines[barIdx+1],墨迹左缘≈数学坐标(细线窄,可忽略)
-  //   终止线(最后小节右线):粗线+左侧0.75ss处细线,墨迹左缘 = barLines[N] - (0.75ss + 细线半宽)
-  //     故最后小节的右界要比数学坐标再左移 FINAL_BAR_INSET,避免符头压终止线左侧细线。
-  // offset ≤ (右界 - 拍位起点) - NOTE_INK_HALF
-  // 短时值末音剩余空间小,offset 自动减小,符头右缘贴线不超。
-  // 正常音剩余空间充足,offset 取满 NOTE_HEAD_HALF,与同beat其他音对齐。
-  const isLastBar = barIdx >= barLines.length - 2;
-  const rightBound = barLines[barIdx + 1] - (isLastBar ? FINAL_BAR_INSET : 0);
-  const roomToBarEnd = (rightBound - barLines[barIdx]) * (1 - beatInBar / bpb) - NOTE_INK_HALF;
+  // 自适应:保证符头右缘(noteX + NOTE_INK_HALF)不超出本小节右线:
+  //   offset ≤ barWidth*(1 - beatInBar/bpb) - NOTE_INK_HALF
+  // 终止线占的宽度已在 computeLayout 的 contentRight 扣除(FINAL_BAR_INSET),故此处无需
+  // 特判终止线 —— barWidth 已不含终止线区域,音符自动避开。
+  // 短时值末音剩余空间小,offset 自动减小,符头右缘贴线不超。正常音取满 NOTE_HEAD_HALF。
+  const roomToBarEnd = barWidth * (1 - beatInBar / bpb) - NOTE_INK_HALF;
   const offset = Math.min(NOTE_HEAD_HALF, roomToBarEnd);
   const x = barLines[barIdx] + beatInBar / bpb * barWidth + offset;
   return { x, slotW };
