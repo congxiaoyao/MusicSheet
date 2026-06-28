@@ -1718,21 +1718,28 @@ export class App {
       }
       card.playheadLayer.style.display = '';
       const x0 = lay.noteX[idx];
-      // 播放头宽 = 2*noteHeadHalf(符头宽+左右padding),与 sms 待输入框一致,以 noteX 为中心盖住符头。
-      const w = lay.noteHeadHalf * 2;
+      // 播放头宽与时值相关:用 noteSlotW(四分宽、八分窄...),回退 2*noteHeadHalf。
+      // 盖住整个时值 slot,直观体现音符持续长度。
+      const w = lay.noteSlotW[idx] || lay.noteHeadHalf * 2;
       const hiliteIdxs: number[] = [idx];
       {
         const chordId = notes[idx].chordId;
         if (chordId) { hiliteIdxs.length = 0; for (let i = 0; i < notes.length; i++) if (notes[i].chordId === chordId) hiliteIdxs.push(i); }
       }
+      // 播放头顶部对齐当前音最高点,含符干高度(stemUp 时符干顶端比符头高约 stemLen=3.5ss)。
+      // stemDown 音符干向下,顶部即符头本身。step<=6 为 stemUp(与 computeStem 一致)。
       const headHalf = lay.staffSpace * 0.6;
+      const stemLen = lay.staffSpace * 3.5;   // 标准符干长
       let staffTop0 = Infinity;
       for (const di of hiliteIdxs) {
         const n = notes[di];
         if (n.midi === null) continue;
         const step = resolvePitch(n.midi, card.pieceView.clef, this.piece.key, n.accidental).step;
         const y = lay.bottomLineY - step * lay.staffSpace / 2;
-        staffTop0 = Math.min(staffTop0, y - headHalf);
+        const stemUp = step <= 6;
+        // stemUp:顶部含符干(y - headHalf - stemLen);stemDown:顶部只到符头(y - headHalf)
+        const top = stemUp ? y - headHalf - stemLen : y - headHalf;
+        staffTop0 = Math.min(staffTop0, top);
       }
       const pad = 6;
       const y1 = (staffTop0 === Infinity ? lay.staffTop : staffTop0) - pad;

@@ -128,11 +128,7 @@ export function computeLayout(piece: Piece, containerWidth: number, currentDurat
   const prefixW = CLEF_GAP + CLEF_W + keyW + keyToTime + TIMESIG_W;  // CLEF_GAP=谱号离起始线间距
 
   const contentLeft = PAD_LEFT + prefixW + GAP_AFTER_PREFIX;
-  // contentRight 扣除终止线占的宽度:终止线=粗线(在barLines[N])+左侧0.75ss处细线,
-  // 左侧细线伸入内容区,会压到最后小节末尾的音符。把这块宽度从 contentRight 预留出去,
-  // contentWidth 缩小 → barWidth 缩小 → 所有音符(含最后小节)自动左移避开终止线区域。
-  // 这样 positionInBar 无需特判终止线,数学模型统一用 barWidth。
-  const contentRight = width - PAD_RIGHT - FINAL_BAR_INSET;
+  const contentRight = width - PAD_RIGHT;   // 终止线粗线位置(固定,不随内容伸缩)
   const contentWidth = contentRight - contentLeft;
   const prefixRight = contentLeft - GAP_AFTER_PREFIX * 0.5;
   const bpb = beatsPerBar(piece.time);
@@ -142,7 +138,11 @@ export function computeLayout(piece: Piece, containerWidth: number, currentDurat
   const timeSigX = PAD_LEFT + CLEF_GAP + CLEF_W + keyW + keyToTime + TIMESIG_W / 2;
 
   const measures = piece.measureCount;
-  const barWidth = contentWidth / measures;
+  // barWidth 给终止线预留 FINAL_BAR_INSET:终止线(粗线+左侧0.75ss细线)画在 contentRight,
+  // 占用最后小节末端 FINAL_BAR_INSET 的空间。音符可用区域 = contentWidth - FINAL_BAR_INSET,
+  // 故 barLines[N] = contentRight - FINAL_BAR_INSET(音符右界) < 终止线左侧细线(contentRight-0.75ss),
+  // 音符右缘不会压终止线。普通小节线仍画在 barLines[1..N-1](无预留,细线窄)。
+  const barWidth = (contentWidth - FINAL_BAR_INSET) / measures;
   const barLines = Array.from({ length: measures + 1 }, (_, i) => contentLeft + i * barWidth);
 
   // 计算每个音符的中心 x（按时值占比居中）
