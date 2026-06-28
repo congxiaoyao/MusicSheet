@@ -106,9 +106,10 @@ function renderStaffLines(layout: Layout): string {
   let s = '';
   for (let i = 0; i < 5; i++) {
     const y = layout.staffTop + i * layout.staffSpace;   // staffSpace = 线距
-    // 五条线贯穿整张画布：左端到画布最左(staffLeftX)，右端到末根小节线。
+    // 五条线贯穿整张画布：左端到画布最左(staffLeftX)，右端到终止线(contentRight)。
     // 谱号/调号/拍号会叠加画在这段线上（渲染顺序在后，盖住线），符合标准记谱。
-    s += line(layout.staffLeftX, y, layout.barLines[layout.barLines.length - 1], y, '#1f2430', W_STAFF * layout.staffSpace);
+    // 右端用 contentRight(终止线位置)而非 barLines[N](音符右界),保证横线贯穿到终止线。
+    s += line(layout.staffLeftX, y, layout.contentRight, y, '#1f2430', W_STAFF * layout.staffSpace);
   }
   return s;
 }
@@ -192,11 +193,14 @@ function renderBarLines(layout: Layout): string {
   // 起始单线（画布最左）
   s += line(layout.staffLeftX, barTop, layout.staffLeftX, barBot, '#1f2430', thin);
   for (let i = 1; i < layout.barLines.length; i++) {
-    const x = layout.barLines[i];
     const isLast = i === layout.barLines.length - 1;
+    // 终止线画在 contentRight(固定,谱表右端),而非 barLines[N](音符可用右界,已为终止线预留空间)。
+    // 这样终止线粗线在 contentRight,左侧细线在 contentRight-0.75ss;音符右缘≤barLines[N]=
+    // contentRight-FINAL_BAR_INSET < contentRight-0.75ss,不压终止线细线。
+    const x = isLast ? layout.contentRight : layout.barLines[i];
     s += line(x, barTop, x, barBot, '#1f2430', isLast ? thick : thin);
     if (isLast) {
-      // 终止线：粗线左侧约 0.4ss 处的细线
+      // 终止线：粗线左侧约 0.75ss 处的细线
       s += line(x - 0.75 * ss, barTop, x - 0.75 * ss, barBot, '#1f2430', thin);
     }
   }
@@ -549,27 +553,28 @@ function renderBeams(groups: BeamGroup[], piece: Piece, layout: Layout): { svg: 
     }
     dy = beamY2 - beamY1;
 
-    // primary 在某音符（组内序号 k）处的 y：沿首尾连线线性插值
-    const primaryYAt = (k: number) => beamY1 + dy * (n === 1 ? 0 : k / (n - 1));
     // 朝内方向偏移系数：次梁比 primary 更靠近符头。up 时梁在上方，「内」= y 更大（往下）→ +1；
     // down 时梁在下方，「内」= y 更小（往上）→ -1。
     const inSign = stemDir === 'up' ? 1 : -1;
     const gap = BEAM_GAP * ss;
 
-    // 每个音符的符干端点都对齐到 primary（最外侧）→ 组内符干等长；
-    // 同时确定每个符干的正确 x：符干外缘对齐符头墨迹最外缘(切点)，与 computeStem 一致。
+    // 第1遍:填所有 stemXs(符干外缘对齐符头墨迹最外缘,与 computeStem 一致)
     for (let k = 0; k < n; k++) {
-      const i = idxs[k];
-      ctxByIdx.set(i, { stemDir, stemEndY: primaryYAt(k) });
-      const x = layout.noteX[i];
+      const x = layout.noteX[idxs[k]];
       stemXs[k] = stemDir === 'up' ? x + headHalfW - stemW : x - headHalfW;
     }
-
-    // primary 首尾两端的 x（必须在符干 x 确定后取，否则用的是占位值）
+    // primary 首尾两端的 x（stemXs 已就绪）
     const x1 = stemXs[0];
     const x2 = stemXs[n - 1] + stemW;
     // primary 线在任意 x 处的 y（按首尾端点线性插值，供短桩两端跟随主梁斜率，使短桩与主梁平行）
     const primaryLineY = (x: number) => beamY1 + dy * (x - x1) / (x2 - x1);
+    // primary 在某音符（组内序号 k）处的 y：用该音符的实际 stemX 插值(非 k 等分)。
+    // 等分 k/(n-1) 在音符间距不等时(如八分接32分)会偏离实际梁线 → 符干顶端脱节。
+    const primaryYAt = (k: number) => primaryLineY(stemXs[k] + stemW / 2);
+    // 第2遍:每个音符的符干端点对齐到 primary（最外侧）→ 组内符干等长
+    for (let k = 0; k < n; k++) {
+      ctxByIdx.set(idxs[k], { stemDir, stemEndY: primaryYAt(k) });
+    }
 
     // ── 画梁 ──
     // 第 1 根（primary，最外侧）贯穿整组首尾。
