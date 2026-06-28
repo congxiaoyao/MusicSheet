@@ -102,11 +102,13 @@ const SLOT_MIN: Record<DurationValue, number> = {
 export function computeLayout(piece: Piece, containerWidth: number, currentDuration: DurationValue = 'quarter', chordAnchorBeat?: number, chordAnchorDuration?: DurationValue, hoverMidi?: number): Layout {
   const fontSize = FONT;
   const staffSpace = SS;
-  // SVG 总宽下限。提到 1056:让 contentWidth 达 ~885,使两小节 32 分音符(拍位宽9.7px)
-  // 末音不溢出小节线(NOTE_HEAD_HALF 偏移需 barWidth≥32×NHH≈400,两小节≥800+前缀)。
-  // 窗口够宽(≥1084px)时谱表自然达此宽;窗口窄时 SVG 用 preserveAspectRatio:none 横向压缩
-  // 到 host 宽度(不裁切不滚动条),但短时值仍会挤(物理限制)。
-  const width = Math.max(containerWidth, 1056);
+  // SVG 总宽下限。1080:两小节 contentWidth≈890,32 分末音符头中心不超小节线
+  // (NOTE_HEAD_HALF≈12.5 偏移需 barWidth≥32×12.5≈400,两小节≥800+前缀)。
+  // 注:符头有墨迹半宽(~6.8),末音右缘可能仍微贴/微超线(物理限制:末音离线仅 barWidth/32),
+  // 完全不超需 layout≥1409,但那要求窗口≥1568px 不现实,故取折中 1080。
+  // 窗口够宽(≥1108px)时谱表自然达此宽;窗口窄时 SVG 用 preserveAspectRatio:none 横向压缩
+  // 到 host 宽度(不裁切不滚动条),短时值仍会挤(物理限制)。
+  const width = Math.max(containerWidth, 1080);
 
   const staffTop = STAFF_TOP;
   // 谱表高度 = 4 个线距 = 8 个半距。SS 现在是真实 staff space(线距)，故 ×4。
