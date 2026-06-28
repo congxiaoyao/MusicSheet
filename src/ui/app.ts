@@ -1,7 +1,7 @@
 // 应用装配：工具栏 ↔ 画布 ↔ 简谱 ↔ 播放 ↔ 导出 ↔ 快捷键
 // 录入模型：追加式（短信验证码）—— 只能往末尾加，只能从末尾删。
 
-import { Note, Piece, DurationValue } from '../core/types';
+import { Note, Piece, DurationValue, durationBeats } from '../core/types';
 import { KEYS, resolvePitch } from '../core/theory';
 import { createPiece, appendNote, popNote, remainingBeats, remainingBeatsInCurrentBar, capacityBeats, totalBeats, totalBeatsBoth, noteStartBeats } from '../core/model';
 import { computeLayout } from '../render/layout';
@@ -423,12 +423,14 @@ export class App {
     const widthPct = w / trebleLayout.width * svgWPct;
     let x0: number;
     if (tIdx >= 0 && bIdx >= 0) {
-      // 两组都在响:跟随 noteX 更靠右(进度更靠后)的那组音。两组小节线 x 对齐但各自音符
-      // 中心 x 可能不同,取更靠右者能让播放头跟随节奏更密/更靠后的那组,避免某一组只有
-      // 一个长音时播放头僵住(如 treble 1四分 + bass 2八分,应跟随 bass 在两八分间跳动)。
-      const tx = trebleLayout.noteX[tIdx];
-      const bx = bassLayout.noteX[bIdx];
-      x0 = Math.max(tx, bx);
+      // 两组都在响:跟随时值更短的那组音。短音是节奏主驱动(更频繁切换),跟着它跳动
+      // 最符合听觉节奏;长音是持续铺垫,无需播放头盯着。两组小节线 x 对齐但各自音符中心
+      // x 不同,只跟一组才能让播放头平滑跳动。相同时值(如都是四分)→ 跟 treble(主旋律)。
+      // 例:treble 1四分 + bass 2八分,八分更短 → 跟随 bass 在两八分间跳动(treble 长音不停留)。
+      // durationBeats 已含连音缩放(三连音八分=1/3拍),连音天然比四分/八分更短,优先跟随。
+      const tDur = durationBeats(this.piece.treble[tIdx]);
+      const bDur = durationBeats(this.piece.bass[bIdx]);
+      x0 = bDur < tDur ? bassLayout.noteX[bIdx] : trebleLayout.noteX[tIdx];
     } else if (tIdx >= 0) {
       x0 = trebleLayout.noteX[tIdx];
     } else if (bIdx >= 0) {
