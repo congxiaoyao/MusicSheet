@@ -70,6 +70,9 @@ const NOTE_PAD = 0.5 * SS;
 // 符头中心相对拍位起点的偏移 = 符头几何半宽 + 小节内 padding。
 // noteX = 拍位起点 + NOTE_HEAD_HALF。同 beat 起点的不同时值音符头中心严格垂直对齐。
 const NOTE_HEAD_HALF = advanceSS('noteheadBlack') / 2 * SS + NOTE_PAD;
+// 符头墨迹半宽(最外缘到中心的距离)。与 staff.ts 的 INK_HALF_W_RATIO(0.497) 一致,加少量冗余
+// 防字体渲染差异。用于 positionInBar 自适应偏移:保证符头右缘(noteX + NOTE_INK_HALF)不超小节线。
+const NOTE_INK_HALF = advanceSS('noteheadBlack') * 0.497 * SS + 1.5;
 const PAD_LEFT = 8;    // 五线谱横线/起始线的左边缘(顶格,仅极小留白防贴死)
 const PAD_RIGHT = 12;  // 随谱表等比缩小(原24)
 const STAFF_TOP = 75;    // 谱表顶端y:字号减半后需容纳朝上符干(stdLen=3.5ss≈40px)+梁厚度+clamp阈值,原58导致梁被裁顶
@@ -102,13 +105,11 @@ const SLOT_MIN: Record<DurationValue, number> = {
 export function computeLayout(piece: Piece, containerWidth: number, currentDuration: DurationValue = 'quarter', chordAnchorBeat?: number, chordAnchorDuration?: DurationValue, hoverMidi?: number): Layout {
   const fontSize = FONT;
   const staffSpace = SS;
-  // SVG 总宽下限。1080:两小节 contentWidth≈890,32 分末音符头中心不超小节线
-  // (NOTE_HEAD_HALF≈12.5 偏移需 barWidth≥32×12.5≈400,两小节≥800+前缀)。
-  // 注:符头有墨迹半宽(~6.8),末音右缘可能仍微贴/微超线(物理限制:末音离线仅 barWidth/32),
-  // 完全不超需 layout≥1409,但那要求窗口≥1568px 不现实,故取折中 1080。
-  // 窗口够宽(≥1108px)时谱表自然达此宽;窗口窄时 SVG 用 preserveAspectRatio:none 横向压缩
-  // 到 host 宽度(不裁切不滚动条),短时值仍会挤(物理限制)。
-  const width = Math.max(containerWidth, 1080);
+  // SVG 总宽下限。1056:两小节 contentWidth≈890,barWidth≈445。
+  // 配合 positionInBar 的自适应偏移,短时值末音符头右缘不超小节线(偏移自动减小),
+  // 任意窗口都不超线,无需依赖大窗口。窗口窄时 SVG 用 preserveAspectRatio:none 横向压缩
+  // 到 host 宽度(不裁切不滚动条),偏移自适应仍保证不超线。
+  const width = Math.max(containerWidth, 1056);
 
   const staffTop = STAFF_TOP;
   // 谱表高度 = 4 个线距 = 8 个半距。SS 现在是真实 staff space(线距)，故 ×4。
@@ -242,7 +243,16 @@ function positionInBar(notes: Piece['notes'], startBeat: number, barIdx: number,
   // slotW 用 slotWidthFor(保留供播放头宽度/简谱临时记号偏移用),但 noteX 不再用 slotW/2 居中,
   // 改为锚定拍位起点+符头半宽,保证同 beat 起点的音符头对齐。
   const slotW = slotWidthFor(note.duration, bpb, barWidth);
-  const x = barLines[barIdx] + beatInBar / bpb * barWidth + NOTE_HEAD_HALF;
+  // 符头偏移:默认 NOTE_HEAD_HALF(拍位起点+符头半宽,同beat对齐+离开小节线)。
+  // 自适应:保证符头右缘(noteX + NOTE_INK_HALF)不超出本小节右线(下小节左线):
+  //   拍位起点 + beatInBar/bpb*barWidth + offset + NOTE_INK_HALF ≤ barLines[barIdx+1]
+  //   → offset ≤ barWidth*(1 - beatInBar/bpb) - NOTE_INK_HALF
+  // 短时值末音(如32分末音 beatInBar≈3.875)剩余空间小,offset 自动减小,符头右缘贴线不超。
+  // 正常音剩余空间充足,offset 取满 NOTE_HEAD_HALF,与同beat其他音对齐。
+  // 实测:仅最后1个32分音偏移减小(其余31个不变),视觉几乎无感。
+  const roomToBarEnd = barWidth * (1 - beatInBar / bpb) - NOTE_INK_HALF;
+  const offset = Math.min(NOTE_HEAD_HALF, roomToBarEnd);
+  const x = barLines[barIdx] + beatInBar / bpb * barWidth + offset;
   return { x, slotW };
 }
 
