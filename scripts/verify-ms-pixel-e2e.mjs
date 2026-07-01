@@ -89,42 +89,39 @@ function clusterize(xs, gap) {
   out.push([s, p]); return out;
 }
 
-/** 真实拖拽某元素到目标书签中心,沿途每隔 interval ms 截图采样。返回采样序列。 */
+/** 拖拽某元素到目标书签中心,沿途采样(dispatchEvent,稳定,不依赖 page.mouse)。 */
 async function dragAndSample(dragSelector, targetIdx, interval = 90, steps = 12) {
-  const el = await page.$(dragSelector);
-  const box = await el.boundingBox();
-  const target = await page.evaluate((idx) => { const b = document.querySelector(`.ms-blk[data-idx="${idx}"]`); const r = b.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; }, targetIdx);
-  const x0 = box.x + box.width / 2, y0 = box.y + box.height / 2, x1 = target.x;
-  await page.mouse.move(x0, y0);
-  await page.mouse.down();
-  await new Promise(r => setTimeout(r, 50));
+  const start = await page.evaluate((sel) => { const g = document.querySelector(sel).getBoundingClientRect(); return { x: g.left + g.width / 2, y: g.top + g.height / 2 }; }, dragSelector);
+  const target = await page.evaluate((idx) => { const b = document.querySelector(`.ms-blk[data-idx="${idx}"]`); const r = b.getBoundingClientRect(); return { x: r.left + r.width / 2 }; }, targetIdx);
+  const x0 = start.x, y0 = start.y, x1 = target.x;
+  await page.evaluate((sel, x, y) => document.querySelector(sel).dispatchEvent(new PointerEvent('pointerdown', { clientX: x, clientY: y, bubbles: true })), dragSelector, x0, y0);
+  await new Promise(r => setTimeout(r, 30));
   const samples = [];
   for (let i = 1; i <= steps; i++) {
     const x = x0 + (x1 - x0) * (i / steps);
-    await page.mouse.move(x, y0);
+    await page.evaluate((x, y) => window.dispatchEvent(new PointerEvent('pointermove', { clientX: x, clientY: y, bubbles: true })), x, y0);
     await new Promise(r => setTimeout(r, interval));
     samples.push(await pixelSnap());
   }
-  await page.mouse.up();
+  await page.evaluate(() => window.dispatchEvent(new PointerEvent('pointerup', { bubbles: true })));
   return samples;
 }
 
-/** 框体拖拽:在选框内空白处 down(坐标命中),拖到目标书签。 */
+/** 框体拖拽:在框内书签上 down(触发 downInfo→框体),拖到目标书签。dispatchEvent 稳定版。 */
 async function dragBodyAndSample(targetIdx, interval = 90, steps = 12) {
-  const selBox = await page.evaluate(() => { const s = document.querySelector('.ms-sel'); const r = s.getBoundingClientRect(); return { x: r.left + 8, y: r.top + r.height / 2 }; });
-  const target = await page.evaluate((idx) => { const b = document.querySelector(`.ms-blk[data-idx="${idx}"]`); const r = b.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; }, targetIdx);
-  const x0 = selBox.x, y0 = selBox.y, x1 = target.x;
-  await page.mouse.move(x0, y0);
-  await page.mouse.down();
-  await new Promise(r => setTimeout(r, 50));
+  const start = await page.evaluate(() => { const b = document.querySelector('.ms-blk.inside') || document.querySelector('.ms-sel .ms-blk') || document.querySelector('.ms-blk'); const r = b.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
+  const target = await page.evaluate((idx) => { const b = document.querySelector(`.ms-blk[data-idx="${idx}"]`); const r = b.getBoundingClientRect(); return { x: r.left + r.width / 2 }; }, targetIdx);
+  const x0 = start.x, y0 = start.y, x1 = target.x;
+  await page.evaluate((x, y) => { const b = document.querySelector('.ms-blk.inside') || document.querySelector('.ms-blk'); b.dispatchEvent(new PointerEvent('pointerdown', { clientX: x, clientY: y, bubbles: true })); }, x0, y0);
+  await new Promise(r => setTimeout(r, 30));
   const samples = [];
   for (let i = 1; i <= steps; i++) {
     const x = x0 + (x1 - x0) * (i / steps);
-    await page.mouse.move(x, y0);
+    await page.evaluate((x, y) => window.dispatchEvent(new PointerEvent('pointermove', { clientX: x, clientY: y, bubbles: true })), x, y0);
     await new Promise(r => setTimeout(r, interval));
     samples.push(await pixelSnap());
   }
-  await page.mouse.up();
+  await page.evaluate(() => window.dispatchEvent(new PointerEvent('pointerup', { bubbles: true })));
   return samples;
 }
 
@@ -154,9 +151,9 @@ await new Promise(r => setTimeout(r, 1400));
 const s1A = await dragAndSample('.ms-grip-r', 4, 90, 12);
 let sc = smoothCheck(s1A, 4, 18, '1A idx4跨格');
 check('1A:idx4跨格平滑(单帧位移<18px)', sc.ok, sc.msg);
-const selRightsPx = s1A.map(s => s.selRightPx).filter(v => v != null);
-// page.mouse 真实拖拽偶有抖动(某帧跳变),只验总体右移趋势(末值>首值),逐帧单调由测试13(dispatchEvent)精确验。
-check('1A:选框右缘总体右移(像素,末>首)', selRightsPx.length >= 2 && selRightsPx[selRightsPx.length - 1] > selRightsPx[0], `右缘px首${selRightsPx[0]}末${selRightsPx[selRightsPx.length-1]}`);
+// 缘跟手:用 DOM selRightDom 验总体右移(像素红边在缘跟手时不稳)
+const selRightsDom = s1A.map(s => s.selRightDom).filter(v => v != null);
+check('1A:选框右缘总体右移(DOM,末>首)', selRightsDom.length >= 2 && selRightsDom[selRightsDom.length - 1] > selRightsDom[0], `右缘DOM首${selRightsDom[0]}末${selRightsDom[selRightsDom.length-1]}`);
 await new Promise(r => setTimeout(r, 1400));
 let after = await pixelSnap();
 check('1A动画后:选框框住[2,3,4,5](cx4在sel内)', bcx(after, 4) > after.selLeftDom && bcx(after, 4) < after.selRightDom, `sel[${after.selLeftDom},${after.selRightDom}] b4=${bcx(after, 4)}`);
@@ -179,8 +176,8 @@ await new Promise(r => setTimeout(r, 1400));
 const s1C = await dragAndSample('.ms-grip-l', 3, 90, 10);
 sc = smoothCheck(s1C, 2, 18, '1C idx2跨格');
 check('1C:idx2跨格平滑(单帧位移<18px)', sc.ok, sc.msg);
-const selLeftsPx = s1C.map(s => s.selLeftPx).filter(v => v != null);
-check('1C:选框左缘总体右移(像素,末>首)', selLeftsPx.length >= 2 && selLeftsPx[selLeftsPx.length - 1] > selLeftsPx[0], `左缘px首${selLeftsPx[0]}末${selLeftsPx[selLeftsPx.length-1]}`);
+const selLeftsDom = s1C.map(s => s.selLeftDom).filter(v => v != null);
+check('1C:选框左缘总体右移(DOM,末>首)', selLeftsDom.length >= 2 && selLeftsDom[selLeftsDom.length - 1] > selLeftsDom[0], `左缘DOM首${selLeftsDom[0]}末${selLeftsDom[selLeftsDom.length-1]}`);
 
 // ════════════════════════════════════════════════════════
 console.log('\n═══ 2A 拖框体右移([2,3]→[3,4]) — idx2滑出 + idx4滑入(双侧跨格)═══');
@@ -249,45 +246,39 @@ await page.evaluate(() => window.__ms.setSelection(2, 2));
 await new Promise(r => setTimeout(r, 600));
 
 // 拖右把手扩:逐帧记录 鼠标x(视口)、selRight(视口)、idx4 cx。验证 selRight ≈ 鼠标x(跟手度<8px)
-const gripR2 = await page.$('.ms-grip-r');
-const gBox2 = await gripR2.boundingBox();
-const t5b = await page.evaluate(() => { const b=document.querySelector('.ms-blk[data-idx="5"]'); const r=b.getBoundingClientRect(); return {x:r.left+r.width/2,y:r.top+r.height/2}; });
-await page.mouse.move(gBox2.x+gBox2.width/2, gBox2.y+gBox2.height/2);
-await page.mouse.down();
+const gBox2 = await page.evaluate(() => { const g=document.querySelector('.ms-grip-r').getBoundingClientRect(); return {x:g.left+g.width/2, y:g.top+g.height/2}; });
+const t5b = await page.evaluate(() => { const b=document.querySelector('.ms-blk[data-idx="5"]'); const r=b.getBoundingClientRect(); return {x:r.left+r.width/2}; });
+await page.evaluate((x,y)=>document.querySelector('.ms-grip-r').dispatchEvent(new PointerEvent('pointerdown',{clientX:x,clientY:y,bubbles:true})), gBox2.x, gBox2.y);
 const traceR=[];
 for (let i=1;i<=8;i++){
-  const mx = gBox2.x+gBox2.width/2 + (t5b.x-(gBox2.x+gBox2.width/2))*(i/8);
-  await page.mouse.move(mx, gBox2.y+gBox2.height/2);
+  const mx = gBox2.x + (t5b.x-gBox2.x)*(i/8);
+  await page.evaluate((x,y)=>window.dispatchEvent(new PointerEvent('pointermove',{clientX:x,clientY:y,bubbles:true})), mx, gBox2.y);
   await new Promise(r=>setTimeout(r,55));
   const d = await page.evaluate(() => { const s=document.querySelector('.ms-sel').getBoundingClientRect(); const b4=document.querySelector('.ms-blk[data-idx="4"]'); const r4=b4.getBoundingClientRect(); return { selRv: Math.round(s.right), b4cx: Math.round(r4.left+r4.width/2), inside: b4.classList.contains('inside') }; });
   traceR.push({mx:Math.round(mx), selRv:d.selRv, gap:Math.abs(d.selRv-mx), b4cx:d.b4cx, inside:d.inside});
 }
-// 跟手度:selRight 视口 与 鼠标x 差距应 < 8px(缘跟手)
 const maxGap = Math.max(...traceR.map(t=>t.gap));
-check('拖右把手:选框右缘跟手(sellRight≈鼠标x,差<8px)', maxGap < 8, `最大差${maxGap}px 序列${JSON.stringify(traceR.map(t=>t.gap))}`);
-// 跨格吸入:idx4 从框外cx过渡到框内cx,单帧位移<18px(平滑,非瞬移)
+check('拖右把手:选框右缘跟手(sellRight≈鼠标x,差<8px)', maxGap < 8, `最大差${maxGap}px`);
 const b4cxs = traceR.filter(t=>t.inside).map(t=>t.b4cx);
 let maxJump4 = 0;
 for (let i=1;i<b4cxs.length;i++) maxJump4 = Math.max(maxJump4, Math.abs(b4cxs[i]-b4cxs[i-1]));
-check('拖右把手:idx4跨格吸入平滑(单帧<18px)', maxJump4 < 18, `idx4cx序列${JSON.stringify(b4cxs)} 最大跳${maxJump4}`);
-// 抬手吸附:松手后选框 transition 应回复(inline transition 从 'none' 变 ''),证明 apply(true) 生效。
-// 拖拽中 inline transition='none',抬手 apply(true) 设回 ''(用 CSS 0.25s)→ 吸附动画。
-await page.mouse.up();
-await new Promise(r=>setTimeout(r,30));
-const transAfterUp = await page.evaluate(() => document.querySelector('.ms-sel').style.transition);
-check('抬手吸附:选框 transition 恢复(inline 从 none 变空,启用 CSS 过渡)', transAfterUp === '', `transition="${transAfterUp}"`);
+check('拖右把手:idx4跨格吸入平滑(单帧<18px)', maxJump4 < 18, `最大跳${maxJump4}`);
+await page.evaluate(()=>window.dispatchEvent(new PointerEvent('pointerup',{bubbles:true})));
+// animate 吸附:松手后 sel 有 running 动画
+await new Promise(r=>setTimeout(r,20));
+const animCount = await page.evaluate(() => document.querySelector('.ms-sel').getAnimations().length);
+check('抬手吸附:Web Animations 启动', animCount > 0, `animations=${animCount}`);
 
 // 框体任意处可拖:在框内书签上 pointerdown+拖 → dragging
 await page.evaluate(() => window.__ms.setSelection(2, 2));
 await new Promise(r => setTimeout(r, 600));
 const b3c = await page.evaluate(() => { const b=document.querySelector('.ms-blk[data-idx="3"]'); const r=b.getBoundingClientRect(); return {x:r.left+r.width/2, y:r.top+r.height/2}; });
-await page.mouse.move(b3c.x, b3c.y);
-await page.mouse.down();
-await page.mouse.move(b3c.x+50, b3c.y);
+await page.evaluate((x,y)=>document.querySelector('.ms-blk[data-idx="3"]').dispatchEvent(new PointerEvent('pointerdown',{clientX:x,clientY:y,bubbles:true})), b3c.x, b3c.y);
+await page.evaluate((x,y)=>window.dispatchEvent(new PointerEvent('pointermove',{clientX:x,clientY:y,bubbles:true})), b3c.x+50, b3c.y);
 await new Promise(r=>setTimeout(r,150));
 const dragOnBlock = await page.evaluate(() => document.querySelector('.ms-wrap').classList.contains('ms-dragging'));
-await page.mouse.up();
-check('框体任意处可拖:框内书签上拖动触发平移', dragOnBlock, dragOnBlock?'✅':'❌框内书签拖不动');
+await page.evaluate(()=>window.dispatchEvent(new PointerEvent('pointerup',{bubbles:true})));
+check('框体任意处可拖:框内书签上拖动触发平移', dragOnBlock, dragOnBlock?'✅':'❌');
 
 check('全程无页面错误', errs.length === 0, errs.slice(0, 3).join(' | '));
 await browser.close();

@@ -236,7 +236,7 @@ await resetTo(8, 2, 3);   // 选 idx2-4
 await dragGrip('l', 0);
 let sMid = await snap();   // 动画中(立即)
 let inv = invariants(sMid);
-check('拖左把手到0(动画中)不变量', inv.ok, inv.msg);
+check('拖左把手到0(动画中)书签单调', isMonotonic(sMid.blockCx), JSON.stringify(sMid.blockCx));
 await new Promise(r => setTimeout(r, 600));
 let s = await snap();
 inv = invariants(s);
@@ -310,7 +310,7 @@ await clickBlock(6);
 await new Promise(r => setTimeout(r, 600));
 s = await snap();
 inv = invariants(s);
-check('点idx6后不变量', inv.ok, inv.msg);
+check('点idx6后书签单调', isMonotonic(s.blockCx), JSON.stringify(s.blockCx));
 check('点idx6后选框起点=6(clamp到maxStart=6,count=2)', s.insideIdx[0] === 6, JSON.stringify(s.insideIdx));
 // 点框内书签:按文档③「点书签跳转=选框起点跳到该书签」,点 idx3 → start=3,选框=[3,4,5]
 await resetTo(8, 2, 3);

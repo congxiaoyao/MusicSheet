@@ -46,6 +46,9 @@ const HANDLE_W = 5;
 const SEL_PAD_X = 6;        // 选框左右 padding(安全区:把手到框边)
 const CLICK_THRESHOLD = 4;
 const PAD_EDGE = 18;        // 轨道两端内边距
+const MAX_COUNT = 8;        // 选框最大宽度(8个小节)
+// 选框最小宽度:两把手间留一个把手宽(不碰)。= pad*2 + handle*2 + grip*2 + handle(中间空隙一个把手宽)
+const MIN_SELW = SEL_PAD_X * 2 + HANDLE_W * 2 + GAP_GRIP * 2 + HANDLE_W;
 
 export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureSelectorCallbacks): MeasureSelectorHandle {
   const state: MeasureSelectorState = { ...initial, hasContent: initial.hasContent ?? [] };
@@ -170,28 +173,31 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
    *    edge='r': 右缘=pos(左端 selX 固定,selW=pos-selX);拖右把手。
    *    edge='l': 左缘=pos,右端固定(selRightFixed,selW=selRightFixed-pos);拖左把手。
    *    edge='move': 整体平移 selX=pos(selW 稳态 count);拖框体。 */
-  const apply = (selAnimated: boolean, dragOverride?: { edge: 'l' | 'r' | 'move'; pos: number; selRightFixed?: number }) => {
+  /** 应用布局。
+   *  selAnimated: 选框/selBorder/grip 是否带 transition(拖拽中 false=缘跟手无 transition;松手吸附 true)。
+   *  dragOverride: 拖拽中选框缘跟手(覆盖 computeX)。书签/addX 始终用 computeX 稳态。
+   *  setTarget: false 时只设 transition + reflow(不设 transform/width 目标值),供 finishDrag 分两帧吸附用
+   *    (从 transition:none 切到 CSS transition 时,先恢复 transition+reflow,下一帧再设值,Chrome 才触发过渡)。 */
+  const apply = (selAnimated: boolean, dragOverride?: { edge: 'l' | 'r' | 'move'; pos: number }, setTarget = true) => {
     const { blockX, selX, selW, addX, totalW, gripLX, gripRX } = computeX();
-    track.style.width = totalW + 'px';
-    // 所有书签:只改 transform + toggle inside class,绝不 appendChild(不挪窝)。
-    blocks.forEach(b => {
-      const inside = b.idx >= state.start && b.idx < state.start + state.count;
-      b.el.classList.toggle('inside', inside);
-      const px = blockX.get(b.idx);
-      if (px !== undefined) b.el.style.transform = `translateX(${px}px)`;
-    });
-    // 选框底色层 + 边框层 + 把手:dragOverride 覆盖缘/整体;否则 computeX 稳态。
+    if (setTarget) {
+      track.style.width = totalW + 'px';
+      blocks.forEach(b => {
+        const inside = b.idx >= state.start && b.idx < state.start + state.count;
+        b.el.classList.toggle('inside', inside);
+        const px = blockX.get(b.idx);
+        if (px !== undefined) b.el.style.transform = `translateX(${px}px)`;
+      });
+    }
     let finalSelX = selX, finalSelW = selW, finalGripLX = gripLX, finalGripRX = gripRX;
     if (dragOverride?.edge === 'r') {
       const r = dragOverride.pos;
-      finalSelW = r - selX;
-      finalGripRX = r - SEL_PAD_X - HANDLE_W;
+      finalSelW = Math.max(MIN_SELW, r - selX);   // 最小宽度:两把手不碰
+      finalGripRX = selX + finalSelW - SEL_PAD_X - HANDLE_W;
     } else if (dragOverride?.edge === 'l') {
-      // 左缘跟手:selL=pos,右端用 computeX(state).selRight(动态,跟 initEnd 书签走)。
-      // 这样松手 apply(true) 用同一 computeX selRight,右框不闪。
       const selRF = selX + selW;
       finalSelX = dragOverride.pos;
-      finalSelW = selRF - dragOverride.pos;
+      finalSelW = Math.max(MIN_SELW, selRF - dragOverride.pos);   // 最小宽度
       finalGripLX = dragOverride.pos + SEL_PAD_X;
       finalGripRX = selRF - SEL_PAD_X - HANDLE_W;
     } else if (dragOverride?.edge === 'move') {
@@ -202,12 +208,15 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
     // transition 处理:selAnimated=true(吸附)时,显式设 inline transition(从拖拽的 'none' 切到明确值),
     // 强制 reflow 让 transition 生效,再设目标值 → 触发过渡。不能设 ''(回退 CSS),因 inline 'none'→'' 与
     // transform 同帧设值时 Chrome 不触发过渡(吸附会瞬跳)。
+    // transition:selAnimated=true 显式设 inline transition(从拖拽 'none' 切到明确值);false 设 'none'。
     const trans = selAnimated ? 'transform 0.25s cubic-bezier(.34,1.3,.64,1), width 0.25s cubic-bezier(.34,1.3,.64,1)' : 'none';
     sel.style.transition = trans;
     selBorder.style.transition = trans;
     leftGrip.style.transition = trans;
     rightGrip.style.transition = trans;
+    // reflow 让 transition 生效(从 'none' 切来时尤其需要)。
     if (selAnimated) { void sel.offsetWidth; void selBorder.offsetWidth; void leftGrip.offsetWidth; void rightGrip.offsetWidth; }
+    if (!setTarget) return;   // 只设 transition + reflow,不设值(finishDrag 第一步)
     sel.style.transform = `translateX(${finalSelX}px)`;
     selBorder.style.transform = `translateX(${finalSelX}px)`;
     sel.style.width = finalSelW + 'px';
@@ -289,26 +298,35 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
       return v;
     };
 
-    // ── 拖框体横移:选框整体缘跟手(selL=initSelX+偏移 d),count 不变。start=左缘扫过的书签。超范围阻尼 ──
+    // ── 拖框体横移:边界内整体缘跟手(edge:'move');到边界时一缘固定另一缘阻尼(等效把手)。 ──
     if (drag.mode === 'm') {
       if (Math.abs(e.clientX - drag.startX) < CLICK_THRESHOLD) return;
       const count = drag.initCount;
       const maxStart = Math.max(0, state.totalMeasures - count);
       const minSelX = computeXAt(0, count, state.totalMeasures).selX;
       const maxSelX = computeXAt(maxStart, count, state.totalMeasures).selX;
-      const selXDrag = damp(drag.initSelX + (e.clientX - drag.startX), minSelX, maxSelX);
+      const raw = drag.initSelX + (e.clientX - drag.startX);
       let ns = maxStart;
-      for (let s = 0; s <= maxStart; s++) { if ((axis.get(s) ?? Infinity) >= selXDrag) { ns = s; break; } }
+      for (let s = 0; s <= maxStart; s++) { if ((axis.get(s) ?? Infinity) >= raw) { ns = s; break; } }
       ns = Math.max(0, Math.min(ns, maxStart));
       state.start = ns; state.count = count;
-      apply(false, { edge: 'move', pos: selXDrag });
+      if (raw < minSelX) {
+        // 拖到最左:左缘阻尼(超出 minSelX 部分打 0.3 折),edge:'l' 右端用 computeX 稳态。
+        apply(false, { edge: 'l', pos: minSelX + (raw - minSelX) * 0.3 });
+      } else if (raw > maxSelX) {
+        // 拖到最右:右缘阻尼(超出 maxSelX 部分打 0.3 折),edge:'r' 左端用 computeX 稳态。
+        const maxSelR = computeXAt(maxStart, count, state.totalMeasures).selRight;
+        apply(false, { edge: 'r', pos: maxSelR + (raw - maxSelX) * 0.3 });
+      } else {
+        apply(false, { edge: 'move', pos: raw });
+      }
       return;
     }
 
     // ── 拖右把手:左端(initStart)固定,右缘跟手(selR=mxTrack)。count = 右缘越过的中心数。超范围阻尼 ──
     if (drag.mode === 'r') {
-      // count 范围 [1, min(8, total-start)]:超出阻尼(8 个小节是选框最大宽度)。
-      const maxCount = Math.min(8, state.totalMeasures - drag.initStart);
+      // count 范围 [1, min(MAX_COUNT, total-start)]:超出阻尼。
+      const maxCount = Math.min(MAX_COUNT, state.totalMeasures - drag.initStart);
       const maxR = computeXAt(drag.initStart, maxCount, state.totalMeasures).selRight;
       const minR = computeXAt(drag.initStart, 1, state.totalMeasures).selRight;
       const selRightDrag = damp(mxTrack, minR, maxR);
@@ -340,7 +358,40 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
     wrap.classList.remove('ms-dragging');
     downInfo = null;
     cb.onChange(state.start, state.count);
-    apply(true);   // 抬手:选框缘从拖拽位 transition 吸附到稳态(apply 内 selAnimated=true 恢复 transition + reflow)
+    // 抬手吸附:用 Web Animations API(element.animate)从拖拽位平滑到稳态。
+    // 绕过 CSS transition 的时序问题(从 inline transition:none 切到 CSS 值时 Chrome 不触发过渡)。
+    // 先读拖拽位(当前 transform/width),再 apply(true) 设稳态目标,然后用 animate 从拖拽位→稳态。
+    const elems = [sel, selBorder, leftGrip, rightGrip];
+    const froms = elems.map(el => {
+      const r = el.getBoundingClientRect();
+      const wrapEl = document.querySelector('.ms-wrap');
+      const w = wrapEl ? wrapEl.getBoundingClientRect() : new DOMRect();
+      const m = el.style.transform.match(/translateX\(([-\d.]+)px\)/);
+      return { x: m ? parseFloat(m[1]) : r.left - w.left, w: parseFloat(el.style.width) || r.width };
+    });
+    // 清除 inline transition,用 computeX 算稳态目标(不设到 DOM,避免 animate 启动前渲染跳变)。
+    elems.forEach(el => { el.style.transition = 'none'; });
+    const cx = computeX();
+    const tos = [
+      { x: cx.selX, w: cx.selW },
+      { x: cx.selX, w: cx.selW },
+      { x: cx.gripLX, w: HANDLE_W },
+      { x: cx.gripRX, w: HANDLE_W },
+    ];
+    elems.forEach((el, i) => {
+      const f = froms[i], t = tos[i];
+      if (Math.abs(f.x - t.x) < 0.5 && Math.abs(f.w - t.w) < 0.5) {
+        el.style.transform = `translateX(${t.x}px)`; el.style.width = t.w + 'px'; return;
+      }
+      const anim = el.animate(
+        [{ transform: `translateX(${f.x}px)`, width: f.w + 'px' }, { transform: `translateX(${t.x}px)`, width: t.w + 'px' }],
+        { duration: 250, easing: 'cubic-bezier(.4,0,.2,1)', fill: 'none' }
+      );
+      anim.onfinish = () => { el.style.transform = `translateX(${t.x}px)`; el.style.width = t.w + 'px'; };
+    });
+    // 书签/add 也设稳态(它们有 CSS transition,自然过渡)
+    blocks.forEach(b => { b.el.style.transform = `translateX(${cx.blockX.get(b.idx) ?? 0}px)`; });
+    addBtn.style.transform = `translateX(${cx.addX}px)`;
   };
 
   const onUp = () => {
