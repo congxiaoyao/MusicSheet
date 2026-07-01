@@ -337,7 +337,8 @@ function bindScoreEvents(root: HTMLElement, score: MockScore, view: { piece: Pie
         state.startMeasure = start; edit.measuresPerLine = count;
         const hint = root.querySelector('.sv-range-hint');
         if (hint) hint.innerHTML = `第 <b>${start + 1}–${start + count}</b> 小节`;
-        render();
+        // ★ 不调 render()(会重建组件、丢失抬手吸附动画)。只重渲五线谱编辑区(范围变了)。
+        reRenderStaff(root, score);
       },
       onDeleteMeasure: (idx) => {
         if (score.totalMeasures <= 1) { flash(root, '至少保留 1 小节'); return; }

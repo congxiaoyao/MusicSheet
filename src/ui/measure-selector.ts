@@ -151,9 +151,12 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
     return { blockX, selX, selW, selRight, addX, totalW: addX + BLOCK_W + PAD_EDGE, gripLX, gripRX };
   };
 
-  /** 应用布局。selAnimated: 选框是否带 transition(拖拽中 false=跟手;其它 true)。
-   *  ★ 书签始终带 transition(跨格/补位平滑);parent 恒为 track(不挪窝)。 */
-  const apply = (selAnimated: boolean) => {
+  /** 应用布局。selAnimated: 选框/selBorder/grip 是否带 transition(拖拽中 false=跟手;其它 true)。
+   *  ★ 书签始终带 transition(跨格/补位平滑);parent 恒为 track(不挪窝)。
+   *  dragOverride: 拖把手时,选框对应缘跟手(用鼠标位置覆盖 computeX 的缘),书签仍用 computeX 稳态位置
+   *    → 选框缘滑块式跟手,越过书签中心时 count 变化,跨格书签 transition 吸入。
+   *    edge='r': selRight=pos(右缘跟手,拖右把手扩/缩 count);edge='l': selLeft=pos(左缘跟手,拖左把手改 start)。 */
+  const apply = (selAnimated: boolean, dragOverride?: { edge: 'l' | 'r'; pos: number }) => {
     const { blockX, selX, selW, addX, totalW, gripLX, gripRX } = computeX();
     track.style.width = totalW + 'px';
     // 所有书签:只改 transform + toggle inside class,绝不 appendChild(不挪窝)。
@@ -163,19 +166,35 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
       const px = blockX.get(b.idx);
       if (px !== undefined) b.el.style.transform = `translateX(${px}px)`;
     });
-    // 选框底色层 + 边框层(同步位置/尺寸;边框层 z 高,边框不被书签盖)
+    // 选框底色层 + 边框层:若有 dragOverride,对应缘用鼠标位置(跟手);否则用 computeX 稳态。
+    const useRX = dragOverride?.edge === 'r';
+    const useLX = dragOverride?.edge === 'l';
+    let finalSelX = selX, finalSelW = selW, finalGripLX = gripLX, finalGripRX = gripRX;
+    if (useRX) {
+      // 右缘跟手:selRight=pos,selX 不变,selW=pos-selX,gripR=pos-SEL_PAD_X-HANDLE_W
+      const selRightOv = dragOverride!.pos;
+      finalSelW = selRightOv - selX;
+      finalGripRX = selRightOv - SEL_PAD_X - HANDLE_W;
+    } else if (useLX) {
+      // 左缘跟手:selLeft=pos,selRight(=selX+selW)不变,selX=pos,selW 不变(稳态 selW),gripL=pos+SEL_PAD_X
+      const selLeftOv = dragOverride!.pos;
+      finalSelX = selLeftOv;
+      finalSelW = selW;   // 宽度用稳态(因 count 已在 onMove 改,稳态 selW 反映新 count)
+      finalGripLX = selLeftOv + SEL_PAD_X;
+    }
     sel.style.transition = selAnimated ? '' : 'none';
     selBorder.style.transition = selAnimated ? '' : 'none';
-    sel.style.transform = `translateX(${selX}px)`;
-    selBorder.style.transform = `translateX(${selX}px)`;
-    sel.style.width = selW + 'px';
-    selBorder.style.width = selW + 'px';
-    // 把手(跟随选框左右缘)
     leftGrip.style.transition = selAnimated ? '' : 'none';
     rightGrip.style.transition = selAnimated ? '' : 'none';
-    leftGrip.style.transform = `translateX(${gripLX}px)`;
-    rightGrip.style.transform = `translateX(${gripRX}px)`;
-    // addBtn
+    // 从拖拽(transition:none)切到动画(transition:CSS)时,强制 reflow 让 transition 先生效,
+    // 再设目标值 → 触发过渡(否则同帧改 transition+transform 浏览器不过渡,抬手吸附会瞬切)。
+    if (selAnimated) void sel.offsetWidth;
+    sel.style.transform = `translateX(${finalSelX}px)`;
+    selBorder.style.transform = `translateX(${finalSelX}px)`;
+    sel.style.width = finalSelW + 'px';
+    selBorder.style.width = finalSelW + 'px';
+    leftGrip.style.transform = `translateX(${finalGripLX}px)`;
+    rightGrip.style.transform = `translateX(${finalGripRX}px)`;
     addBtn.style.transform = `translateX(${addX}px)`;
   };
 
@@ -229,10 +248,18 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
 
   const onMove = (e: PointerEvent) => {
     if (!drag) {
-      if (downInfo && (Math.abs(e.clientX - downInfo.x) > CLICK_THRESHOLD || Math.abs(e.clientY - downInfo.y) > CLICK_THRESHOLD)) downInfo = null;
+      // 书签 pointerdown 后拖动:若拖动超阈值且该书签在选框内 → 转为框体平移(任意处可拖)。
+      if (downInfo && (Math.abs(e.clientX - downInfo.x) > CLICK_THRESHOLD || Math.abs(e.clientY - downInfo.y) > CLICK_THRESHOLD)) {
+        const insideSel = downInfo.idx >= state.start && downInfo.idx < state.start + state.count;
+        if (insideSel) {
+          drag = { mode: 'm', initStart: state.start, initCount: state.count, startX: e.clientX };
+          wrap.classList.add('ms-dragging');
+        }
+        downInfo = null;
+      }
       return;
     }
-    // move(框体横移):先过 4px 阈值才动作,否则当作点击(框体内点击无操作)。
+    // move(框体横移):选框整体跟手平移,start = 鼠标所在小节,count 不变。
     if (drag.mode === 'm') {
       if (Math.abs(e.clientX - drag.startX) < CLICK_THRESHOLD) return;
       const idx = xToNearestBlock(e.clientX);
@@ -240,22 +267,29 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
       const ns = Math.max(0, Math.min(idx, maxStart));
       if (ns === state.start) return;
       state.start = ns;
-      apply(false);   // 拖框体横移也跟手
+      apply(false);   // 拖框体横移:selX 跟手 transition:none,书签跨格 transition 平滑
       return;
     }
+    // 拖把手:选框缘跟手(滑块式),count/start 由鼠标越过的小节中心算,跨格书签 transition 吸入。
+    // mx → track 坐标(trackLeft 是 track 视口左缘,getBoundingClientRect 含滚动)
+    const trackLeft = track.getBoundingClientRect().left;
+    const mxTrack = e.clientX - trackLeft;
     const idx = xToNearestBlock(e.clientX);
     if (drag.mode === 'l') {
+      // 拖左把手:start = 鼠标所在小节(不能超过原右界),选框左缘跟手
       const oldRight = drag.initStart + drag.initCount - 1;
       const ns = Math.max(0, Math.min(idx, oldRight));
       const nc = oldRight - ns + 1;
       if (nc <= 0) { finishDrag(); cb.onDeleteMeasure(state.totalMeasures - 1); return; }
       const cl = clamp(ns, nc); state.start = cl.s; state.count = cl.c;
+      apply(false, { edge: 'l', pos: mxTrack });   // 左缘跟手
     } else {
+      // 拖右把手:count = 鼠标所在小节 - initStart + 1,选框右缘跟手
       const nc = Math.max(1, idx - drag.initStart + 1);
       if (idx < drag.initStart) { finishDrag(); cb.onDeleteMeasure(state.totalMeasures - 1); return; }
       const cl = clamp(drag.initStart, nc); state.start = cl.s; state.count = cl.c;
+      apply(false, { edge: 'r', pos: mxTrack });   // 右缘跟手
     }
-    apply(false);
   };
 
   const finishDrag = () => {
@@ -264,7 +298,7 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
     wrap.classList.remove('ms-dragging');
     downInfo = null;
     cb.onChange(state.start, state.count);
-    requestAnimationFrame(() => apply(true));
+    apply(true);   // 抬手:选框缘从拖拽位 transition 吸附到稳态(apply 内 selAnimated=true 恢复 transition + reflow)
   };
 
   const onUp = () => {
