@@ -187,7 +187,9 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
       finalSelW = r - selX;
       finalGripRX = r - SEL_PAD_X - HANDLE_W;
     } else if (dragOverride?.edge === 'l') {
-      const selRF = dragOverride.selRightFixed ?? (selX + selW);
+      // 左缘跟手:selL=pos,右端用 computeX(state).selRight(动态,跟 initEnd 书签走)。
+      // 这样松手 apply(true) 用同一 computeX selRight,右框不闪。
+      const selRF = selX + selW;
       finalSelX = dragOverride.pos;
       finalSelW = selRF - dragOverride.pos;
       finalGripLX = dragOverride.pos + SEL_PAD_X;
@@ -301,13 +303,15 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
 
     // ── 拖右把手:左端(initStart)固定,右缘跟手(selR=mxTrack)。count = 右缘越过的中心数。超范围阻尼 ──
     if (drag.mode === 'r') {
-      const maxR = computeXAt(drag.initStart, state.totalMeasures - drag.initStart, state.totalMeasures).selRight;
+      // count 范围 [1, min(8, total-start)]:超出阻尼(8 个小节是选框最大宽度)。
+      const maxCount = Math.min(8, state.totalMeasures - drag.initStart);
+      const maxR = computeXAt(drag.initStart, maxCount, state.totalMeasures).selRight;
       const minR = computeXAt(drag.initStart, 1, state.totalMeasures).selRight;
       const selRightDrag = damp(mxTrack, minR, maxR);
       let lastIdx = drag.initStart;
       for (let i = drag.initStart; i < state.totalMeasures; i++) { if ((axis.get(i) ?? Infinity) <= selRightDrag) lastIdx = i; else break; }
       let nc = lastIdx - drag.initStart + 1;
-      nc = Math.max(1, Math.min(nc, state.totalMeasures - drag.initStart));
+      nc = Math.max(1, Math.min(nc, maxCount));
       const cl = clamp(drag.initStart, nc); state.start = cl.s; state.count = cl.c;
       apply(false, { edge: 'r', pos: selRightDrag });
       return;
@@ -318,13 +322,12 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
     const minL = computeXAt(0, initEnd + 1, state.totalMeasures).selX;
     const maxL = computeXAt(initEnd, 1, state.totalMeasures).selX;
     const selLeftDrag = damp(mxTrack, minL, maxL);
-    const selRightFixed = drag.initSelRight;
     let ns = initEnd;
     for (let s = 0; s <= initEnd; s++) { if ((axis.get(s) ?? Infinity) >= selLeftDrag) { ns = s; break; } }
     ns = Math.max(0, Math.min(ns, initEnd));
     const nc2 = initEnd - ns + 1;
     const cl2 = clamp(ns, nc2); state.start = cl2.s; state.count = cl2.c;
-    apply(false, { edge: 'l', pos: selLeftDrag, selRightFixed });
+    apply(false, { edge: 'l', pos: selLeftDrag });
   };
 
   const finishDrag = () => {

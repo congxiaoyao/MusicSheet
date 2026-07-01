@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>选框边缘半透明裁切 demo</title>
+<style>
+  body { font-family: system-ui; padding: 30px; background: #f5f5f5; }
+  .desc { font-size: 13px; color: #666; margin-bottom: 16px; line-height: 1.7; max-width: 700px; }
+  /* 容器:overflow hidden + 圆角,内含书签行 */
+  .stage {
+    position: relative; width: 700px; height: 64px;
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 12px;
+    overflow: hidden;
+    /* ★ 关键:mask 让左右边缘内容渐变淡出。这里全行左右淡出,模拟滑动容器边缘裁切。 */
+    -webkit-mask-image: linear-gradient(to right, transparent 0, #000 24px, #000 calc(100% - 24px), transparent 100%);
+    mask-image: linear-gradient(to right, transparent 0, #000 24px, #000 calc(100% - 24px), transparent 100%);
+  }
+  .track { position: relative; height: 100%; display: flex; align-items: center; padding: 0 18px; gap: 15px; }
+  .blk { width: 44px; height: 42px; flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+    background: #fff; border: 1px solid #d1d5db; border-radius: 10px; font-size: 15px; font-weight: 600; color: #3a3f4a; }
+  .blk.in { background: #eef2ff; border-color: rgba(99,102,241,0.5); }
+
+  h2 { font-size: 14px; margin: 28px 0 6px; }
+  /* 第二个 demo:选框边缘裁切(只在选框左右缘淡出,不是整行)。
+     用一个跟随选框的 mask 覆盖层。实际方案:给 track 加动态 mask,左右淡出带跟随选框缘。 */
+  .stage2 {
+    position: relative; width: 700px; height: 64px;
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 12px;
+    overflow: hidden;
+  }
+  .stage2 .track { height: 100%; position: relative; }
+  .stage2 .blk { position: absolute; top: 11px; }
+  /* 选框:半透明蓝底。左右各放一个渐变遮罩(白→透明),让选框边缘的书签淡出 */
+  .sel-fade {
+    position: absolute; top: 4px; height: 56px; pointer-events: none;
+    background: rgba(99,102,241,0.08); border: 2px solid rgba(99,102,241,0.55); border-radius: 12px;
+  }
+  /* 左右淡出渐变层:在选框左右缘,从选框外(透明)到选框内(实色背景色),遮住书签使其淡出 */
+  .fade-left, .fade-right {
+    position: absolute; top: 0; height: 100%; pointer-events: none; width: 28px;
+  }
+  .fade-left { background: linear-gradient(to right, #fff, transparent); }
+  .fade-right { background: linear-gradient(to left, #fff, transparent); }
+</style>
+</head>
+<body>
+<h1 style="font-size:17px">选框边缘半透明裁切 demo</h1>
+<p class="desc">
+效果目标:书签滑入选框/滑出选框时,在选框边缘做半透明渐变淡出(像被选框"裁切"),而不是书签直接跨过选框边缘。<br>
+类似 iOS 滑动容器边缘的 fade mask。
+</p>
+
+<h2>方案1:整行 mask(左右边缘淡出)</h2>
+<p class="desc">整个书签行左右边缘渐变淡出(滑动容器常见效果)。简单,但所有边缘书签都淡出,不只选框边缘。</p>
+<div class="stage">
+  <div class="track">
+    <div class="blk">1</div><div class="blk in">2</div><div class="blk in">3</div><div class="blk">4</div><div class="blk">5</div><div class="blk">6</div><div class="blk">7</div><div class="blk">8</div>
+  </div>
+</div>
+
+<h2>方案2:选框边缘淡出(跟随选框)</h2>
+<p class="desc">只在选框左右缘做淡出(白色渐变遮罩),选框外的书签正常。书签经过选框边缘时被白色渐变"吞掉"。</p>
+<div class="stage2">
+  <div class="track">
+    <div class="blk" style="left:18px">1</div>
+    <div class="blk in" style="left:77px">2</div>
+    <div class="blk in" style="left:136px">3</div>
+    <div class="blk" style="left:195px">4</div>
+    <div class="blk" style="left:254px">5</div>
+    <div class="blk" style="left:313px">6</div>
+    <div class="blk" style="left:372px">7</div>
+    <div class="blk" style="left:431px">8</div>
+    <!-- 选框(框住2,3) -->
+    <div class="sel-fade" style="left:60px;width:119px"></div>
+    <!-- 左右淡出渐变(白→透明),贴选框边缘外侧 -->
+    <div class="fade-left" style="left:60px"></div>
+    <div class="fade-right" style="left:151px"></div>
+  </div>
+</div>
+<p class="desc" style="margin-top:8px">↑ 方案2:选框[2,3]在 left:60 width:119。左右淡出层贴选框缘,书签1(在选框左外)被左淡出层部分遮,书签4(右外)被右淡出层部分遮。拖动选框时淡出层跟随。</p>
+
+<h2>方案3:mask 跟随选框(纯mask,无遮罩色)</h2>
+<p class="desc">用 CSS mask 让选框区域外的书签渐变淡出(真正半透明,不叠白色)。需动态 mask-image。这是最接近"滑动容器边缘裁切"的。<br>实现:track 加 mask,左右淡出带位置 = 选框左右缘。JS 动态设 mask-position。</p>
+<div class="stage2" id="s3">
+  <div class="track" id="t3">
+    <div class="blk" style="left:18px">1</div>
+    <div class="blk in" style="left:77px">2</div>
+    <div class="blk in" style="left:136px">3</div>
+    <div class="blk" style="left:195px">4</div>
+    <div class="blk" style="left:254px">5</div>
+    <div class="blk" style="left:313px">6</div>
+    <div class="blk" style="left:372px">7</div>
+    <div class="blk" style="left:431px">8</div>
+    <div class="sel-fade" style="left:60px;width:119px;background:transparent;border-color:rgba(99,102,241,0.55)"></div>
+  </div>
+</div>
+<p class="desc" style="margin-top:8px">↑ 方案3:track 用 mask,左右淡出带在选框缘(60px 和 179px)。选框外书签渐变淡出(半透明),选框内正常。</p>
+
+<script>
+// 方案3:动态 mask。track mask = 选框外两侧淡出。
+// mask-image: linear-gradient(to right,
+//   transparent 0, #000 (selLeft), #000 (selRight), transparent 100%)
+// 但这样选框外全透明(不可见)。你要的是选框外书签"半透明裁切"(渐变淡出,不是完全消失)。
+// 即:选框内不透明,选框外缘渐变淡出(但还能看到)。
+// 用 mask:选框内全显示,选框左右缘 28px 渐变带(从选框缘向外淡出)。
+const t3=document.getElementById('t3');
+const selLeft=60, selRight=179, fadeW=28;
+// mask: [0..selLeft-fadeW] 显示 → [selLeft-fadeW..selLeft] 渐变淡出 → [selLeft..selRight] 显示 → [selRight..selRight+fadeW] 渐变 → [selRight+fadeW..] 显示
+// 实际选框外要"半透明"(渐变到一定 alpha,不是完全透明)。mask 只能 0/1/中间。用渐变让边缘 alpha 降。
+const mask=`linear-gradient(to right,
+  #000 0, #000 ${selLeft-fadeW}px,
+  rgba(0,0,0,0.3) ${selLeft}px,
+  #000 ${selLeft}px, #000 ${selRight}px,
+  rgba(0,0,0,0.3) ${selRight}px,
+  #000 ${selRight+fadeW}px, #000 100%)`;
+t3.style.webkitMaskImage=mask;
+t3.style.maskImage=mask;
+</script>
+</body>
+</html>
