@@ -57,6 +57,10 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
   const track = document.createElement('div');   // 流式撑开 wrap 的可滚动宽度;absolute 子元素的定位上下文
   track.className = 'ms-track';
 
+  // 书签层:单独一层,加动态 mask 做选框边缘半透明裁切(选框缘外书签渐变淡出)。
+  // 选框/把手/add 在 track 直接子级,不受 mask 影响。
+  const blocksLayer = document.createElement('div'); blocksLayer.className = 'ms-blocks-layer';
+
   // 元素(都挂在 track 上,平级)。
   // 选框分两层:sel=底色层(z:0,在书签下,框内书签可见);selBorder=边框层(z:3,在书签上,
   //   边框永不被滑过的框外书签白底盖住)。
@@ -103,7 +107,7 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
     if (total > prev) {
       for (let i = prev; i < total; i++) {
         const el = makeBlock(i, animateNew);
-        track.appendChild(el);
+        blocksLayer.appendChild(el);
         blocks.push({ el, idx: i });
       }
     } else if (total < prev) {
@@ -224,15 +228,22 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
     leftGrip.style.transform = `translateX(${finalGripLX}px)`;
     rightGrip.style.transform = `translateX(${finalGripRX}px)`;
     addBtn.style.transform = `translateX(${addX}px)`;
+    // 书签层 mask:选框缘外 fadeW 范围书签渐变淡出(alpha 1→0.25),选框内全显示。
+    // 滚动容器边缘裁切效果,只作用书签层(选框/把手/add 不受影响)。
+    const sL = finalSelX, sR = finalSelX + finalSelW, fade = 22;
+    const mask = `linear-gradient(to right, #000 0, #000 ${sL - fade}px, rgba(0,0,0,0.28) ${sL}px, #000 ${sL}px, #000 ${sR}px, rgba(0,0,0,0.28) ${sR}px, #000 ${sR + fade}px, #000 100%)`;
+    blocksLayer.style.webkitMaskImage = mask;
+    blocksLayer.style.maskImage = mask;
   };
 
   const init = () => {
     wrap.innerHTML = '';
     wrap.appendChild(track);
     track.appendChild(sel);          // 选框底色层(z:0,在书签下)
-    track.appendChild(leftGrip);     // 把手(z:2,可命中)
+    track.appendChild(blocksLayer);  // 书签层(z:1,带 mask 边缘裁切)
+    track.appendChild(leftGrip);     // 把手(z:4,可命中,在过渡色上层)
     track.appendChild(rightGrip);
-    track.appendChild(selBorder);    // 选框边框层(z:3,在书签上,边框永不被盖)—— 必须在书签挂载后追加(z 相同时 DOM 顺序后者在上)
+    track.appendChild(selBorder);    // 选框边框层(z:3,在书签上)
     syncBlocks(false);   // 初始构建:书签直接显示,无进场动画(动画只用于 refresh 加小节)
     track.appendChild(addBtn);
     addBtn.addEventListener('click', (e) => { e.stopPropagation(); cb.onAddMeasure(); });

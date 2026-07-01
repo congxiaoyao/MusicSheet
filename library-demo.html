@@ -425,6 +425,15 @@
     min-width: 100%;
     height: 1px;   /* 高度 0 不占垂直空间,子元素 absolute 自己定位 */
   }
+  /* 书签层:满铺 track,带动态 mask 做选框边缘半透明裁切(JS 设 mask-image)。
+     height 不能用 100%(track 高 1px 会让 mask 区域只 1px,书签溢出被裁),用固定组件高度。 */
+  .ms-blocks-layer {
+    position: absolute;
+    left: 0; top: 0;
+    width: 100%; height: 64px;
+    z-index: 1;
+    overflow: visible;
+  }
   .ms-sel {
     position: absolute;
     left: 0; top: 0;
