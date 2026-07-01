@@ -413,10 +413,10 @@
     overflow-y: visible;
     padding: 0;
     user-select: none;
-    touch-action: pan-y;  /* 允许纵向滚动,横向交给选框/把手拖拽(触屏兜底) */
-    scrollbar-width: thin;
+    touch-action: pan-x pan-y;  /* 允许横向(滚轮/触屏横滑)+纵向 */
+    scrollbar-width: none;      /* Firefox 隐藏滚动条 */
   }
-  .ms-wrap::-webkit-scrollbar { height: 6px; }
+  .ms-wrap::-webkit-scrollbar { display: none; }  /* Chrome 隐藏滚动条 */
   .ms-wrap::-webkit-scrollbar-thumb { background: var(--line); border-radius: 3px; }
   /* track:流式元素,width 撑开 wrap 的可滚动宽度(absolute 子元素不撑开滚动)。
      它是 absolute 子元素的定位上下文。 */
@@ -482,13 +482,13 @@
     font-size: 15px; font-weight: 600; color: var(--ink-2);
     z-index: 1;
     touch-action: none;      /* 触屏点书签/拖拽不被滚动拦截 */
-    transition: transform 0.16s cubic-bezier(.34,1.3,.64,1), opacity 0.2s, background 0.2s, border-color 0.2s;
+    transition: transform 0.15s cubic-bezier(.34,1.3,.64,1), opacity 0.2s;
   }
   .ms-blk.has-content::after {
     content: ''; position: absolute; bottom: 5px; left: 50%; transform: translateX(-50%);
     width: 5px; height: 5px; border-radius: 50%; background: var(--accent);
   }
-  .ms-blk.inside { background: rgba(99,102,241,0.06); border-color: rgba(99,102,241,0.3); }
+  /* 框内书签不高亮(去掉 .inside 背景/边框覆盖,选框本身已标识选中区间) */
   /* 加小节进场:alpha 淡入(~200ms)。只动 opacity,不碰 transform(避免与定位冲突)。 */
   .ms-blk.ms-enter { opacity: 0; transition: none; }
   /* 删小节退场:alpha 淡出 + 缩小(用 @keyframes,不干扰 transform 定位)。 */

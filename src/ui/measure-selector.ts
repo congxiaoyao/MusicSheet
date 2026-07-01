@@ -40,7 +40,7 @@ export interface MeasureSelectorHandle {
 // 尺寸常量(px)。
 const BLOCK_W = 44;
 const GAP_NORMAL = 15;      // 正常书签间距(框外/框内)
-const GAP_SEL_SIDE = 10;    // 选框与左右书签的间距(更紧)
+const GAP_SEL_SIDE = GAP_NORMAL;  // 选框与左右书签的间距:与正常间距一致(消除翻转跳变;选框"紧贴"感靠选框内部 padding/handle 区)
 const GAP_GRIP = 6;         // 把手到框内书签的间距
 const HANDLE_W = 5;
 const SEL_PAD_X = 6;        // 选框左右 padding(安全区:把手到框边)
@@ -143,8 +143,10 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
     for (let k = 0; k < count; k++) blockX.set(start + k, innerStartX + k * (BLOCK_W + GAP_NORMAL));
     // 框右外书签
     x = selRight + GAP_SEL_SIDE;
+    const hasRightOut = start + count < total;
     for (let i = start + count; i < total; i++) { blockX.set(i, x); x += BLOCK_W + (i < total - 1 ? GAP_NORMAL : 0); }
-    const addX = x + GAP_NORMAL;
+    // addX:有框右外书签时 = 最后书签右缘 + GAP_NORMAL;无(全选)时 = selRight + GAP_SEL_SIDE(加号紧贴选框)
+    const addX = hasRightOut ? x + GAP_NORMAL : selRight + GAP_SEL_SIDE;
     // 把手 x(跟随选框左右缘内侧)
     const gripLX = selX + SEL_PAD_X;
     const gripRX = selRight - SEL_PAD_X - HANDLE_W;

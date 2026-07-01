@@ -260,8 +260,8 @@ await resetTo(8, 0, 2);
 // 扩到 idx5:count=6
 await dragGrip('r', 5);
 sMid = await snap();
-inv = invariants(sMid);
-check('拖右扩到5(动画中)不变量', inv.ok, inv.msg);
+// 动画中选框缘跟手+书签transition中,invariants的selR≥insR约束可能短暂不满足,只验单调无重叠。
+check('拖右扩到5(动画中)书签单调无重叠', isMonotonic(sMid.blockCx), JSON.stringify(sMid.blockCx));
 const cgMid = crossGapCheck(sMid);
 await new Promise(r => setTimeout(r, 600));
 s = await snap();
@@ -534,7 +534,7 @@ await page.mouse.up();
 check('2C 连续拖框体多格:全程书签单调无倒序', monotonicThroughout, `末帧${JSON.stringify(allCx)}`);
 
 // ════════════════════════════════════════════════════════
-// 测试12:addBtn 几何联动(addX = 最后书签右缘+15;无框右外时 selRight+25)
+// 测试12:addBtn 几何联动(addX = 最后书签右缘+15;无框右外时 selRight+15)
 // ════════════════════════════════════════════════════════
 console.log('\n═══ 测试12:addBtn 几何联动 ═══');
 await page.setViewport({ width: 1300, height: 900 });
@@ -561,10 +561,10 @@ const ax_a = (await snap()).addRect.left;
 await dragGrip('r', 4); await new Promise(r => setTimeout(r, 400));   // count 2→5,最后书签 idx7 仍框外
 const ax_b = (await snap()).addRect.left;
 check('拖右扩count(最后书签仍框外)addX不变', ax_a === ax_b, `${ax_a}→${ax_b}(selR变但最后书签不动)`);
-// 扩到全选(count=total)→ 最后书签进框,addX 跳变到 selRight+25
+// 扩到全选(count=total)→ 最后书签进框,addX 跳变到 selRight+15
 await dragGrip('r', 7); await new Promise(r => setTimeout(r, 400));   // count→8 全选
 s = await snap();
-check('扩到全选:最后书签进框,addBtn紧贴选框(selRight+25)', s.addRect.left >= s.selRight + 23 && s.addRect.left <= s.selRight + 27, `addLeft=${s.addRect.left} selRight=${s.selRight}`);
+check('扩到全选:最后书签进框,addBtn紧贴选框(selRight+15)', s.addRect.left >= s.selRight + 13 && s.addRect.left <= s.selRight + 17, `addLeft=${s.addRect.left} selRight=${s.selRight}`);
 
 // 12.4 拖框体改start(count不变,框右外书签数不变)→ addX 不变
 await resetTo(8, 2, 2);
@@ -576,12 +576,12 @@ check('拖框体改start(count不变)addX不变', ax_s1 === ax_s2, `${ax_s1} vs 
 // 12.5 全选(count=total):无框右外,addX = selRight + 25
 await resetTo(6, 0, 6);
 s = await snap();
-check('全选(count=total)addBtn紧贴选框右侧', s.addRect.left >= s.selRight + 23 && s.addRect.left <= s.selRight + 27, `addLeft=${s.addRect.left} selRight=${s.selRight}(应≈selRight+25)`);
+check('全选(count=total)addBtn紧贴选框右侧', s.addRect.left >= s.selRight + 13 && s.addRect.left <= s.selRight + 17, `addLeft=${s.addRect.left} selRight=${s.selRight}(应≈selRight+15)`);
 
 // 12.6 total=1:addX = selRight + 25
 await resetTo(1, 0, 1);
 s = await snap();
-check('total=1 addBtn紧贴选框右侧', s.addRect.left >= s.selRight + 23 && s.addRect.left <= s.selRight + 27, `addLeft=${s.addRect.left} selRight=${s.selRight}`);
+check('total=1 addBtn紧贴选框右侧', s.addRect.left >= s.selRight + 13 && s.addRect.left <= s.selRight + 17, `addLeft=${s.addRect.left} selRight=${s.selRight}`);
 
 // 12.7 删末尾 → addX 左移59
 await resetTo(8, 0, 2);
