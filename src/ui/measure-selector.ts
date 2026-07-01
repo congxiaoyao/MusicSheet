@@ -199,11 +199,15 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
       finalGripLX = dragOverride.pos + SEL_PAD_X;
       finalGripRX = dragOverride.pos + selW - SEL_PAD_X - HANDLE_W;
     }
-    sel.style.transition = selAnimated ? '' : 'none';
-    selBorder.style.transition = selAnimated ? '' : 'none';
-    leftGrip.style.transition = selAnimated ? '' : 'none';
-    rightGrip.style.transition = selAnimated ? '' : 'none';
-    if (selAnimated) void sel.offsetWidth;
+    // transition 处理:selAnimated=true(吸附)时,显式设 inline transition(从拖拽的 'none' 切到明确值),
+    // 强制 reflow 让 transition 生效,再设目标值 → 触发过渡。不能设 ''(回退 CSS),因 inline 'none'→'' 与
+    // transform 同帧设值时 Chrome 不触发过渡(吸附会瞬跳)。
+    const trans = selAnimated ? 'transform 0.25s cubic-bezier(.34,1.3,.64,1), width 0.25s cubic-bezier(.34,1.3,.64,1)' : 'none';
+    sel.style.transition = trans;
+    selBorder.style.transition = trans;
+    leftGrip.style.transition = trans;
+    rightGrip.style.transition = trans;
+    if (selAnimated) { void sel.offsetWidth; void selBorder.offsetWidth; void leftGrip.offsetWidth; void rightGrip.offsetWidth; }
     sel.style.transform = `translateX(${finalSelX}px)`;
     selBorder.style.transform = `translateX(${finalSelX}px)`;
     sel.style.width = finalSelW + 'px';

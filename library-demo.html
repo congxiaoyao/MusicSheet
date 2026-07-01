@@ -337,7 +337,7 @@
     justify-content: center;
     font-size: 24px;
     margin-bottom: 8px;
-    transition: transform 0.2s cubic-bezier(.34,1.56,.64,1);
+    transition: transform 0.25s cubic-bezier(.34,1.56,.64,1);
   }
   .score-card.new-card:hover .plus { transform: rotate(90deg) scale(1.1); }
 
@@ -484,7 +484,7 @@
     font-size: 15px; font-weight: 600; color: var(--ink-2);
     z-index: 1;
     touch-action: none;      /* 触屏点书签/拖拽不被滚动拦截 */
-    transition: transform 0.2s cubic-bezier(.34,1.3,.64,1), opacity 0.2s;
+    transition: transform 0.25s cubic-bezier(.34,1.3,.64,1), opacity 0.2s;
   }
   .ms-blk.has-content::after {
     content: ''; position: absolute; bottom: 5px; left: 50%; transform: translateX(-50%);
@@ -504,7 +504,7 @@
     padding: 0; cursor: pointer; z-index: 3;
     display: flex; align-items: center; justify-content: center;
     opacity: 0; transform: scale(0.5);
-    transition: opacity 0.15s, transform 0.2s cubic-bezier(.34,1.56,.64,1), background 0.12s;
+    transition: opacity 0.15s, transform 0.25s cubic-bezier(.34,1.56,.64,1), background 0.12s;
   }
   /* 叉的透明热区:扩展到书签右上角一块(约 24×24),让鼠标移到右上角即可触发叉显形。
      不再用 .ms-blk:hover(那样 hover 整个书签都出叉)。
