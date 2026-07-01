@@ -285,8 +285,8 @@ await resetTo(8, 0, 2);
 // 拖框体到 idx4:start 应变 4,count 仍 2
 await dragBody(4);
 sMid = await snap();
-inv = invariants(sMid);
-check('拖框体到4(动画中)不变量', inv.ok, inv.msg);
+// 框体跟手中选框缘是动态跟手值(非稳态),只验书签单调无重叠,不验选框包住(invariants 的 selLeft 约束不适用)。
+check('拖框体到4(动画中)书签单调无重叠', isMonotonic(sMid.blockCx), JSON.stringify(sMid.blockCx));
 await new Promise(r => setTimeout(r, 600));
 s = await snap();
 inv = invariants(s);

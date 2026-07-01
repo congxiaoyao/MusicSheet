@@ -64,7 +64,7 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
   const addBtn = document.createElement('button'); addBtn.type = 'button'; addBtn.className = 'ms-add'; addBtn.textContent = '+'; addBtn.title = '末尾加一小节';
   let blocks: { el: HTMLElement; idx: number }[] = [];
 
-  let drag: { mode: 'l' | 'r' | 'm'; initStart: number; initCount: number; startX: number } | null = null;
+  let drag: { mode: 'l' | 'r' | 'm'; initStart: number; initCount: number; startX: number; initSelX: number } | null = null;
   let downInfo: { x: number; y: number; idx: number } | null = null;
 
   const clamp = (s: number, c: number) => {
@@ -151,12 +151,32 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
     return { blockX, selX, selW, selRight, addX, totalW: addX + BLOCK_W + PAD_EDGE, gripLX, gripRX };
   };
 
+  /** 稳定的小节中心表(track 坐标):基于"假设 start=refStart"算每个 idx 的稳态中心,
+   *  不依赖 DOM getBoundingClientRect(避免拖拽 transition 中位置抖动导致吸附判定不准)。
+   *  几何:idx<refStart 框左外(等间距);idx≥refStart 按"框内序列"算(从 refStart 的 selX 起,
+   *  每书签 BLOCK_W+GAP_NORMAL)。这样拖右把手时,下一个待吸入小节的中心是稳定值,
+   *  selRight 扫过它才 count+1(扫过中心吸附,非"最近小节")。 */
+  const blockAxisCenters = (refStart: number): Map<number, number> => {
+    const m = new Map<number, number>();
+    const total = state.totalMeasures;
+    // 框左外(idx<refStart):PAD_EDGE 起,等间距 BLOCK_W+GAP_NORMAL
+    let x = PAD_EDGE;
+    for (let i = 0; i < refStart && i < total; i++) { m.set(i, x + BLOCK_W / 2); x += BLOCK_W + GAP_NORMAL; }
+    // refStart 的 selX(框左外末尾 + GAP_SEL_SIDE)
+    const selX = x + (refStart > 0 ? GAP_SEL_SIDE - GAP_NORMAL : 0);  // 修正:末尾间距已是 GAP_NORMAL,补差到 GAP_SEL_SIDE
+    // 框内序列(idx≥refStart):innerStartX 起,每 BLOCK_W+GAP_NORMAL
+    const innerStartX = selX + SEL_PAD_X + HANDLE_W + GAP_GRIP;
+    for (let i = refStart; i < total; i++) { m.set(i, innerStartX + (i - refStart) * (BLOCK_W + GAP_NORMAL) + BLOCK_W / 2); }
+    return m;
+  };
+
   /** 应用布局。selAnimated: 选框/selBorder/grip 是否带 transition(拖拽中 false=跟手;其它 true)。
-   *  ★ 书签始终带 transition(跨格/补位平滑);parent 恒为 track(不挪窝)。
-   *  dragOverride: 拖把手时,选框对应缘跟手(用鼠标位置覆盖 computeX 的缘),书签仍用 computeX 稳态位置
-   *    → 选框缘滑块式跟手,越过书签中心时 count 变化,跨格书签 transition 吸入。
-   *    edge='r': selRight=pos(右缘跟手,拖右把手扩/缩 count);edge='l': selLeft=pos(左缘跟手,拖左把手改 start)。 */
-  const apply = (selAnimated: boolean, dragOverride?: { edge: 'l' | 'r'; pos: number }) => {
+   *  ★ 书签/addX 始终用 computeX 稳态位置(不跟手),只有选框缘/把手在拖拽中跟手。
+   *  dragOverride: 拖拽中选框缘/整体跟手(覆盖 computeX 的 selX/selW/grip),书签仍用稳态。
+   *    edge='r': 右缘=pos(左端 selX 固定,selW=pos-selX);拖右把手扩/缩 count。
+   *    edge='l': 左缘=pos,**右端固定**(selRightFixed 不变,selW=selRightFixed-pos);拖左把手改 start。
+   *    edge='move': 整体平移 selX=pos(selW 用稳态 count);拖框体横移。 */
+  const apply = (selAnimated: boolean, dragOverride?: { edge: 'l' | 'r' | 'move'; pos: number }) => {
     const { blockX, selX, selW, addX, totalW, gripLX, gripRX } = computeX();
     track.style.width = totalW + 'px';
     // 所有书签:只改 transform + toggle inside class,绝不 appendChild(不挪窝)。
@@ -166,21 +186,25 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
       const px = blockX.get(b.idx);
       if (px !== undefined) b.el.style.transform = `translateX(${px}px)`;
     });
-    // 选框底色层 + 边框层:若有 dragOverride,对应缘用鼠标位置(跟手);否则用 computeX 稳态。
-    const useRX = dragOverride?.edge === 'r';
-    const useLX = dragOverride?.edge === 'l';
+    // 选框底色层 + 边框层 + 把手:dragOverride 覆盖缘/整体;否则 computeX 稳态。
     let finalSelX = selX, finalSelW = selW, finalGripLX = gripLX, finalGripRX = gripRX;
-    if (useRX) {
-      // 右缘跟手:selRight=pos,selX 不变,selW=pos-selX,gripR=pos-SEL_PAD_X-HANDLE_W
-      const selRightOv = dragOverride!.pos;
-      finalSelW = selRightOv - selX;
-      finalGripRX = selRightOv - SEL_PAD_X - HANDLE_W;
-    } else if (useLX) {
-      // 左缘跟手:selLeft=pos,selRight(=selX+selW)不变,selX=pos,selW 不变(稳态 selW),gripL=pos+SEL_PAD_X
-      const selLeftOv = dragOverride!.pos;
-      finalSelX = selLeftOv;
-      finalSelW = selW;   // 宽度用稳态(因 count 已在 onMove 改,稳态 selW 反映新 count)
-      finalGripLX = selLeftOv + SEL_PAD_X;
+    if (dragOverride?.edge === 'r') {
+      // 右缘跟手:selX 不变,selRight=pos → selW=pos-selX,gripR=pos-PAD-HANDLE
+      const r = dragOverride.pos;
+      finalSelW = r - selX;
+      finalGripRX = r - SEL_PAD_X - HANDLE_W;
+    } else if (dragOverride?.edge === 'l') {
+      // 左缘跟手:selX=pos,右端用当前 count 的稳态 selRight(=selX+selW),selW=selRight-pos
+      const selRF = selX + selW;   // computeX 稳态右缘(基于当前 start/count)
+      finalSelX = dragOverride.pos;
+      finalSelW = selRF - dragOverride.pos;
+      finalGripLX = dragOverride.pos + SEL_PAD_X;
+      finalGripRX = selRF - SEL_PAD_X - HANDLE_W;
+    } else if (dragOverride?.edge === 'move') {
+      // 整体平移:selX=pos,selW 用稳态(count 不变),两把手随 selX 平移
+      finalSelX = dragOverride.pos;
+      finalGripLX = dragOverride.pos + SEL_PAD_X;
+      finalGripRX = dragOverride.pos + selW - SEL_PAD_X - HANDLE_W;
     }
     sel.style.transition = selAnimated ? '' : 'none';
     selBorder.style.transition = selAnimated ? '' : 'none';
@@ -218,7 +242,8 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
 
   const startDrag = (e: PointerEvent, mode: 'l' | 'r') => {
     e.preventDefault(); e.stopPropagation();
-    drag = { mode, initStart: state.start, initCount: state.count, startX: e.clientX };
+    const initSelX = computeX().selX;   // 拖拽起始的选框左缘(track 坐标,框体跟手用)
+    drag = { mode, initStart: state.start, initCount: state.count, startX: e.clientX, initSelX };
     wrap.classList.add('ms-dragging');
   };
 
@@ -241,7 +266,7 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
       });
       if (onBlock) return;
       e.preventDefault();
-      drag = { mode: 'm', initStart: state.start, initCount: state.count, startX: e.clientX };
+      drag = { mode: 'm', initStart: state.start, initCount: state.count, startX: e.clientX, initSelX: computeX().selX };
       wrap.classList.add('ms-dragging');
     }
   };
@@ -252,44 +277,59 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
       if (downInfo && (Math.abs(e.clientX - downInfo.x) > CLICK_THRESHOLD || Math.abs(e.clientY - downInfo.y) > CLICK_THRESHOLD)) {
         const insideSel = downInfo.idx >= state.start && downInfo.idx < state.start + state.count;
         if (insideSel) {
-          drag = { mode: 'm', initStart: state.start, initCount: state.count, startX: e.clientX };
+          const initSelX = computeX().selX;
+          drag = { mode: 'm', initStart: state.start, initCount: state.count, startX: e.clientX, initSelX };
           wrap.classList.add('ms-dragging');
         }
         downInfo = null;
       }
       return;
     }
-    // move(框体横移):选框整体跟手平移,start = 鼠标所在小节,count 不变。
-    if (drag.mode === 'm') {
-      if (Math.abs(e.clientX - drag.startX) < CLICK_THRESHOLD) return;
-      const idx = xToNearestBlock(e.clientX);
-      const maxStart = Math.max(0, state.totalMeasures - state.count);
-      const ns = Math.max(0, Math.min(idx, maxStart));
-      if (ns === state.start) return;
-      state.start = ns;
-      apply(false);   // 拖框体横移:selX 跟手 transition:none,书签跨格 transition 平滑
-      return;
-    }
-    // 拖把手:选框缘跟手(滑块式),count/start 由鼠标越过的小节中心算,跨格书签 transition 吸入。
-    // mx → track 坐标(trackLeft 是 track 视口左缘,getBoundingClientRect 含滚动)
     const trackLeft = track.getBoundingClientRect().left;
     const mxTrack = e.clientX - trackLeft;
-    const idx = xToNearestBlock(e.clientX);
-    if (drag.mode === 'l') {
-      // 拖左把手:start = 鼠标所在小节(不能超过原右界),选框左缘跟手
-      const oldRight = drag.initStart + drag.initCount - 1;
-      const ns = Math.max(0, Math.min(idx, oldRight));
-      const nc = oldRight - ns + 1;
-      if (nc <= 0) { finishDrag(); cb.onDeleteMeasure(state.totalMeasures - 1); return; }
-      const cl = clamp(ns, nc); state.start = cl.s; state.count = cl.c;
-      apply(false, { edge: 'l', pos: mxTrack });   // 左缘跟手
-    } else {
-      // 拖右把手:count = 鼠标所在小节 - initStart + 1,选框右缘跟手
-      const nc = Math.max(1, idx - drag.initStart + 1);
-      if (idx < drag.initStart) { finishDrag(); cb.onDeleteMeasure(state.totalMeasures - 1); return; }
-      const cl = clamp(drag.initStart, nc); state.start = cl.s; state.count = cl.c;
-      apply(false, { edge: 'r', pos: mxTrack });   // 右缘跟手
+
+    // ── 拖框体横移:选框整体连续跟手(selX = initSelX + 鼠标偏移),start 由选框左缘扫过的小节中心算 ──
+    if (drag.mode === 'm') {
+      if (Math.abs(e.clientX - drag.startX) < CLICK_THRESHOLD) return;
+      const selXDrag = drag.initSelX + (e.clientX - drag.startX);
+      const count = drag.initCount;
+      const maxStart = Math.max(0, state.totalMeasures - count);
+      // start = 选框左缘(selXDrag)扫过的最大小节中心(基于拖拽初始布局的轴)
+      const axis = blockAxisCenters(drag.initStart);
+      let ns = 0;
+      for (let s = maxStart; s >= 0; s--) { if ((axis.get(s) ?? 0) <= selXDrag) { ns = s; break; } }
+      ns = Math.max(0, Math.min(ns, maxStart));
+      state.start = ns; state.count = count;
+      apply(false, { edge: 'move', pos: selXDrag });   // 整体跟手,书签用稳态(跨格 transition)
+      return;
     }
+
+    // ── 拖右把手:左端(initStart)固定,右缘跟手。count = 右缘扫过的框内小节中心数(扫过中心才吸入) ──
+    if (drag.mode === 'r') {
+      const selRightDrag = mxTrack;
+      const axis = blockAxisCenters(drag.initStart);   // 基于 initStart 的轴:idx≥initStart 按框内序列
+      // count = 从 initStart 起,selRight 越过的最后一个中心 → (idx-initStart+1)
+      let lastIdx = drag.initStart;
+      for (let i = drag.initStart; i < state.totalMeasures; i++) { if ((axis.get(i) ?? Infinity) <= selRightDrag) lastIdx = i; else break; }
+      let nc = lastIdx - drag.initStart + 1;
+      nc = Math.max(1, Math.min(nc, state.totalMeasures - drag.initStart));
+      const cl = clamp(drag.initStart, nc); state.start = cl.s; state.count = cl.c;
+      apply(false, { edge: 'r', pos: selRightDrag });
+      return;
+    }
+
+    // ── 拖左把手:左缘跟手,initEnd(最右选中)固定。start = 左缘扫过的小节中心,count=initEnd-start+1。
+    //    右端用当前 count 的稳态 selRight(apply 内算,initEnd 书签 transition 平滑跟随)。 ──
+    const initEnd = drag.initStart + drag.initCount - 1;
+    const selLeftDrag = mxTrack;
+    // start = 左缘扫过的最大小节中心(基于拖拽初始布局的轴)
+    const axisL = blockAxisCenters(drag.initStart);
+    let ns = 0;
+    for (let s = initEnd; s >= 0; s--) { if ((axisL.get(s) ?? Infinity) <= selLeftDrag) { ns = s; break; } }
+    ns = Math.max(0, Math.min(ns, initEnd));
+    const nc2 = initEnd - ns + 1;
+    const cl2 = clamp(ns, nc2); state.start = cl2.s; state.count = cl2.c;
+    apply(false, { edge: 'l', pos: selLeftDrag });
   };
 
   const finishDrag = () => {
@@ -313,16 +353,6 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
   };
   window.addEventListener('pointermove', onMove);
   window.addEventListener('pointerup', onUp);
-
-  const xToNearestBlock = (clientX: number): number => {
-    let best = 0, bestD = Infinity;
-    blocks.forEach(b => {
-      const r = b.el.getBoundingClientRect();
-      const d = Math.abs(r.left + r.width / 2 - clientX);
-      if (d < bestD) { bestD = d; best = b.idx; }
-    });
-    return best;
-  };
 
   init();
 
