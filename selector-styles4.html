@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>非等间距 · 把手实插撑开书签</title>
+<link rel="stylesheet" href="/src/style.css" />
+<style>
+  .cmp { max-width: 1040px; margin: 0 auto; padding: 28px 24px 60px; }
+  .cmp h1 { font-size: 22px; margin: 0 0 6px; }
+  .cmp p.lead { color: var(--muted); font-size: 13px; margin: 0 0 10px; line-height: 1.6; }
+  .note {
+    background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px;
+    padding: 10px 14px; font-size: 12.5px; color: #92400e; margin: 0 0 20px; line-height: 1.7;
+  }
+  .note b { color: #78350f; }
+  .variant {
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 20px 22px; margin-bottom: 16px;
+    box-shadow: var(--shadow-sm);
+  }
+  .variant-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 4px; flex-wrap: wrap; }
+  .variant-tag { font-size: 12px; font-weight: 700; color: var(--accent); background: var(--accent-soft); padding: 3px 10px; border-radius: 10px; }
+  .variant-name { font-size: 16px; font-weight: 650; }
+  .variant-desc { font-size: 12px; color: var(--muted); }
+  .variant-meta { font-size: 12px; color: var(--ink-2); margin: 4px 0 16px; line-height: 1.6; }
+  .variant-meta b { color: var(--accent); font-weight: 600; }
+
+  /* 书签条:真正的 flex 流式排列,把手是真实子元素(不是绝对定位硬画)。 */
+  .bar {
+    position: relative;
+    display: flex;
+    align-items: center;
+    padding: 22px 16px;
+    background: #fcfcfd;
+    border-radius: 10px;
+    border: 1px solid var(--line-2);
+    /* 正常书签间距小 */
+  }
+  .bar .blk-out { margin-right: 6px; }   /* 框外书签间距 6 */
+  .blk {
+    position: relative; flex: 0 0 44px; height: 42px;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+    font-size: 15px; font-weight: 600; color: var(--ink-2);
+  }
+  .blk.full::after {
+    content: ''; position: absolute; bottom: 5px; left: 50%; transform: translateX(-50%);
+    width: 5px; height: 5px; border-radius: 50%; background: var(--accent);
+  }
+  .add { flex: 0 0 40px; height: 42px; border: 1px dashed var(--line); border-radius: 10px;
+    color: var(--muted); font-size: 22px; display: flex; align-items: center; justify-content: center;
+    margin-left: 6px; }
+
+  /* 把手:真实占位的 flex 子元素。它有自身宽度 + 两侧 margin,撑开相邻书签。
+     关键:把手 margin 比正常书签间距大 → 选中区两侧间距明显比别处宽(非等间距)。 */
+  .grip {
+    flex: 0 0 auto;
+    height: 30px;
+    background: var(--accent);
+    border-radius: 4px;
+    box-shadow: 0 2px 6px rgba(79,70,229,0.4);
+    /* 把手两侧 margin = HANDLE_PAD(比正常书签间距 6 大),书签为它让位 */
+    margin: 0 14px;
+    cursor: ew-resize;
+  }
+
+  /* 选区背景:绝对定位,覆盖 左把手左缘 → 右把手右缘。在书签之下(z-index)。
+     注意:背景宽度 = 两个把手之间(含书签),把手在背景外侧/边缘,不压书签。 */
+  .selbg {
+    position: absolute;
+    top: 16px; height: 54px;   /* 上下各超出书签 6px(安全区) */
+    border-radius: 13px;
+    box-sizing: border-box;
+    pointer-events: none;
+    z-index: 0;
+  }
+  .blk, .grip, .add { position: relative; z-index: 1; }   /* 在背景之上 */
+
+  /* ── N1:把手 6px 宽,中底,实色边 ── */
+  .bar-n1 .grip { width: 6px; }
+  .bar-n1 .selbg {
+    background: rgba(79,70,229,0.10); border: 2px solid var(--accent);
+    box-shadow: 0 4px 12px rgba(79,70,229,0.12);
+  }
+
+  /* ── N2:把手 8px 宽,淡底,细边 ── */
+  .bar-n2 .grip { width: 8px; margin: 0 16px; }
+  .bar-n2 .selbg {
+    background: rgba(79,70,229,0.07); border: 1.5px solid rgba(79,70,229,0.5);
+  }
+
+  /* ── N3:把手 6px 宽,深底,中边 ── */
+  .bar-n3 .grip { width: 6px; }
+  .bar-n3 .selbg {
+    background: rgba(79,70,229,0.16); border: 1.5px solid var(--accent);
+  }
+
+  /* ── N4:把手 10px 宽(更粗),渐变底,无边框 ── */
+  .bar-n4 .grip { width: 10px; border-radius: 5px; margin: 0 12px; }
+  .bar-n4 .selbg {
+    background: linear-gradient(180deg, rgba(79,70,229,0.14), rgba(79,70,229,0.08));
+    border: 1px solid rgba(79,70,229,0.25);
+    border-radius: 14px;
+  }
+
+  /* 量距标注(说明非等间距) */
+  .ruler {
+    display: flex; align-items: center; margin-top: 10px; padding: 0 16px;
+    font-size: 10px; color: var(--muted); font-family: ui-monospace, monospace;
+  }
+  .ruler .normal { color: var(--muted); }
+  .ruler .wide { color: var(--accent); font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="cmp">
+  <h1>非等间距 · 把手实插撑开书签</h1>
+  <p class="lead">这次把手是真实占位元素(不是绝对定位硬画),它有宽度 + 两侧 margin,把选中区两侧的书签物理推开 → 那里的间距明显比别处大。</p>
+  <div class="note">
+    <b>关键</b>:正常书签间距 6px;把手两侧 margin 14~16px → 选中区两侧间距 = 14~16px(<b>明显比别处宽</b>)。<br>
+    把手落在选框的安全区内,绝不压书签。选框背景上下各超 6px(安全区),左右从左把手到右把手。
+  </div>
+
+  <div class="variant">
+    <div class="variant-head">
+      <span class="variant-tag">N1</span><span class="variant-name">6px 把手 · 中底 · 实色边</span>
+    </div>
+    <div class="variant-meta">把手宽 <b>6px</b> + 两侧 margin <b>14px</b>(=选中区两侧间距 14,别处 6);底 10%,边 2px 实色。</div>
+    <div class="bar bar-n1">
+      <div class="blk blk-out full">1</div>
+      <div class="grip"></div>
+      <div class="blk blk-out full">2</div><div class="blk blk-out full">3</div>
+      <div class="grip"></div>
+      <div class="blk blk-out full">4</div>
+      <div class="blk blk-out">5</div><div class="blk blk-out">6</div>
+      <div class="add">+</div>
+      <div class="selbg" style="left:64px; width:176px;"></div>
+    </div>
+    <div class="ruler">
+      <span>间距6</span>&nbsp;·&nbsp;<span class="normal">把手(6宽+14margin)</span>&nbsp;·&nbsp;<span class="wide">选中区两侧间距=14(明显宽)</span>&nbsp;·&nbsp;<span class="normal">把手</span>&nbsp;·&nbsp;<span>间距6</span>
+    </div>
+  </div>
+
+  <div class="variant">
+    <div class="variant-head">
+      <span class="variant-tag">N2</span><span class="variant-name">8px 把手 · 淡底 · 细边</span>
+    </div>
+    <div class="variant-meta">把手宽 <b>8px</b> + 两侧 margin <b>16px</b>;底 7%,边 1.5px/50%。呼吸更大。</div>
+    <div class="bar bar-n2">
+      <div class="blk blk-out full">1</div>
+      <div class="grip"></div>
+      <div class="blk blk-out full">2</div><div class="blk blk-out full">3</div>
+      <div class="grip"></div>
+      <div class="blk blk-out full">4</div>
+      <div class="blk blk-out">5</div><div class="blk blk-out">6</div>
+      <div class="add">+</div>
+      <div class="selbg" style="left:62px; width:194px;"></div>
+    </div>
+  </div>
+
+  <div class="variant">
+    <div class="variant-head">
+      <span class="variant-tag">N3</span><span class="variant-name">6px 把手 · 深底 · 中边</span>
+    </div>
+    <div class="variant-meta">把手宽 <b>6px</b> + margin <b>14px</b>;底 <b>16%</b>(明显发蓝),边 1.5px。选区最醒目。</div>
+    <div class="bar bar-n3">
+      <div class="blk blk-out full">1</div>
+      <div class="grip"></div>
+      <div class="blk blk-out full">2</div><div class="blk blk-out full">3</div>
+      <div class="grip"></div>
+      <div class="blk blk-out full">4</div>
+      <div class="blk blk-out">5</div><div class="blk blk-out">6</div>
+      <div class="add">+</div>
+      <div class="selbg" style="left:64px; width:176px;"></div>
+    </div>
+  </div>
+
+  <div class="variant">
+    <div class="variant-head">
+      <span class="variant-tag">N4</span><span class="variant-name">10px 粗把手 · 渐变底 · 无边框</span>
+    </div>
+    <div class="variant-meta">把手宽 <b>10px</b>(圆头)+ margin <b>12px</b>;底渐变 14%→8%,边 1px/25%,圆角 14px。最柔。</div>
+    <div class="bar bar-n4">
+      <div class="blk blk-out full">1</div>
+      <div class="grip"></div>
+      <div class="blk blk-out full">2</div><div class="blk blk-out full">3</div>
+      <div class="grip"></div>
+      <div class="blk blk-out full">4</div>
+      <div class="blk blk-out">5</div><div class="blk blk-out">6</div>
+      <div class="add">+</div>
+      <div class="selbg" style="left:60px; width:196px;"></div>
+    </div>
+  </div>
+
+  <p class="lead" style="margin-top:20px">看选中区两侧:书签到把手的间距(14~16px)明显比框外书签间距(6px)宽 —— 这就是非等间距。拖动把手时,书签在「宽间距区」和「正常间距区」间迁移,动画过渡。</p>
+</div>
+</body>
+</html>

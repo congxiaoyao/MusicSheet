@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>选择框样式精调 · A1-A4</title>
+<link rel="stylesheet" href="/src/style.css" />
+<style>
+  .cmp { max-width: 1000px; margin: 0 auto; padding: 28px 24px 60px; }
+  .cmp h1 { font-size: 22px; margin: 0 0 6px; }
+  .cmp p.lead { color: var(--muted); font-size: 13px; margin: 0 0 22px; }
+  .variant {
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 20px 22px; margin-bottom: 16px;
+    box-shadow: var(--shadow-sm);
+  }
+  .variant-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 6px; flex-wrap: wrap; }
+  .variant-tag { font-size: 12px; font-weight: 700; color: var(--accent); background: var(--accent-soft); padding: 3px 10px; border-radius: 10px; }
+  .variant-name { font-size: 16px; font-weight: 650; }
+  .variant-desc { font-size: 12px; color: var(--muted); }
+  .variant-meta { font-size: 12px; color: var(--ink-2); margin: 4px 0 14px; line-height: 1.6; }
+  .variant-meta b { color: var(--accent); font-weight: 600; }
+  /* 共用书签条 */
+  .bar {
+    position: relative; display: flex; align-items: center; gap: 8px;
+    padding: 16px 14px; background: #fcfcfd; border-radius: 10px; border: 1px solid var(--line-2);
+  }
+  .blk {
+    position: relative; flex: 0 0 44px; height: 40px;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+    font-size: 15px; font-weight: 600; color: var(--ink-2);
+  }
+  .blk.full::after {
+    content: ''; position: absolute; bottom: 5px; left: 50%; transform: translateX(-50%);
+    width: 5px; height: 5px; border-radius: 50%; background: var(--accent);
+  }
+  .add { flex: 0 0 40px; height: 40px; border: 1px dashed var(--line); border-radius: 10px;
+    color: var(--muted); font-size: 22px; display: flex; align-items: center; justify-content: center; }
+
+  /* 选框定位基准:第1书签 left = 14(pad)+1(border)=15 起。每个书签44+gap8=52。
+     框住第1-2书签:left=15-2(框外扩)=13? 这里直接给清晰值,框略大于书签组。
+     选中区(第1+gap+第2)= 44+8+44=96,框 left=13 width=100(各包2px呼吸)。 */
+  :root {
+    --sel-left: 13px;
+    --sel-w: 100px;
+  }
+
+  /* ── A1:淡底 + 细边 + 内嵌小竖线把手(最轻盈)── */
+  .bar-a1 .sel {
+    position: absolute; top: 16px; height: 40px; left: var(--sel-left); width: var(--sel-w);
+    background: rgba(79,70,229,0.07); border: 1.5px solid rgba(79,70,229,0.55);
+    border-radius: 11px; box-sizing: border-box; pointer-events: none;
+  }
+  .bar-a1 .sel::before, .bar-a1 .sel::after {
+    content: ''; position: absolute; top: 50%; transform: translateY(-50%);
+    width: 2px; height: 14px; background: rgba(79,70,229,0.6); border-radius: 2px;
+  }
+  .bar-a1 .sel::before { left: 4px; } .bar-a1 .sel::after { right: 4px; }
+
+  /* ── A2:中底 + 实色边 + 粗圆头把手(把手在框边缘,圆头突出醒目)── */
+  .bar-a2 .sel {
+    position: absolute; top: 16px; height: 40px; left: var(--sel-left); width: var(--sel-w);
+    background: rgba(79,70,229,0.12); border: 2px solid var(--accent);
+    border-radius: 12px; box-sizing: border-box; pointer-events: none;
+    box-shadow: 0 4px 12px rgba(79,70,229,0.12);
+  }
+  .bar-a2 .sel::before, .bar-a2 .sel::after {
+    content: ''; position: absolute; top: 50%; transform: translateY(-50%);
+    width: 6px; height: 22px; background: var(--accent); border-radius: 3px;
+    box-shadow: 0 1px 4px rgba(79,70,229,0.4);
+  }
+  .bar-a2 .sel::before { left: 3px; } .bar-a2 .sel::after { right: 3px; }
+
+  /* ── A3:深底(选区明显发蓝)+ 中边 + 把手做成双竖线(⋮ 形,精细感)── */
+  .bar-a3 .sel {
+    position: absolute; top: 16px; height: 40px; left: var(--sel-left); width: var(--sel-w);
+    background: rgba(79,70,229,0.18); border: 1.5px solid var(--accent);
+    border-radius: 11px; box-sizing: border-box; pointer-events: none;
+  }
+  .bar-a3 .sel::before, .bar-a3 .sel::after {
+    content: ''; position: absolute; top: 50%; transform: translateY(-50%);
+    width: 8px; height: 16px;
+    background-image: linear-gradient(90deg, var(--accent) 0 2px, transparent 2px 4px, var(--accent) 4px 6px, transparent 6px 8px);
+    /* 双竖线 */
+  }
+  .bar-a3 .sel::before { left: 3px; } .bar-a3 .sel::after { right: 3px; }
+
+  /* ── A4:无边框 + 强底色渐变 + 圆点把手(最柔,无边框压力)── */
+  .bar-a4 .sel {
+    position: absolute; top: 16px; height: 40px; left: var(--sel-left); width: var(--sel-w);
+    background: linear-gradient(180deg, rgba(79,70,229,0.16), rgba(79,70,229,0.10));
+    border: 1px solid rgba(79,70,229,0.3);
+    border-radius: 20px; box-sizing: border-box; pointer-events: none;
+  }
+  .bar-a4 .sel::before, .bar-a4 .sel::after {
+    content: ''; position: absolute; top: 50%; transform: translateY(-50%);
+    width: 8px; height: 8px; border-radius: 50%; background: var(--accent);
+    box-shadow: 0 1px 3px rgba(79,70,229,0.5);
+  }
+  .bar-a4 .sel::before { left: 5px; } .bar-a4 .sel::after { right: 5px; }
+
+  .spec { font-family: ui-monospace, monospace; font-size: 11px; color: var(--muted); margin-top: 10px; }
+</style>
+</head>
+<body>
+<div class="cmp">
+  <h1>选择框精调 · A1–A4</h1>
+  <p class="lead">基于 A(半透明底色框)精调。差异在底色浓度、边框、把手形态。框住第 1–2 小节。</p>
+
+  <div class="variant">
+    <div class="variant-head">
+      <span class="variant-tag">A1</span><span class="variant-name">淡底 · 细边 · 内嵌小竖线</span>
+      <span class="variant-desc">最轻盈</span>
+    </div>
+    <div class="variant-meta">底色 <b>7%</b> · 边框 <b>1.5px / 55% accent</b> · 把手 <b>2px 细竖线</b> · 圆角 11px</div>
+    <div class="bar bar-a1">
+      <div class="blk full">1</div><div class="blk full">2</div><div class="blk full">3</div>
+      <div class="blk">4</div><div class="blk">5</div><div class="blk">6</div><div class="add">+</div>
+      <div class="sel"></div>
+    </div>
+  </div>
+
+  <div class="variant">
+    <div class="variant-head">
+      <span class="variant-tag">A2</span><span class="variant-name">中底 · 实色边 · 粗圆头把手</span>
+      <span class="variant-desc">平衡 · 把手最醒目</span>
+    </div>
+    <div class="variant-meta">底色 <b>12%</b> · 边框 <b>2px 实色 accent</b> · 把手 <b>6px 粗圆头竖条</b> · 圆角 12px</div>
+    <div class="bar bar-a2">
+      <div class="blk full">1</div><div class="blk full">2</div><div class="blk full">3</div>
+      <div class="blk">4</div><div class="blk">5</div><div class="blk">6</div><div class="add">+</div>
+      <div class="sel"></div>
+    </div>
+  </div>
+
+  <div class="variant">
+    <div class="variant-head">
+      <span class="variant-tag">A3</span><span class="variant-name">深底 · 中边 · 双竖线把手</span>
+      <span class="variant-desc">选区最明显 · 把手精细</span>
+    </div>
+    <div class="variant-meta">底色 <b>18%</b>(明显发蓝) · 边框 <b>1.5px accent</b> · 把手 <b>⋮ 双竖线</b> · 圆角 11px</div>
+    <div class="bar bar-a3">
+      <div class="blk full">1</div><div class="blk full">2</div><div class="blk full">3</div>
+      <div class="blk">4</div><div class="blk">5</div><div class="blk">6</div><div class="add">+</div>
+      <div class="sel"></div>
+    </div>
+  </div>
+
+  <div class="variant">
+    <div class="variant-head">
+      <span class="variant-tag">A4</span><span class="variant-name">无边框 · 渐变底 · 圆点把手</span>
+      <span class="variant-desc">最柔 · 胶囊感</span>
+    </div>
+    <div class="variant-meta">底色 <b>渐变 16%→10%</b> · 边框 <b>1px / 30% accent</b> · 把手 <b>圆点</b> · 圆角 20px(胶囊)</div>
+    <div class="bar bar-a4">
+      <div class="blk full">1</div><div class="blk full">2</div><div class="blk full">3</div>
+      <div class="blk">4</div><div class="blk">5</div><div class="blk">6</div><div class="add">+</div>
+      <div class="sel"></div>
+    </div>
+  </div>
+
+  <p class="lead" style="margin-top:20px">书签下方蓝点 = 该小节有内容。框 = 当前编辑的小节范围。</p>
+</div>
+</body>
+</html>

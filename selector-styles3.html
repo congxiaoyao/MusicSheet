@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>选择框安全区 · 先把几何改对</title>
+<link rel="stylesheet" href="/src/style.css" />
+<style>
+  .cmp { max-width: 1000px; margin: 0 auto; padding: 28px 24px 60px; }
+  .cmp h1 { font-size: 22px; margin: 0 0 6px; }
+  .cmp p.lead { color: var(--muted); font-size: 13px; margin: 0 0 10px; }
+  .note {
+    background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px;
+    padding: 10px 14px; font-size: 12.5px; color: #92400e; margin: 0 0 20px; line-height: 1.6;
+  }
+  .variant {
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 20px 22px; margin-bottom: 16px;
+    box-shadow: var(--shadow-sm);
+  }
+  .variant-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 4px; flex-wrap: wrap; }
+  .variant-tag { font-size: 12px; font-weight: 700; color: var(--accent); background: var(--accent-soft); padding: 3px 10px; border-radius: 10px; }
+  .variant-name { font-size: 16px; font-weight: 650; }
+  .variant-desc { font-size: 12px; color: var(--muted); }
+  .variant-meta { font-size: 12px; color: var(--ink-2); margin: 4px 0 16px; line-height: 1.6; }
+  .variant-meta b { color: var(--accent); font-weight: 600; }
+
+  /* 书签条 */
+  .bar {
+    position: relative; display: flex; align-items: center; gap: 10px;
+    padding: 22px 16px; background: #fcfcfd; border-radius: 10px; border: 1px solid var(--line-2);
+  }
+  .blk {
+    position: relative; flex: 0 0 44px; height: 42px;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+    font-size: 15px; font-weight: 600; color: var(--ink-2);
+  }
+  .blk.full::after {
+    content: ''; position: absolute; bottom: 5px; left: 50%; transform: translateX(-50%);
+    width: 5px; height: 5px; border-radius: 50%; background: var(--accent);
+  }
+  .add { flex: 0 0 40px; height: 42px; border: 1px dashed var(--line); border-radius: 10px;
+    color: var(--muted); font-size: 22px; display: flex; align-items: center; justify-content: center; }
+
+  /* ─── 安全区几何说明 ───
+     书签:宽44, gap10。框住第1-2书签。
+     第1书签 left = 16(pad) + 1(书签border) = 17? 这里用精确值。
+     第1书签左缘=16(pad),右缘=16+44=60;第2书签左缘=60+10gap=70,右缘=114。
+     选中书签组:左16 右114,宽98。
+     安全区:框比书签组四周大 PAD=6px → 框 left=16-6=10, width=98+12=110, top=22(bar pad)-6=16, height=42+12=54。
+     把手落在框 padding 内(不碰书签)。 */
+
+  /* S1:中底 + 实色边 + 6px 安全区 + 粗把手(把手在框 padding 内,远离书签) */
+  .bar-s1 .sel {
+    position: absolute; top: 16px; height: 54px; left: 10px; width: 110px;
+    background: rgba(79,70,229,0.10); border: 2px solid var(--accent);
+    border-radius: 13px; box-sizing: border-box; pointer-events: none;
+    box-shadow: 0 4px 12px rgba(79,70,229,0.12);
+  }
+  .bar-s1 .sel::before, .bar-s1 .sel::after {
+    content: ''; position: absolute; top: 50%; transform: translateY(-50%);
+    width: 5px; height: 20px; background: var(--accent); border-radius: 3px;
+    box-shadow: 0 1px 4px rgba(79,70,229,0.4);
+  }
+  .bar-s1 .sel::before { left: 4px; }   /* 在框 padding 内,距书签 6px */
+  .bar-s1 .sel::after { right: 4px; }
+
+  /* S2:淡底 + 细边 + 8px 更大安全区 + 把手做成框边自身的加粗段(无独立竖条) */
+  .bar-s2 .sel {
+    position: absolute; top: 14px; height: 58px; left: 8px; width: 114px;
+    background: rgba(79,70,229,0.07); border: 1.5px solid rgba(79,70,229,0.5);
+    border-radius: 12px; box-sizing: border-box; pointer-events: none;
+  }
+  /* 把手 = 框边缘中段的加粗(用伪元素叠在框边上) */
+  .bar-s2 .sel::before, .bar-s2 .sel::after {
+    content: ''; position: absolute; top: 50%; transform: translateY(-50%);
+    width: 3px; height: 16px; background: var(--accent); border-radius: 2px;
+  }
+  .bar-s2 .sel::before { left: -1px; }   /* 贴在框左边外侧 */
+  .bar-s2 .sel::after { right: -1px; }
+
+  /* S3:深底 + 中边 + 6px 安全区 + 圆点把手(把手是圆点,不占纵向空间) */
+  .bar-s3 .sel {
+    position: absolute; top: 16px; height: 54px; left: 10px; width: 110px;
+    background: rgba(79,70,229,0.16); border: 1.5px solid var(--accent);
+    border-radius: 13px; box-sizing: border-box; pointer-events: none;
+  }
+  .bar-s3 .sel::before, .bar-s3 .sel::after {
+    content: ''; position: absolute; top: 50%; transform: translateY(-50%);
+    width: 9px; height: 9px; border-radius: 50%; background: var(--accent);
+    box-shadow: 0 1px 3px rgba(79,70,229,0.5);
+  }
+  .bar-s3 .sel::before { left: 4px; } .bar-s3 .sel::after { right: 4px; }
+
+  /* S4:无边框纯底色 + 8px 安全区 + 两端渐隐(最柔,把手用小三角指示) */
+  .bar-s4 .sel {
+    position: absolute; top: 14px; height: 58px; left: 8px; width: 114px;
+    background: linear-gradient(180deg, rgba(79,70,229,0.14), rgba(79,70,229,0.08));
+    border: 1px solid rgba(79,70,229,0.25);
+    border-radius: 14px; box-sizing: border-box; pointer-events: none;
+  }
+  .bar-s4 .sel::before, .bar-s4 .sel::after {
+    content: ''; position: absolute; top: 50%; transform: translateY(-50%);
+    width: 0; height: 0;
+    border-top: 5px solid transparent; border-bottom: 5px solid transparent;
+  }
+  .bar-s4 .sel::before { left: 3px; border-right: 6px solid var(--accent); }   /* ▶ 指右 */
+  .bar-s4 .sel::after { right: 3px; border-left: 6px solid var(--accent); }     /* ◀ 指左 */
+</style>
+</head>
+<body>
+<div class="cmp">
+  <h1>选择框安全区 · 先把几何改对</h1>
+  <p class="lead">这次重点:选框四周留安全区(padding),把手和框边绝不碰书签。</p>
+  <div class="note">
+    <b>问题根因</b>:之前选框 = 书签组的精确尺寸(边贴边、把手压书签)。<br>
+    <b>正解</b>:选框 = 书签组 + 四周 PAD(6~8px),把手落在 PAD 内,书签和框之间永远有呼吸空间。
+  </div>
+
+  <div class="variant">
+    <div class="variant-head">
+      <span class="variant-tag">S1</span><span class="variant-name">中底 + 实色边 + 6px 安全区 + 粗把手</span>
+    </div>
+    <div class="variant-meta">框比书签组四周大 <b>6px</b>;把手(5×20 粗竖条)落在框 padding 内,距书签 6px。底 10%,边 2px 实色。</div>
+    <div class="bar bar-s1">
+      <div class="blk full">1</div><div class="blk full">2</div><div class="blk full">3</div>
+      <div class="blk">4</div><div class="blk">5</div><div class="blk">6</div><div class="add">+</div>
+      <div class="sel"></div>
+    </div>
+  </div>
+
+  <div class="variant">
+    <div class="variant-head">
+      <span class="variant-tag">S2</span><span class="variant-name">淡底 + 细边 + 8px 安全区 + 边缘加粗把手</span>
+    </div>
+    <div class="variant-meta">框四周大 <b>8px</b>(更大呼吸);把手=框边中段加粗竖条(贴框外侧,不占内部空间)。底 7%,边 1.5px/50%。</div>
+    <div class="bar bar-s2">
+      <div class="blk full">1</div><div class="blk full">2</div><div class="blk full">3</div>
+      <div class="blk">4</div><div class="blk">5</div><div class="blk">6</div><div class="add">+</div>
+      <div class="sel"></div>
+    </div>
+  </div>
+
+  <div class="variant">
+    <div class="variant-head">
+      <span class="variant-tag">S3</span><span class="variant-name">深底 + 中边 + 6px 安全区 + 圆点把手</span>
+    </div>
+    <div class="variant-meta">框四周大 <b>6px</b>;把手=圆点(9px,不占纵向空间,适合书签矮的场景)。底 16%,边 1.5px。</div>
+    <div class="bar bar-s3">
+      <div class="blk full">1</div><div class="blk full">2</div><div class="blk full">3</div>
+      <div class="blk">4</div><div class="blk">5</div><div class="blk">6</div><div class="add">+</div>
+      <div class="sel"></div>
+    </div>
+  </div>
+
+  <div class="variant">
+    <div class="variant-head">
+      <span class="variant-tag">S4</span><span class="variant-name">渐变底 + 8px 安全区 + 三角把手</span>
+    </div>
+    <div class="variant-meta">框四周大 <b>8px</b>;把手=小三角(▶◀ 指向选区),最柔。底渐变 14%→8%,边 1px/25%,圆角 14px。</div>
+    <div class="bar bar-s4">
+      <div class="blk full">1</div><div class="blk full">2</div><div class="blk full">3</div>
+      <div class="blk">4</div><div class="blk">5</div><div class="blk">6</div><div class="add">+</div>
+      <div class="sel"></div>
+    </div>
+  </div>
+
+  <p class="lead" style="margin-top:20px">现在书签和框之间有清晰的安全区,把手不再压书签。选定后我再配套调粗细/浓度。</p>
+</div>
+</body>
+</html>

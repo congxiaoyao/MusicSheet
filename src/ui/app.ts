@@ -12,8 +12,12 @@ import { computeBeams, indexBeamMap } from '../render/beam';
 import { buildToolbar, defaultTool, ToolState, TUPLET_CONFIG, TupletMode, tupletModeForActual } from './toolbar';
 import { Player, PlayState } from '../audio/player';
 import { buildPlaybackCard, loadFingering, loadShow, saveFingering, saveShow, Fingering, ShowFlags, PlaybackView } from './playback-card';
-import { serialize, deserialize, sheetFileName, SHEET_EXTENSION } from '../core/serialize';
+import { deserializeScore, scoreFileName } from '../core/serialize';
 import { twinkleExample } from './examples';
+import { Score, ScoreMeta, MeasureData, rangeToPiece, pieceBackToScore, emptyMeasure } from '../core/score';
+import { listPieces, createPiece as apiCreatePiece, getPiece as apiGetPiece, updateMeta as apiUpdateMeta, putMeasure, deletePiece as apiDeletePiece, exportPiece as apiExportScore, MeasureFlusher } from '../core/storage';
+import { buildProjectBar, ProjectBarHandle } from './project-bar';
+import { buildPreviewModal, PreviewModalHandle } from './score-preview-modal';
 
 interface HoverState { midi: number; x: number; }
 
@@ -78,10 +82,21 @@ export class App {
   private playingIndex = -1;
   private currentBeat = 0;
   private playState: PlayState = 'stopped';
+  /** 当前曲谱项目(整曲)。未加载时为 null(启动初始化阶段)。 */
+  private score: Score | null = null;
+  /** 所有曲谱 meta 列表(项目下拉用)。 */
+  private pieces: ScoreMeta[] = [];
+  /** 编辑区起始小节(0-based):this.piece = rangeToPiece(score, currentStartMeasure, tool.measureCount)。
+   *  点书签/预览小节切换它 → 编辑区换到「从该小节起的 N 个连续小节」。 */
+  private currentStartMeasure = 0;
+  /** 落盘节流队列(3 秒间隔,按小节局部落盘)。 */
+  private flusher: MeasureFlusher | null = null;
   private fingering: Fingering;
   private show: ShowFlags;
   private player: Player;
   private toolbar!: HTMLElement;
+  private projectBar: ProjectBarHandle | null = null;
+  private previewModal: PreviewModalHandle | null = null;
   private playbackCard!: HTMLElement;
   private hover: HoverState | null = null;
   /** hover 试听音效开关(默认关)。 */
@@ -98,7 +113,7 @@ export class App {
 
   constructor(root: HTMLElement) {
     this.root = root;
-    this.piece = createPiece();
+    this.piece = createPiece();   // 占位:启动后由 loadScoreFromServer 用范围视图替换
     this.tool = defaultTool();
     this.viewMode = this.tool.viewMode;
     /** hover 试听音效开关(默认关)。localStorage 持久化。 */
@@ -133,7 +148,272 @@ export class App {
       },
     });
     this.buildDOM();
+    // 落盘队列:按小节局部落盘到服务端。
+    this.flusher = new MeasureFlusher(async (idx, m) => {
+      if (this.score) await putMeasure(this.score.meta.id, idx, m);
+    }, 3000);
+    // 页面关闭前强制 flush(防丢失改动)。sendBeacon 兜底不可行(需复杂请求),用同步 flush。
+    window.addEventListener('beforeunload', () => { if (this.flusher?.hasPending()) { void this.flusher.flush(); } });
     void ensureFontLoaded().then(() => this.render());
+    // 异步加载曲谱列表 + 选/建第一个(启动后接管 this.piece)。
+    void this.initFromServer();
+  }
+
+  /** 启动:拉曲谱列表 → 选最近一个或新建 → 加载整曲 → 设范围视图。
+   *  失败(如服务器未启动)时降级为内存中的空 piece,编辑不落盘但不阻塞 UI。 */
+  private async initFromServer(): Promise<void> {
+    try {
+      const { pieces } = await listPieces();
+      this.pieces = pieces;
+      if (pieces.length === 0) {
+        // 无曲谱:自动建一个默认曲谱(2 小节 C 大调 4/4)。
+        const meta = await apiCreatePiece({ title: '未命名曲谱', totalMeasures: 4, viewMode: this.tool.viewMode });
+        this.pieces = [meta];
+        await this.loadScoreById(meta.id);
+        this.flash('已创建默认曲谱');
+      } else {
+        await this.loadScoreById(pieces[0].id);
+      }
+    } catch (err) {
+      console.warn('[app] 加载曲谱失败,降级为内存模式:', err);
+      this.flash('未连接存储服务器(仅内存模式)');
+    }
+  }
+
+  /** 加载某曲谱整曲 → 设 this.score → 按 currentStartMeasure + tool.measureCount 切范围视图。 */
+  private async loadScoreById(id: string): Promise<void> {
+    try {
+      // 切曲谱前先 flush 旧曲谱的待落盘改动。
+      if (this.flusher) await this.flusher.flush();
+      const score = await apiGetPiece(id);
+      this.applyScore(score);
+    } catch (err) {
+      this.flash('加载曲谱失败:' + (err as Error).message);
+    }
+  }
+
+  /** 应用新 score 到当前会话:刷新列表 meta、重置范围视图、重建卡片、render。 */
+  private applyScore(score: Score): void {
+    this.score = score;
+    // 同步 tool 状态(调号/拍号/视图模式跟随整曲 meta)。
+    this.tool.key = score.meta.key.name;
+    this.tool.time = { ...score.meta.time };
+    this.tool.measureCount = Math.min(this.tool.measureCount, score.meta.totalMeasures);
+    this.tool.measureCount = Math.max(2, this.tool.measureCount);
+    this.viewMode = score.meta.viewMode;
+    this.currentStartMeasure = 0;
+    // 刷新列表里该曲谱的 meta( updatedAt 可能变了)。
+    this.pieces = this.pieces.map(p => p.id === score.meta.id ? score.meta : p);
+    this.rebuildRangePiece();
+    this.player.stop();
+    this.playingIndex = -1;
+    this.currentBeat = 0;
+    this.playState = 'stopped';
+    this.hover = null;
+    this.currentChordId = null;
+    this.tupletProgress = null;
+    this.rebuildCards();
+    this.rebuildToolbar();
+    this.refreshProjectBar();
+    this.render();
+  }
+
+  /** 由 this.score + currentStartMeasure + tool.measureCount 重建范围视图 Piece。
+   *  现有渲染/编辑/播放层继续吃这个 N 小节单行 Piece,零改动。 */
+  private rebuildRangePiece(): void {
+    if (!this.score) return;
+    const activeStaff = this.viewMode === 'bass' ? 'bass' : 'treble';
+    this.piece = rangeToPiece(this.score, this.currentStartMeasure, this.tool.measureCount, activeStaff);
+  }
+
+  /** 刷新项目面板(曲谱下拉 + 小节书签)状态。 */
+  private refreshProjectBar(): void {
+    this.projectBar?.refresh({
+      pieces: this.pieces,
+      currentId: this.score?.meta.id ?? null,
+      totalMeasures: this.score?.meta.totalMeasures ?? 0,
+      currentStartMeasure: this.currentStartMeasure,
+      measuresPerLine: this.tool.measureCount,
+    });
+  }
+
+  // ── 项目面板回调 ──────────────────────────────────────────
+
+  /** 新建曲谱:弹框输入标题 → 调服务端建 → 加载它。 */
+  private async createNewPiece(): Promise<void> {
+    const title = prompt('曲谱标题:', '未命名曲谱');
+    if (title === null) return;
+    try {
+      // 切前先 flush 旧改动。
+      if (this.flusher) await this.flusher.flush();
+      const meta = await apiCreatePiece({
+        title: title.trim() || '未命名曲谱',
+        totalMeasures: 4,
+        viewMode: this.tool.viewMode,
+        key: KEYS[this.tool.key],
+        time: { ...this.tool.time },
+      });
+      this.pieces = [meta, ...this.pieces];
+      await this.loadScoreById(meta.id);
+      this.flash('已新建曲谱');
+    } catch (err) {
+      this.flash('新建失败:' + (err as Error).message);
+    }
+  }
+
+  /** 删除当前曲谱(确认后)。删后选最近一个或新建。 */
+  private async deleteCurrentPiece(): Promise<void> {
+    if (!this.score) return;
+    if (this.pieces.length <= 1) { this.flash('至少保留 1 个曲谱'); return; }
+    if (!confirm(`删除曲谱「${this.score.meta.title}」?此操作不可撤销。`)) return;
+    try {
+      if (this.flusher) await this.flusher.flush();
+      const id = this.score.meta.id;
+      await apiDeletePiece(id);
+      this.pieces = this.pieces.filter(p => p.id !== id);
+      // 选列表里第一个。
+      await this.loadScoreById(this.pieces[0].id);
+      this.flash('已删除曲谱');
+    } catch (err) {
+      this.flash('删除失败:' + (err as Error).message);
+    }
+  }
+
+  /** 导出当前整曲为 .mscore 文件(曲谱级打包)。 */
+  private async exportCurrentScore(): Promise<void> {
+    if (!this.score) { this.flash('无曲谱可导出'); return; }
+    try {
+      if (this.flusher) await this.flusher.flush();   // 导出前先落盘最新改动
+      const text = await apiExportScore(this.score.meta.id);
+      const blob = new Blob([text], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = scoreFileName(this.score.meta.title);
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      this.flash('已导出整曲');
+    } catch (err) {
+      this.flash('导出失败:' + (err as Error).message);
+    }
+  }
+
+  /** 导入 .mscore 整曲文件 → 新建一曲谱 → 把内容铺进去。 */
+  private importScoreFile(): void {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.mscore,application/json';
+    input.addEventListener('change', () => {
+      const f = input.files?.[0];
+      if (!f) return;
+      void f.text().then(t => this.importScoreText(t));
+    });
+    input.click();
+  }
+
+  /** 由 .mscore 文本导入整曲(文件选择与拖拽共用)。 */
+  private async importScoreText(text: string): Promise<void> {
+    try {
+      const imported = deserializeScore(text);
+      if (this.flusher) await this.flusher.flush();
+      // 建新曲谱(用导入的 meta),再把各小节逐个 PUT。
+      const meta = await apiCreatePiece({
+        title: imported.meta.title || '导入的曲谱',
+        key: imported.meta.key,
+        time: imported.meta.time,
+        totalMeasures: imported.meta.totalMeasures,
+        viewMode: imported.meta.viewMode,
+      });
+      // 逐小节落盘(并发会乱序,顺序 await)。
+      for (let i = 0; i < imported.meta.totalMeasures; i++) {
+        await putMeasure(meta.id, i, imported.measures[i]);
+      }
+      this.pieces = [meta, ...this.pieces];
+      await this.loadScoreById(meta.id);
+      this.flash(`已导入整曲(${imported.meta.totalMeasures} 小节)`);
+    } catch (err) {
+      this.flash('导入失败:' + (err as Error).message);
+    }
+  }
+
+  /** 末尾追加一小节(扩 totalMeasures)。服务端补空小节文件,本地 score 同步。 */
+  private async addMeasure(): Promise<void> {
+    if (!this.score) return;
+    if (this.score.meta.totalMeasures >= 256) { this.flash('已达最大小节数 256'); return; }
+    try {
+      const newTotal = this.score.meta.totalMeasures + 1;
+      const meta = await apiUpdateMeta(this.score.meta.id, { totalMeasures: newTotal });
+      this.score.meta = meta;
+      this.score.measures.push(emptyMeasure());
+      // 若 window 大小不够、当前窗口末尾已到曲末 → 无需移窗。
+      // 确保 window 不越界。
+      if (this.currentStartMeasure + this.tool.measureCount > this.score.meta.totalMeasures) {
+        this.currentStartMeasure = Math.max(0, this.score.meta.totalMeasures - this.tool.measureCount);
+      }
+      this.rebuildRangePiece();
+      this.refreshProjectBar();
+      this.rebuildCards();
+      this.render();
+    } catch (err) {
+      this.flash('加小节失败:' + (err as Error).message);
+    }
+  }
+
+  /** 末尾删除一小节(缩 totalMeasures)。若删的是当前窗口范围外则不影响编辑区。 */
+  private async removeMeasure(): Promise<void> {
+    if (!this.score) return;
+    if (this.score.meta.totalMeasures <= 1) { this.flash('至少保留 1 小节'); return; }
+    // 末尾小节若有内容,确认。
+    const last = this.score.measures[this.score.measures.length - 1];
+    const hasContent = last && (last.treble.length > 0 || last.bass.length > 0);
+    if (hasContent && !confirm(`删除最后一小节(含 ${last.treble.length + last.bass.length} 个音符)?`)) return;
+    try {
+      const newTotal = this.score.meta.totalMeasures - 1;
+      const meta = await apiUpdateMeta(this.score.meta.id, { totalMeasures: newTotal });
+      this.score.meta = meta;
+      this.score.measures.pop();
+      // 确保窗口不越界。
+      if (this.currentStartMeasure >= this.score.meta.totalMeasures) {
+        this.currentStartMeasure = Math.max(0, this.score.meta.totalMeasures - this.tool.measureCount);
+      }
+      this.tool.measureCount = Math.min(this.tool.measureCount, this.score.meta.totalMeasures);
+      this.tool.measureCount = Math.max(1, this.tool.measureCount);
+      this.rebuildRangePiece();
+      this.refreshProjectBar();
+      this.rebuildCards();
+      this.rebuildToolbar();
+      this.render();
+    } catch (err) {
+      this.flash('减小节失败:' + (err as Error).message);
+    }
+  }
+
+  /** 点小节书签:切编辑区到「从第 n 小节起的 N 个连续小节」。保留其它小节。 */
+  private selectMeasure(n0Based: number): void {
+    if (!this.score) return;
+    // 切前先 flush 当前窗口改动。
+    void this.flusher?.flush();
+    const maxStart = Math.max(0, this.score.meta.totalMeasures - this.tool.measureCount);
+    this.currentStartMeasure = Math.max(0, Math.min(n0Based, maxStart));
+    this.rebuildRangePiece();
+    this.player.stop();
+    this.playingIndex = -1;
+    this.currentBeat = 0;
+    this.playState = 'stopped';
+    this.hover = null;
+    this.currentChordId = null;
+    this.tupletProgress = null;
+    this.refreshProjectBar();
+    this.rebuildCards();
+    this.render();
+  }
+
+  /** 打开整曲预览弹窗。 */
+  private openPreview(): void {
+    if (!this.score) { this.flash('无曲谱可预览'); return; }
+    this.previewModal?.open();
   }
 
   private buildDOM(): void {
@@ -145,6 +425,29 @@ export class App {
     header.innerHTML = `<h1>简谱翻译 <span class="dot">·</span> <em>MusicSheet</em></h1>
       <p class="hint">点击五线谱放音 → 下方实时显示简谱 · 类似短信验证码：只能往右追加，退格删除最后一个</p>`;
     this.root.appendChild(header);
+
+    // 项目面板(标题右侧,两行:曲谱选择 + 小节书签)。
+    this.projectBar = buildProjectBar(
+      { pieces: this.pieces, currentId: this.score?.meta.id ?? null, totalMeasures: this.score?.meta.totalMeasures ?? 0, currentStartMeasure: this.currentStartMeasure, measuresPerLine: this.tool.measureCount },
+      {
+        onSelectPiece: (id) => void this.loadScoreById(id),
+        onCreatePiece: () => void this.createNewPiece(),
+        onDeletePiece: () => void this.deleteCurrentPiece(),
+        onExportScore: () => void this.exportCurrentScore(),
+        onImportScore: () => void this.importScoreFile(),
+        onAddMeasure: () => void this.addMeasure(),
+        onRemoveMeasure: () => void this.removeMeasure(),
+        onSelectMeasure: (n) => this.selectMeasure(n),
+        onOpenPreview: () => this.openPreview(),
+      },
+    );
+    this.root.appendChild(this.projectBar.el);
+
+    // 整曲预览弹窗(惰性 open)。
+    this.previewModal = buildPreviewModal({
+      onSelectMeasure: (n) => this.selectMeasure(n),
+      getScore: () => this.score,
+    });
 
     this.toolbar = buildToolbar(this.tool, {
       onChange: () => this.onToolChange(),
@@ -198,16 +501,34 @@ export class App {
     });
     this.root.appendChild(this.playbackCard);
 
-    // 编辑操作栏（示例/清空 + 导出/导入下拉）—— 次要操作，放卡片下一行
+    // 编辑操作栏（示例/清空 + PNG 导出）—— 次要操作，放卡片下一行。
+    // 曲谱级导入/导出/删除 已移到项目面板。
     const editBar = document.createElement('div');
     editBar.className = 'edit-bar';
     const exampleBtn = mkBtn('示例：小星星', 'ghost', () => this.loadExample());
-    const clearBtn = mkBtn('清空', 'ghost', () => this.clear());
-    editBar.append(spacer(), exampleBtn, clearBtn, this.buildExportImportMenu());
+    const clearBtn = mkBtn('清空当前行', 'ghost', () => this.clear());
+    const pngBtn = mkBtn('⬇ 导出 PNG', 'ghost', () => { void this.doExport(); });
+    editBar.append(spacer(), exampleBtn, clearBtn, pngBtn);
     this.root.appendChild(editBar);
 
     this.bindKeys();
-    this.bindDragDrop();
+    // 拖拽 .mscore 文件导入整曲(复用 importScoreFile 的解析+建曲谱逻辑)。
+    let dragCounter = 0;
+    this.root.addEventListener('dragenter', (e) => {
+      if (!e.dataTransfer?.types.includes('Files')) return;
+      e.preventDefault();
+      dragCounter++;
+      this.root.classList.add('drag-over');
+    });
+    this.root.addEventListener('dragover', (e) => { if (e.dataTransfer?.types.includes('Files')) e.preventDefault(); });
+    this.root.addEventListener('dragleave', () => { dragCounter--; if (dragCounter <= 0) { dragCounter = 0; this.root.classList.remove('drag-over'); } });
+    this.root.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dragCounter = 0;
+      this.root.classList.remove('drag-over');
+      const file = e.dataTransfer?.files?.[0];
+      if (file) void file.text().then(t => this.importScoreText(t));
+    });
     // 全局 mouseup 复位 isMouseDown(只在构造器绑一次,避免 bindCard 每张卡都累积 window 监听器)。
     window.addEventListener('mouseup', () => { this.isMouseDown = false; });
     this.render();
@@ -495,173 +816,6 @@ export class App {
       const isActive = c === this.activeCard;
       c.svgHost.classList.toggle('inactive', this.viewMode === 'grand' && !isActive);
     }
-  }
-
-  /** 构建「导出/导入」下拉按钮组：导出 PNG / 导出乐谱 / 导入乐谱 */
-  private buildExportImportMenu(): HTMLElement {
-    const wrap = document.createElement('div');
-    wrap.className = 'dropdown';
-
-    const trigger = document.createElement('button');
-    trigger.className = 'btn btn-accent export-trigger';
-    trigger.type = 'button';
-    trigger.innerHTML = '⬇ 导出/导入 <span class="caret"></span>';
-
-    const menu = document.createElement('div');
-    menu.className = 'dropdown-menu anchored';
-
-    const pngItem = document.createElement('button');
-    pngItem.className = 'dropdown-item';
-    pngItem.type = 'button';
-    pngItem.textContent = '导出 PNG（图片）';
-    pngItem.addEventListener('click', (e) => { e.stopPropagation(); menu.classList.remove('open'); trigger.classList.remove('is-open'); void this.doExport(); });
-
-    const sheetItem = document.createElement('button');
-    sheetItem.className = 'dropdown-item';
-    sheetItem.type = 'button';
-    sheetItem.textContent = '导出乐谱（.msheet）';
-    sheetItem.addEventListener('click', (e) => { e.stopPropagation(); menu.classList.remove('open'); trigger.classList.remove('is-open'); this.doExportSheet(); });
-
-    const importItem = document.createElement('button');
-    importItem.className = 'dropdown-item';
-    importItem.type = 'button';
-    importItem.textContent = '导入乐谱…（也可拖拽文件）';
-    importItem.addEventListener('click', (e) => { e.stopPropagation(); menu.classList.remove('open'); trigger.classList.remove('is-open'); this.openImportPicker(); });
-
-    menu.append(pngItem, sheetItem, importItem);
-    // 菜单挂 body 下，fixed 定位脱离工具栏流避免被裁切
-    document.body.appendChild(menu);
-
-    trigger.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const open = menu.classList.toggle('open');
-      trigger.classList.toggle('is-open', open);
-      if (open) {
-        const r = trigger.getBoundingClientRect();
-        // 边界感知定位(水平 + 垂直):
-        // 水平:默认右对齐(菜单右边贴按钮右边),若左侧空间不足则左对齐
-        // 垂直:默认向下展开,若下方空间不足则向上展开(避免被视口底/页底裁切)
-        const menuW = 200;
-        const margin = 8;
-        let left: number;
-        if (r.right - menuW >= margin) {
-          left = r.right - menuW;            // 左侧够:右对齐
-        } else {
-          left = margin;                      // 左侧不够:贴左边
-        }
-        menu.style.left = `${left}px`;
-        menu.style.minWidth = `${menuW}px`;
-        // 先设 top(向下),测高度后判断是否需向上
-        menu.style.top = `${r.bottom + 6}px`;
-        // 用 rAF 等渲染后测实际高度,若超出视口底部则向上展开
-        requestAnimationFrame(() => {
-          const menuH = menu.getBoundingClientRect().height;
-          const spaceBelow = window.innerHeight - r.bottom;
-          if (menuH + margin > spaceBelow && r.top > menuH + margin) {
-            // 下方不够且上方够:向上展开
-            menu.style.top = `${r.top - menuH - 6}px`;
-          }
-        });
-      }
-    });
-    // 点外部关闭
-    document.addEventListener('click', () => { menu.classList.remove('open'); trigger.classList.remove('is-open'); });
-
-    wrap.append(trigger, menu);
-    return wrap;
-  }
-
-  /** 导出乐谱为 .msheet 文件 */
-  private doExportSheet(): void {
-    if (this.piece.notes.length === 0) { this.flash('乐谱为空，无内容可导出'); return; }
-    try {
-      const text = serialize(this.piece);
-      const blob = new Blob([text], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = sheetFileName();
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-      this.flash(`已导出 ${this.piece.notes.length} 个音符`);
-    } catch (err) {
-      this.flash('导出失败：' + (err as Error).message);
-    }
-  }
-
-  /** 打开文件选择器导入乐谱 */
-  private openImportPicker(): void {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = SHEET_EXTENSION + ',application/json';
-    input.addEventListener('change', () => {
-      const f = input.files?.[0];
-      if (f) void this.doImportSheet(f);
-    });
-    input.click();
-  }
-
-  /** 读取文件并导入：校验 + 覆盖确认 + 替换 piece */
-  private async doImportSheet(file: File): Promise<void> {
-    if (this.piece.notes.length > 0) {
-      if (!confirm('当前乐谱已有内容，导入将覆盖。确定继续吗？')) return;
-    }
-    try {
-      const text = await file.text();
-      const piece = deserialize(text);
-      this.applyImportedPiece(piece);
-      this.flash(`已导入 ${piece.notes.length} 个音符`);
-    } catch (err) {
-      this.flash('导入失败：' + (err as Error).message);
-    }
-  }
-
-  /** 应用导入的 piece：同步 tool 状态 + 重建卡片/工具栏 + 重置播放 + render */
-  private applyImportedPiece(piece: Piece): void {
-    this.piece = piece;
-    // 同步工具栏选项(谱号由导入 piece 决定 viewMode)
-    this.tool.key = piece.key.name;
-    this.tool.time = { ...piece.time };
-    this.tool.measureCount = piece.measureCount;
-    // 按 piece.clef 设 viewMode
-    this.viewMode = piece.clef === 'bass' ? 'bass' : 'treble';
-    this.player.stop();
-    this.playingIndex = -1;
-    this.currentBeat = 0;
-    this.playState = 'stopped';
-    this.hover = null;
-    this.currentChordId = null;
-    this.tupletProgress = null;
-    this.rebuildCards();
-    this.rebuildToolbar();
-    this.render();
-  }
-
-  /** 拖拽导入：整个 app 容器接收文件拖放 */
-  private bindDragDrop(): void {
-    let dragCounter = 0;
-    this.root.addEventListener('dragenter', (e) => {
-      if (!e.dataTransfer?.types.includes('Files')) return;
-      e.preventDefault();
-      dragCounter++;
-      this.root.classList.add('drag-over');
-    });
-    this.root.addEventListener('dragover', (e) => {
-      if (e.dataTransfer?.types.includes('Files')) e.preventDefault();
-    });
-    this.root.addEventListener('dragleave', () => {
-      dragCounter--;
-      if (dragCounter <= 0) { dragCounter = 0; this.root.classList.remove('drag-over'); }
-    });
-    this.root.addEventListener('drop', (e) => {
-      e.preventDefault();
-      dragCounter = 0;
-      this.root.classList.remove('drag-over');
-      const file = e.dataTransfer?.files?.[0];
-      if (file) void this.doImportSheet(file);
-    });
   }
 
   private isMouseDown = false;
@@ -1015,11 +1169,41 @@ export class App {
   }
 
   private afterEdit(): void {
+    // 把范围视图 Piece 切回 score.measures(按小节拍边界),并标记 dirty 小节做 3 秒防抖落盘。
+    this.syncRangePieceToScore();
     // 追加后重置一次性修饰（附点/升降/休止），符合行业惯例
     (this.toolbar as any)._resetModifiers?.();
     this.hover = null;
     this.syncPlayerAfterEdit();
     this.render();
+  }
+
+  /** 编辑后把范围视图 Piece 切回 this.score,并把范围内被改动的小节标记 dirty(3 秒防抖落盘)。
+   *  切回后立即 rebuildRangePiece() 让 this.piece 重新指向 score 的最新数据(引用一致),
+   *  避免 piece 与 score 脱节。 */
+  private syncRangePieceToScore(): void {
+    if (!this.score || !this.flusher) return;
+    const start = this.currentStartMeasure;
+    const count = this.piece.measureCount;
+    // 切回前快照范围内旧小节,用于 dirty 对比(只落盘真正改动的小节)。
+    const oldSnapshot: MeasureData[] = [];
+    for (let i = start; i < start + count && i < this.score.meta.totalMeasures; i++) {
+      const m = this.score.measures[i] || emptyMeasure();
+      oldSnapshot.push({ treble: [...m.treble], bass: [...m.bass] });
+    }
+    pieceBackToScore(this.score, this.piece, start);
+    // rebuildRangePiece 让 this.piece 重新指向 score 最新数据(保持引用一致)。
+    // 注:此刻 viewMode/activeStaff 不变,直接复用。
+    this.rebuildRangePiece();
+    // 比对范围内各小节,改动则标记 dirty。
+    for (let k = 0; k < count && start + k < this.score.meta.totalMeasures; k++) {
+      const idx = start + k;
+      const cur = this.score.measures[idx] || emptyMeasure();
+      const old = oldSnapshot[k];
+      if (!old || JSON.stringify(old) !== JSON.stringify(cur)) {
+        this.flusher.markDirty(idx, { treble: cur.treble, bass: cur.bass });
+      }
+    }
   }
 
   /** 编辑（增删音）后同步 Player 的 schedule，避免播放头/高亮与新乐谱错位。
@@ -1037,19 +1221,58 @@ export class App {
   }
 
   private onToolChange(): void {
-    const oldTime = `${this.piece.time.num}/${this.piece.time.den}`;
+    const oldTime = this.score ? `${this.score.meta.time.num}/${this.score.meta.time.den}` : `${this.piece.time.num}/${this.piece.time.den}`;
     const oldMeasureCount = this.piece.measureCount;
     const oldViewMode = this.viewMode;
-    this.piece.key = KEYS[this.tool.key];
-    this.piece.time = { ...this.tool.time };
-    this.piece.measureCount = this.tool.measureCount;
+    const oldKey = this.score ? this.score.meta.key.name : this.piece.key.name;
+    const newTime = `${this.tool.time.num}/${this.tool.time.den}`;
+    const newKey = this.tool.key;
     this.viewMode = this.tool.viewMode;
-    // 切换拍号 / 小节数:两组共享,清空已输入音符(避免错位与节奏错乱)。
-    const newTime = `${this.piece.time.num}/${this.piece.time.den}`;
-    if (oldTime !== newTime || oldMeasureCount !== this.piece.measureCount) {
-      this.piece.treble = [];
-      this.piece.bass = [];
-      if (this.activeCard) this.piece.notes = this.activeCard.staff === 'bass' ? this.piece.bass : this.piece.treble;
+
+    // 调号/拍号变更:整曲级属性,更新 score.meta 并落盘。拍号变更会改变小节拍边界,
+    // 故清空整曲所有小节(避免错位与节奏错乱)。
+    if (this.score) {
+      this.score.meta.key = KEYS[newKey];
+      this.score.meta.time = { ...this.tool.time };
+      this.score.meta.viewMode = this.tool.viewMode;
+      // 同步 piece 视图的 key/time(rangeToPiece 会读 score.meta)。
+      this.piece.key = this.score.meta.key;
+      this.piece.time = this.score.meta.time;
+      // 拍号变化:清空整曲小节(拍边界变了,旧音符会错位)。
+      if (oldTime !== newTime) {
+        for (let i = 0; i < this.score.meta.totalMeasures; i++) {
+          this.score.measures[i] = emptyMeasure();
+          if (this.flusher) this.flusher.markDirty(i, emptyMeasure());
+        }
+        this.currentStartMeasure = 0;
+        this.playingIndex = -1;
+        if (this.playState !== 'stopped') {
+          this.player.stop();
+          this.currentBeat = 0;
+          this.playState = 'stopped';
+          this.refreshCard();
+        }
+        // 异步落盘 meta(key/time/viewMode 改动)。
+        void apiUpdateMeta(this.score.meta.id, {
+          key: this.score.meta.key, time: this.score.meta.time, viewMode: this.score.meta.viewMode,
+        }).catch(err => this.flash('保存设置失败:' + err.message));
+      } else if (oldKey !== newKey || oldViewMode !== this.tool.viewMode) {
+        // 仅调号/视图模式变:落盘 meta(不清音符)。
+        void apiUpdateMeta(this.score.meta.id, {
+          key: this.score.meta.key, viewMode: this.score.meta.viewMode,
+        }).catch(err => this.flash('保存设置失败:' + err.message));
+      }
+    } else {
+      // 无 score(内存模式):直接改 piece(向后兼容)。
+      this.piece.key = KEYS[newKey];
+      this.piece.time = { ...this.tool.time };
+    }
+
+    // 小节数(tool.measureCount)现在语义是「编辑区每行显示几个小节」(窗口大小),
+    // 改它只重建范围视图(换显示哪几个),不清空、不动其它小节。
+    if (oldMeasureCount !== this.tool.measureCount) {
+      // 切窗口大小时先 flush 当前范围的改动,再重建。
+      this.rebuildRangePiece();
       this.playingIndex = -1;
       if (this.playState !== 'stopped') {
         this.player.stop();
@@ -1057,7 +1280,11 @@ export class App {
         this.playState = 'stopped';
         this.refreshCard();
       }
+    } else if (oldTime === newTime && this.score) {
+      // key/viewMode 变了但 measureCount 没变:piece.key/time 已上面同步,这里确保 piece 视图刷新。
+      this.rebuildRangePiece();
     }
+
     // 先保存当前谱号的输入配置(必须在 rebuildCards 之前,否则切模式时 loadStaffConfig
     // 读到的是旧配置),再重建卡片。数据(treble/bass 组)保留不清空。
     if (this.activeCard) this.saveStaffConfig(this.activeCard.staff);
@@ -1065,6 +1292,8 @@ export class App {
     if (oldViewMode !== this.viewMode) {
       this.rebuildCards();
     }
+    // 窗口大小变了 → 书签条的 in-window 高亮范围变了,刷新面板。
+    if (oldMeasureCount !== this.tool.measureCount) this.refreshProjectBar();
     this.render();
   }
 
@@ -1266,20 +1495,50 @@ export class App {
   }
 
   private clear(): void {
-    this.piece = createPiece();
-    this.piece.key = KEYS[this.tool.key];
-    this.piece.time = { ...this.tool.time };
-    this.piece.measureCount = this.tool.measureCount;
+    if (this.score) {
+      // 清空当前范围(编辑区显示的几个小节)的音符,标记 dirty 落盘。其它小节保留。
+      const start = this.currentStartMeasure;
+      for (let i = start; i < start + this.tool.measureCount && i < this.score.meta.totalMeasures; i++) {
+        this.score.measures[i] = emptyMeasure();
+        if (this.flusher) this.flusher.markDirty(i, emptyMeasure());
+      }
+      this.rebuildRangePiece();
+    } else {
+      this.piece = createPiece();
+      this.piece.key = KEYS[this.tool.key];
+      this.piece.time = { ...this.tool.time };
+      this.piece.measureCount = this.tool.measureCount;
+    }
     this.playingIndex = -1;
+    if (this.playState !== 'stopped') { this.player.stop(); this.currentBeat = 0; this.playState = 'stopped'; }
     this.rebuildCards();
     this.render();
   }
 
   private loadExample(): void {
-    this.piece = twinkleExample(this.tool.measureCount);
-    this.piece.key = KEYS[this.tool.key];
-    this.piece.time = { ...this.tool.time };
-    this.piece.measureCount = this.tool.measureCount;
+    // 小星星示例填到当前范围(tool.measureCount 个小节)。示例是单组 treble 旋律。
+    const ex = twinkleExample(this.tool.measureCount);
+    if (this.score) {
+      const start = this.currentStartMeasure;
+      for (let i = 0; i < this.tool.measureCount && start + i < this.score.meta.totalMeasures; i++) {
+        // 示例按小节铺:第 i 小节的音符 = 示例在第 i 小节拍范围内的音。
+        this.score.measures[start + i] = { treble: [], bass: [] };
+      }
+      // 示例 notes 是连续的,需按小节拍边界切分铺到范围内各小节。
+      const fakePiece = ex;
+      pieceBackToScore(this.score, fakePiece, start);
+      // 标记范围内各小节 dirty。
+      for (let i = start; i < start + this.tool.measureCount && i < this.score.meta.totalMeasures; i++) {
+        const m = this.score.measures[i] || emptyMeasure();
+        if (this.flusher) this.flusher.markDirty(i, { treble: m.treble, bass: m.bass });
+      }
+      this.rebuildRangePiece();
+    } else {
+      this.piece = ex;
+      this.piece.key = KEYS[this.tool.key];
+      this.piece.time = { ...this.tool.time };
+      this.piece.measureCount = this.tool.measureCount;
+    }
     this.rebuildCards();
     this.rebuildToolbar();
     this.render();

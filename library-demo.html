@@ -1,0 +1,1070 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>曲谱库 · 设计 demo</title>
+<link rel="stylesheet" href="/src/style.css" />
+<style>
+  /* ── demo 专属:曲谱库全屏视图 ──
+     设计目标:像 Logic/GarageBand 启动项目选择器,而非标题栏附属控件。
+     核心理念:卡片即入口(点卡片进曲子),卡片本身就是真实五线谱缩略图(一眼认出曲子)。 */
+
+  .lib {
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 28px 28px 60px;
+  }
+
+  /* 顶部:标题 + 工具条 */
+  .lib-top {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 22px;
+    flex-wrap: wrap;
+  }
+  .lib-title h1 {
+    margin: 0 0 4px;
+    font-size: 26px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .lib-title .count {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--accent);
+    background: var(--accent-soft);
+    padding: 2px 9px;
+    border-radius: 20px;
+  }
+  .lib-title p {
+    margin: 0;
+    font-size: 13px;
+    color: var(--muted);
+  }
+
+  /* 工具条:搜索 + 排序 + 视图 + 新建 */
+  .lib-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .lib-search {
+    position: relative;
+  }
+  .lib-search input {
+    font: inherit;
+    font-size: 14px;
+    width: 220px;
+    padding: 9px 12px 9px 34px;
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    background: var(--card);
+    color: var(--ink);
+    outline: none;
+    transition: all 0.16s;
+  }
+  .lib-search input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-ring);
+    width: 260px;
+  }
+  .lib-search svg {
+    position: absolute;
+    left: 11px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--muted);
+    pointer-events: none;
+  }
+  .lib-seg {
+    display: flex;
+    gap: 2px;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    padding: 3px;
+  }
+  .lib-seg button {
+    font: inherit;
+    font-size: 13px;
+    border: 0;
+    background: transparent;
+    color: var(--muted);
+    padding: 6px 12px;
+    border-radius: 16px;
+    cursor: pointer;
+    transition: all 0.14s;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .lib-seg button:hover { color: var(--ink); }
+  .lib-seg button.active {
+    background: var(--ink);
+    color: #fff;
+  }
+  .lib-new {
+    font: inherit;
+    font-size: 14px;
+    font-weight: 600;
+    color: #fff;
+    background: var(--accent);
+    border: 0;
+    border-radius: 20px;
+    padding: 9px 16px 9px 13px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    box-shadow: 0 4px 12px rgba(79, 70, 229, 0.28);
+    transition: transform 0.14s cubic-bezier(.34,1.56,.64,1), box-shadow 0.14s;
+  }
+  .lib-new:hover {
+    transform: translateY(-1px) scale(1.02);
+    box-shadow: 0 6px 18px rgba(79, 70, 229, 0.36);
+  }
+  .lib-new:active { transform: translateY(0) scale(0.99); }
+
+  /* ── 网格视图 ── */
+  .lib-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 18px;
+  }
+  /* 列表视图 */
+  .lib-grid.list {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  /* ── 曲谱卡片 ── */
+  .score-card {
+    position: relative;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    overflow: hidden;
+    cursor: pointer;
+    transition: transform 0.22s cubic-bezier(.34,1.4,.64,1), box-shadow 0.22s, border-color 0.16s;
+    box-shadow: var(--shadow-sm);
+    outline: none;
+  }
+  .score-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 12px 32px rgba(16, 24, 40, 0.12);
+    border-color: transparent;
+  }
+  .score-card.selected {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-ring), 0 12px 32px rgba(79, 70, 229, 0.18);
+  }
+  .score-card:focus-visible {
+    box-shadow: 0 0 0 3px var(--accent-ring);
+  }
+
+  /* 缩略图:真实五线谱渲染(前两小节),卡片的核心识别区 */
+  .sc-thumb {
+    height: 110px;
+    background: linear-gradient(180deg, #fcfcfd 0%, #f4f5f8 100%);
+    border-bottom: 1px solid var(--line-2);
+    overflow: hidden;
+    position: relative;
+    display: flex;
+    align-items: center;
+    padding: 6px 10px;
+  }
+  .sc-thumb svg {
+    width: 100%;
+    height: 100%;
+    display: block;
+    transition: transform 0.3s cubic-bezier(.34,1.3,.64,1);
+  }
+  .score-card:hover .sc-thumb svg { transform: scale(1.04); }
+  /* 缩略图右下角:小节数徽章 */
+  .sc-bars {
+    position: absolute;
+    right: 8px;
+    bottom: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--ink-2);
+    background: rgba(255,255,255,0.88);
+    backdrop-filter: blur(4px);
+    padding: 2px 8px;
+    border-radius: 10px;
+    border: 1px solid var(--line-2);
+  }
+  /* 空曲谱:占位提示 */
+  .sc-thumb.empty::after {
+    content: '空曲谱';
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--muted);
+    font-size: 13px;
+  }
+
+  /* 卡片信息区 */
+  .sc-body {
+    padding: 12px 14px 13px;
+  }
+  .sc-title-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 7px;
+  }
+  .sc-title {
+    font-size: 15px;
+    font-weight: 650;
+    color: var(--ink);
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  /* 调号/拍号 徽章 */
+  .sc-badges {
+    display: flex;
+    gap: 5px;
+    flex-wrap: wrap;
+    margin-bottom: 8px;
+  }
+  .sc-badge {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--ink-2);
+    background: var(--bg);
+    padding: 2px 8px;
+    border-radius: 10px;
+  }
+  .sc-badge.key { color: var(--accent); background: var(--accent-soft); }
+  .sc-meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  /* 内容指示:已写多少小节(进度点) */
+  .sc-fill {
+    display: flex;
+    gap: 3px;
+    align-items: center;
+  }
+  .sc-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--line);
+    transition: background 0.2s;
+  }
+  .sc-dot.filled { background: var(--accent); }
+
+  /* 卡片操作浮层(hover 出现):重命名/复制/导出/删除 */
+  .sc-actions {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    display: flex;
+    gap: 4px;
+    opacity: 0;
+    transform: translateY(-4px);
+    transition: opacity 0.16s, transform 0.16s;
+  }
+  .score-card:hover .sc-actions,
+  .score-card.selected .sc-actions {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  .sc-act {
+    width: 28px;
+    height: 28px;
+    border: 0;
+    border-radius: 7px;
+    background: rgba(255,255,255,0.92);
+    backdrop-filter: blur(6px);
+    color: var(--ink-2);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: var(--shadow-sm);
+    transition: all 0.14s;
+  }
+  .sc-act:hover { background: var(--card); color: var(--accent); transform: scale(1.08); }
+  .sc-act.danger:hover { color: #ef4444; }
+
+  /* 新建占位卡:虚线边框,点开 inline 输入 */
+  .score-card.new-card {
+    border: 2px dashed var(--line);
+    background: transparent;
+    box-shadow: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 220px;
+    color: var(--muted);
+    transition: all 0.18s;
+  }
+  .score-card.new-card:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: var(--accent-soft);
+    transform: translateY(-2px);
+  }
+  .new-card-inner {
+    text-align: center;
+  }
+  .new-card-inner .plus {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: var(--accent-soft);
+    color: var(--accent);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+    margin-bottom: 8px;
+    transition: transform 0.2s cubic-bezier(.34,1.56,.64,1);
+  }
+  .score-card.new-card:hover .plus { transform: rotate(90deg) scale(1.1); }
+
+  /* 列表视图下的卡片:横向布局 */
+  .lib-grid.list .score-card {
+    display: flex;
+    align-items: stretch;
+    min-height: 64px;
+  }
+  .lib-grid.list .sc-thumb {
+    width: 140px;
+    height: auto;
+    border-bottom: 0;
+    border-right: 1px solid var(--line-2);
+    flex-shrink: 0;
+  }
+  .lib-grid.list .sc-body {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+  .lib-grid.list .sc-title-row { margin: 0; flex: 1; }
+  .lib-grid.list .sc-badges,
+  .lib-grid.list .sc-meta { margin: 0; }
+  .lib-grid.list .new-card { min-height: 64px; }
+
+  /* 进入曲谱的过渡(点卡片 → 假装进入编辑) */
+  .lib-entering {
+    animation: libFade 0.4s ease forwards;
+  }
+  @keyframes libFade {
+    to { opacity: 0; transform: scale(0.96); }
+  }
+
+  /* 空状态:无搜索结果 */
+  .lib-empty {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--muted);
+  }
+  .lib-empty .big { font-size: 40px; margin-bottom: 12px; opacity: 0.4; }
+
+  /* hint 条 */
+  .lib-hint {
+    margin-top: 28px;
+    padding: 12px 16px;
+    background: var(--accent-soft);
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+    color: var(--ink-2);
+    line-height: 1.7;
+  }
+  .lib-hint kbd {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 1px 6px;
+    font-size: 11px;
+    font-family: ui-monospace, monospace;
+    box-shadow: 0 1px 0 var(--line);
+  }
+
+  /* ── 进入曲子视图:小节管理 ── */
+  .score-view { padding-bottom: 40px; }
+
+  /* ── MeasureSelector 组件(最终方案:选框=视觉叠加层,书签不挪窝,transform 驱动)── */
+  .ms-wrap {
+    position: relative;
+    width: 100%;          /* 撑满 host(由 host 的 flex:1 约束宽度) */
+    height: 64px;
+    overflow-x: auto;
+    overflow-y: visible;
+    padding: 0;
+    user-select: none;
+    touch-action: pan-y;  /* 允许纵向滚动,横向交给选框/把手拖拽(触屏兜底) */
+    scrollbar-width: thin;
+  }
+  .ms-wrap::-webkit-scrollbar { height: 6px; }
+  .ms-wrap::-webkit-scrollbar-thumb { background: var(--line); border-radius: 3px; }
+  /* track:流式元素,width 撑开 wrap 的可滚动宽度(absolute 子元素不撑开滚动)。
+     它是 absolute 子元素的定位上下文。 */
+  .ms-track {
+    position: relative;
+    min-width: 100%;
+    height: 1px;   /* 高度 0 不占垂直空间,子元素 absolute 自己定位 */
+  }
+  .ms-sel {
+    position: absolute;
+    left: 0; top: 0;
+    height: 62px;
+    box-sizing: border-box;
+    background: #f0f2ff;
+    border-radius: 13px;
+    z-index: 0;
+    pointer-events: none;   /* 底色层:纯装饰,在书签下,不挡点击 */
+    transition: transform 0.25s cubic-bezier(.34,1.3,.64,1), width 0.25s cubic-bezier(.34,1.3,.64,1);
+  }
+  /* 选框边框层:独立叠加元素,只画边框/投影/圆角,z 高于书签,
+     保证框外书签滑过时边框永不被书签白底盖住。pointer-events:none 不挡点击。 */
+  .ms-sel-border {
+    position: absolute;
+    left: 0; top: 0;
+    height: 62px;
+    box-sizing: border-box;
+    border: 2px solid rgba(99,102,241,0.55);
+    border-radius: 13px;
+    box-shadow: 0 3px 10px rgba(79,70,229,0.15);
+    z-index: 3;
+    pointer-events: none;
+    transition: transform 0.25s cubic-bezier(.34,1.3,.64,1), width 0.25s cubic-bezier(.34,1.3,.64,1);
+  }
+  .ms-wrap.ms-dragging .ms-sel,
+  .ms-wrap.ms-dragging .ms-sel-border { transition: none; }
+  .ms-grip {
+    position: absolute;
+    left: 0; top: 20px;       /* 对齐选框垂直中心(选框 top:0 h:62,中心31;把手h:22→top=20) */
+    width: 5px; height: 22px;
+    background: rgba(99,102,241,0.30);
+    border-radius: 3px;
+    cursor: ew-resize;
+    z-index: 2;              /* 高于书签(z:1),可命中拖拽 */
+    pointer-events: auto;
+    touch-action: none;      /* 触屏拖把手不被滚动拦截 */
+    transition: transform 0.25s cubic-bezier(.34,1.3,.64,1);
+  }
+  .ms-wrap.ms-dragging .ms-grip { cursor: grabbing; transition: none; }
+  .ms-blk {
+    position: absolute;
+    left: 0; top: 10px;
+    width: 44px; height: 42px;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    font-size: 15px; font-weight: 600; color: var(--ink-2);
+    z-index: 1;
+    touch-action: none;      /* 触屏点书签/拖拽不被滚动拦截 */
+    transition: transform 0.16s cubic-bezier(.34,1.3,.64,1), opacity 0.2s, background 0.2s, border-color 0.2s;
+  }
+  .ms-blk.has-content::after {
+    content: ''; position: absolute; bottom: 5px; left: 50%; transform: translateX(-50%);
+    width: 5px; height: 5px; border-radius: 50%; background: var(--accent);
+  }
+  .ms-blk.inside { background: rgba(99,102,241,0.06); border-color: rgba(99,102,241,0.3); }
+  /* 加小节进场:alpha 淡入(~200ms)。只动 opacity,不碰 transform(避免与定位冲突)。 */
+  .ms-blk.ms-enter { opacity: 0; transition: none; }
+  /* 删小节退场:alpha 淡出 + 缩小(用 @keyframes,不干扰 transform 定位)。 */
+  .ms-blk.ms-leave { opacity: 0; pointer-events: none; z-index: 2; transition: opacity 0.2s ease; }
+  .ms-del {
+    position: absolute; top: -7px; right: -7px;
+    width: 19px; height: 19px;
+    border: 2px solid var(--card); border-radius: 50%;
+    background: #ef4444; color: #fff;
+    font-size: 13px; font-weight: 700; line-height: 1;
+    padding: 0; cursor: pointer; z-index: 3;
+    display: flex; align-items: center; justify-content: center;
+    opacity: 0; transform: scale(0.5);
+    transition: opacity 0.15s, transform 0.15s cubic-bezier(.34,1.56,.64,1), background 0.12s;
+  }
+  /* 叉的透明热区:扩展到书签右上角一块(约 24×24),让鼠标移到右上角即可触发叉显形。
+     不再用 .ms-blk:hover(那样 hover 整个书签都出叉)。
+     opacity:0 的元素 pointer-events 仍有效,故热区可被 hover。 */
+  .ms-del::before {
+    content: ''; position: absolute;
+    top: -8px; right: -8px;        /* 热区比叉本体更大,覆盖右上角 */
+    width: 24px; height: 24px;
+    border-radius: 50%;
+  }
+  .ms-blk.inside .ms-del { display: none; }   /* 框内书签彻底无叉 */
+  .ms-del:hover { opacity: 1; transform: scale(1); }   /* 鼠标进右上角热区 → 出叉 */
+  .ms-del:hover:hover { background: #dc2626; transform: scale(1.15); }
+  .ms-add {
+    position: absolute; left: 0; top: 10px;
+    width: 40px; height: 42px;
+    background: transparent;
+    border: 1px dashed var(--line); border-radius: 10px;
+    color: var(--muted); font-size: 22px;
+    cursor: pointer; z-index: 1;
+    touch-action: manipulation;
+    transition: transform 0.16s cubic-bezier(.34,1.3,.64,1), all 0.14s;
+  }
+  .ms-wrap.ms-dragging .ms-add { transition: none; }
+  .ms-add:hover { border-color: var(--accent); color: var(--accent); border-style: solid; }
+
+  .appbar {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 8px 0 20px;
+    margin-bottom: 8px;
+    border-bottom: 1px solid var(--line-2);
+  }
+  .appbar-back {
+    font: inherit;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--ink-2);
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 22px;
+    padding: 9px 16px 9px 12px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: all 0.16s cubic-bezier(.34,1.3,.64,1);
+  }
+  .appbar-back:hover { border-color: var(--accent); color: var(--accent); transform: translateX(-2px); }
+  .appbar-back:active { transform: translateX(0); }
+  .appbar-center {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+  }
+  .appbar-name {
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    outline: none;
+    border-radius: 6px;
+    padding: 2px 6px;
+    margin-left: -6px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
+  }
+  .appbar-name:focus { background: var(--accent-soft); box-shadow: 0 0 0 2px var(--accent-ring); }
+  .appbar-badge {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--ink-2);
+    background: var(--bg);
+    padding: 3px 10px;
+    border-radius: 12px;
+    flex-shrink: 0;
+  }
+  .appbar-badge.key { color: var(--accent); background: var(--accent-soft); }
+  /* 视图模式 radio(高音/低音/双谱/预览) */
+  .appbar-view {
+    display: flex;
+    gap: 2px;
+    background: var(--bg);
+    border-radius: 20px;
+    padding: 3px;
+    margin-left: 4px;
+  }
+  .appbar-vbtn {
+    font: inherit;
+    font-size: 17px;
+    border: 0;
+    background: transparent;
+    color: var(--muted);
+    padding: 5px 12px;
+    border-radius: 16px;
+    cursor: pointer;
+    transition: all 0.14s;
+    line-height: 1;
+    min-width: 36px;
+  }
+  .appbar-vbtn:hover { color: var(--ink); }
+  .appbar-vbtn.active { background: var(--card); color: var(--accent); box-shadow: var(--shadow-sm); font-weight: 600; }
+  .appbar-right { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+  .appbar-act {
+    font: inherit;
+    font-size: 18px;
+    font-weight: 600;
+    width: 32px; height: 32px;
+    line-height: 1;
+    color: var(--ink-2);
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    cursor: pointer;
+    padding: 0;
+    transition: all 0.14s;
+  }
+  .appbar-act:hover { border-color: var(--accent); color: var(--accent); }
+  .appbar-count { font-size: 14px; font-weight: 650; min-width: 24px; text-align: center; }
+  .appbar-sep { width: 1px; height: 22px; background: var(--line); margin: 0 4px; }
+  .appbar-preview {
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--ink-2);
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    padding: 8px 14px;
+    cursor: pointer;
+    transition: all 0.14s;
+  }
+  .appbar-preview:hover { border-color: var(--accent); color: var(--accent); }
+  .sv-top {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 6px 0 18px;
+    flex-wrap: wrap;
+  }
+  .sv-back {
+    font: inherit;
+    font-size: 14px;
+    color: var(--ink-2);
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+    padding: 6px 8px;
+    border-radius: 8px;
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    transition: all 0.14s;
+  }
+  .sv-back:hover { background: var(--bg); color: var(--accent); }
+  .sv-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+    min-width: 0;
+  }
+  .sv-name {
+    font-size: 19px;
+    font-weight: 700;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .sv-badge {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--ink-2);
+    background: var(--bg);
+    padding: 2px 8px;
+    border-radius: 10px;
+  }
+  .sv-badge.key { color: var(--accent); background: var(--accent-soft); }
+  .sv-top-actions { display: flex; align-items: center; gap: 10px; }
+  /* 工具栏小节数控件(曲子属性,和调号拍号同级语义) */
+  .sv-barctrl {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    background: var(--bg);
+    border-radius: var(--radius-sm);
+    padding: 3px 6px 3px 10px;
+  }
+  .sv-barctrl-label { font-size: 12px; color: var(--muted); margin-right: 4px; }
+  .sv-mini {
+    font: inherit;
+    font-size: 16px;
+    font-weight: 600;
+    width: 26px; height: 26px;
+    color: var(--ink-2);
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    cursor: pointer;
+    padding: 0;
+    line-height: 1;
+  }
+  .sv-mini:hover { border-color: var(--accent); color: var(--accent); }
+  .sv-barcount { font-size: 14px; font-weight: 650; min-width: 24px; text-align: center; }
+  .sv-preview {
+    font: inherit;
+    font-size: 13px;
+    color: var(--ink-2);
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    padding: 7px 14px;
+    cursor: pointer;
+    transition: all 0.14s;
+  }
+  .sv-preview:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* 小节缩略图条 */
+  /* 小节条:数字方块 + 可拖拽吸附选择框 */
+  .sv-barwrap {
+    margin-bottom: 18px;
+  }
+  .sv-measures {
+    position: relative;
+    overflow-x: auto;
+    overflow-y: visible;
+    padding: 4px 4px 6px;
+    user-select: none;
+  }
+  .sv-measures::-webkit-scrollbar { height: 6px; }
+  .sv-measures::-webkit-scrollbar-thumb { background: var(--line); border-radius: 3px; }
+  .sv-m-track {
+    display: flex;
+    align-items: stretch;
+    gap: 6px;
+    width: max-content;
+    min-width: 100%;
+  }
+  .sv-m {
+    flex: 0 0 44px;
+    height: 38px;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.14s cubic-bezier(.34,1.3,.64,1);
+    position: relative;
+  }
+  .sv-m:hover { border-color: var(--accent); transform: translateY(-1px); }
+  /* hover 出现的删除叉(右上角) */
+  .sv-m-del {
+    position: absolute;
+    top: -5px; right: -5px;
+    width: 18px; height: 18px;
+    border: 0;
+    border-radius: 50%;
+    background: #ef4444;
+    color: #fff;
+    font-size: 13px;
+    font-weight: 700;
+    line-height: 16px;
+    padding: 0;
+    cursor: pointer;
+    opacity: 0;
+    transform: scale(0.6);
+    transition: opacity 0.14s, transform 0.14s cubic-bezier(.34,1.56,.64,1);
+    z-index: 5;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .sv-m:hover .sv-m-del { opacity: 1; transform: scale(1); }
+  .sv-m-del:hover { background: #dc2626; transform: scale(1.12); }
+  /* 选中区里的方块 hover 删除叉更显眼 */
+  .sv-m.in-sel:hover .sv-m-del { opacity: 1; }
+  .sv-m-num {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--ink-2);
+  }
+  /* 有内容的方块:数字下方加一个 accent 圆点 */
+  .sv-m.has-content::after {
+    content: '';
+    position: absolute;
+    bottom: 5px; left: 50%;
+    transform: translateX(-50%);
+    width: 5px; height: 5px;
+    border-radius: 50%;
+    background: var(--accent);
+  }
+  /* 末尾加小节 */
+  .sv-m-add {
+    border-style: dashed;
+    color: var(--muted);
+    font-size: 20px;
+  }
+  .sv-m-add:hover { color: var(--accent); border-color: var(--accent); }
+  /* 可拖拽吸附选择框:框住当前编辑的小节。
+     关键:背景半透明 + 数字方块在它之上(避免盖住数字)。
+     选择框只做"框线 + 左右把手"指示,不挡内容。 */
+  .sv-selector {
+    position: absolute;
+    border: 2px solid var(--accent);
+    border-radius: 13px;
+    background: rgba(79, 70, 229, 0.06);   /* 极淡,不挡数字 */
+    box-sizing: border-box;
+    pointer-events: auto;
+    cursor: grab;
+    transition: left 0.12s cubic-bezier(.34,1.3,.64,1), width 0.12s cubic-bezier(.34,1.3,.64,1), box-shadow 0.14s;
+    box-shadow: 0 4px 12px rgba(79,70,229,0.14);
+    z-index: 1;   /* 在数字方块(track 内)之下 */
+  }
+  /* 选中区内的方块:轻微 accent 底,强化"这几小节在编辑"语义,但仍清晰可读 */
+  .sv-m.in-sel {
+    background: rgba(79, 70, 229, 0.08);
+    border-color: rgba(79, 70, 229, 0.4);
+    z-index: 2;   /* 数字方块在选择框之上,绝不被盖 */
+    position: relative;
+  }
+  .sv-selector.dragging { transition: none; cursor: grabbing; box-shadow: 0 6px 18px rgba(79,70,229,0.28); }
+  /* 左右边缘拖拽 handle(竖条),hover/drag 时显现 */
+  .sv-selector::before, .sv-selector::after {
+    content: '';
+    position: absolute;
+    top: 50%; transform: translateY(-50%);
+    width: 4px; height: 20px;
+    background: var(--accent);
+    border-radius: 2px;
+    opacity: 0.5;
+    transition: opacity 0.14s;
+    z-index: 3;
+  }
+  .sv-selector::before { left: 4px; }
+  .sv-selector::after { right: 4px; }
+  .sv-selector:hover::before, .sv-selector:hover::after,
+  .sv-selector.dragging::before, .sv-selector.dragging::after { opacity: 1; }
+  .sv-selector:hover { cursor: grab; }
+  /* 拖拽手柄命中区扩大(透明,覆盖边缘 12px,但不挡数字 —— 数字在更高层) */
+  .sv-selector::before, .sv-selector::after { pointer-events: none; }
+
+  /* 编辑区 */
+  .sv-edit {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 16px 18px;
+    box-shadow: var(--shadow-md);
+  }
+  .sv-edit-label { font-size: 14px; font-weight: 600; margin-bottom: 12px; }
+  .sv-edit-sub { font-weight: 400; color: var(--muted); font-size: 12px; }
+  .sv-edit-host { min-height: 120px; }
+  .sv-edit-host svg { width: 100%; height: auto; display: block; }
+  .sv-edit-empty {
+    text-align: center;
+    color: var(--muted);
+    padding: 40px;
+    background: var(--bg);
+    border-radius: var(--radius-sm);
+    border: 1px dashed var(--line);
+  }
+
+  /* ── 工具盘(二级编辑页)── */
+  .sv-tools {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px 14px;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    margin-bottom: 16px;
+    box-shadow: var(--shadow-sm);
+    position: sticky;
+    top: 10px;
+    z-index: 5;
+  }
+  .sv-tools-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  /* 单元格:一个标签 + 控件,卡片化分组(更大点击区、留白) */
+  .sv-cell {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    background: var(--bg);
+    border-radius: 11px;
+    padding: 5px 10px;
+  }
+  .sv-tlabel {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--muted);
+    letter-spacing: 0.04em;
+  }
+  .sv-select {
+    font: inherit;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--ink);
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 7px 10px;
+    cursor: pointer;
+    outline: none;
+    min-width: 60px;
+  }
+  .sv-select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
+  .sv-action {
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    height: 36px;
+    padding: 0 13px;
+    border: 1px solid var(--line);
+    background: var(--card);
+    color: var(--ink-2);
+    border-radius: 9px;
+    cursor: pointer;
+    transition: all 0.12s;
+  }
+  .sv-action:hover { border-color: var(--accent); color: var(--accent); }
+  .sv-acc {
+    font: inherit;
+    font-size: 19px;
+    width: 36px; height: 36px;
+    border: 0;
+    background: transparent;
+    color: var(--ink-2);
+    cursor: pointer;
+    border-radius: 7px;
+    line-height: 1;
+  }
+  .sv-acc:hover { color: var(--ink); background: rgba(255,255,255,0.6); }
+  .sv-acc.active { background: var(--card); color: var(--accent); box-shadow: var(--shadow-sm); }
+  .sv-range-hint {
+    font-size: 13px;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  .sv-range-hint b { color: var(--accent); font-weight: 650; }
+  /* 小节导航行:MeasureSelector 区填满剩余宽度(可独立横滑) */
+  .sv-tools-measures { padding-top: 4px; }
+  .sv-tools-measures .sv-measures-host { flex: 1 1 auto; min-width: 0; }
+  .sv-tool-group {
+    display: flex;
+    gap: 2px;
+    background: var(--bg);
+    border-radius: var(--radius-sm);
+    padding: 3px;
+  }
+  .sv-dur {
+    font: inherit;
+    font-size: 19px;
+    min-width: 42px;
+    height: 36px;
+    border: 0;
+    background: transparent;
+    color: var(--ink-2);
+    cursor: pointer;
+    border-radius: 8px;
+    transition: all 0.12s;
+    padding: 0 8px;
+    line-height: 1;
+  }
+  .sv-dur:hover { color: var(--ink); background: rgba(255,255,255,0.6); }
+  .sv-dur.active { background: var(--card); color: var(--accent); box-shadow: var(--shadow-sm); }
+  .sv-toggle {
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    height: 36px;
+    min-width: 38px;
+    padding: 0 12px;
+    border: 1px solid var(--line);
+    background: var(--card);
+    color: var(--ink-2);
+    border-radius: 9px;
+    cursor: pointer;
+    line-height: 1;
+    transition: all 0.12s;
+  }
+  .sv-toggle:hover { border-color: var(--accent); color: var(--accent); }
+  .sv-toggle.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .sv-sep { width: 1px; height: 24px; background: var(--line); margin: 0 4px; }
+  .sv-field {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .sv-field select {
+    font: inherit;
+    font-size: 13px;
+    color: var(--ink);
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    padding: 6px 8px;
+    cursor: pointer;
+    outline: none;
+  }
+  .sv-field select:focus { border-color: var(--accent); }
+  .sv-ghost {
+    font: inherit;
+    font-size: 13px;
+    color: var(--ink-2);
+    background: transparent;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    padding: 7px 12px;
+    cursor: pointer;
+    transition: all 0.14s;
+  }
+  .sv-ghost:hover { border-color: var(--accent); color: var(--accent); }
+  .sv-ghost.danger:hover { border-color: #ef4444; color: #ef4444; }
+
+  /* 编辑区:五线谱 + 简谱 */
+  .sv-staff-host {
+    background: #fcfcfd;
+    border-radius: var(--radius-sm);
+    padding: 8px 6px 4px;
+    cursor: crosshair;
+  }
+  .sv-staff-host svg { width: 100%; height: auto; display: block; }
+  .sv-jp-host {
+    background: #fcfcfd;
+    border-top: 1px solid var(--line-2);
+    border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+    padding: 4px 6px 10px;
+    margin-top: -4px;
+  }
+  .sv-jp-host svg { width: 100%; height: auto; display: block; }
+  .sv-name { outline: none; border-radius: 4px; padding: 1px 4px; }
+  .sv-name:focus { background: var(--accent-soft); box-shadow: 0 0 0 2px var(--accent-ring); }
+  .sv-flash {
+    position: fixed;
+    left: 50%; top: 70px;
+    transform: translateX(-50%);
+    background: var(--ink);
+    color: #fff;
+    padding: 8px 16px;
+    border-radius: 20px;
+    font-size: 13px;
+    z-index: 100;
+    animation: svflash 1.2s ease forwards;
+  }
+  @keyframes svflash {
+    0% { opacity: 0; transform: translate(-50%, -10px); }
+    15% { opacity: 1; transform: translate(-50%, 0); }
+    80% { opacity: 1; }
+    100% { opacity: 0; }
+  }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script type="module" src="/src/library-demo.ts"></script>
+</body>
+</html>

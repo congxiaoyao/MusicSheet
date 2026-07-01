@@ -1,13 +1,13 @@
 // 工具栏：当前编辑状态 + 控件渲染
 
-import { Clef, DurationValue, KeyName, TimeSig, noteValueBeats } from '../core/types';
+import { Clef, DurationValue, KeyName, TimeSig, ViewMode, noteValueBeats } from '../core/types';
 import { G } from '../render/glyphs';
 
 /** 连音模式。off=普通；其余值表示对应连音类型（actual:normal）。 */
 export type TupletMode = 'off' | 'triplet' | 'quintuplet' | 'sextuplet';
 
-/** 视图模式(排版区 radio):高音谱/低音谱/高低音谱/仅预览 */
-export type ViewMode = 'treble' | 'bass' | 'grand' | 'preview';
+// ViewMode 已移至 core/types(供 core/score.ts 等使用)。此处再导出,保持旧导入路径可用。
+export type { ViewMode } from '../core/types';
 
 /** 各连音模式的 actual:normal 配置。三连音=3:2(3个音占2个普通音位)；五连音=5:4；六连音=6:4。 */
 export const TUPLET_CONFIG: Record<Exclude<TupletMode, 'off'>, { actual: number; normal: number; label: string }> = {

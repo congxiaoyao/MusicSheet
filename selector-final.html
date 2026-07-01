@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>最终间距方案</title>
+<link rel="stylesheet" href="/src/style.css" />
+<style>
+  body { padding: 40px 0; }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 0 24px; }
+  .wrap h1 { font-size: 20px; margin: 0 0 4px; }
+  .wrap p.lead { color: var(--muted); font-size: 13px; margin: 0 0 24px; line-height: 1.6; }
+
+  /* 关键:正常书签间距 15;选框与左右书签间距 10(更紧凑)。
+     用精确 margin 控制,不用通配 * + * 。 */
+  .bar { position: relative; display: flex; align-items: center; background: #fcfcfd; border-radius: 12px; border: 1px solid var(--line-2); padding: 22px 18px; }
+  .blk { position: relative; flex: 0 0 44px; height: 42px; display: flex; align-items: center; justify-content: center; background: var(--card); border: 1px solid var(--line); border-radius: 10px; font-size: 15px; font-weight: 600; color: var(--ink-2); }
+  .blk.full::after { content: ''; position: absolute; bottom: 5px; left: 50%; transform: translateX(-50%); width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
+  .add { flex: 0 0 40px; height: 42px; border: 1px dashed var(--line); border-radius: 10px; color: var(--muted); font-size: 22px; display: flex; align-items: center; justify-content: center; margin-left: 15px; }
+
+  /* 正常书签间距 15(框外相邻书签) */
+  .blk + .blk { margin-left: 15px; }
+
+  /* 选框块 */
+  .sel { display: flex; align-items: center; padding: 10px 6px; height: 62px; box-sizing: border-box; background: #f0f2ff; border: 2px solid rgba(99,102,241,0.55); border-radius: 13px; box-shadow: 0 3px 10px rgba(79,70,229,0.15); }
+  /* 选框与左右书签间距 10(比正常15小,选框紧贴) */
+  .blk + .sel { margin-left: 10px; }
+  .sel + .blk { margin-left: 10px; }
+  /* 框内书签间距 15(正常) */
+  .sel .grip { flex: 0 0 5px; height: 22px; border-radius: 3px; cursor: ew-resize; background: rgba(99,102,241,0.30); }
+  .sel .grip + .blk { margin-left: 6px; }
+  .sel .blk + .grip { margin-left: 6px; }
+  .sel .blk + .blk { margin-left: 15px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>最终间距方案</h1>
+  <p class="lead">选框两侧 10px(紧凑)· 正常书签 15px · 框内 15px。G5c 把手(5px/30%)。</p>
+
+  <div class="bar">
+    <div class="blk full">1</div>
+    <div class="sel"><div class="grip"></div><div class="blk full">2</div><div class="blk full">3</div><div class="grip"></div></div>
+    <div class="blk full">4</div><div class="blk">5</div><div class="blk">6</div><div class="blk">7</div>
+    <div class="add">+</div>
+  </div>
+
+  <p class="lead" style="margin-top:24px; font-size:12px;">标签1→选框左 <b style="color:var(--accent)">10</b> · 选框右→标签4 <b style="color:var(--accent)">10</b> · 框外书签 <b>15</b> · 框内书签 <b>15</b></p>
+</div>
+</body>
+</html>

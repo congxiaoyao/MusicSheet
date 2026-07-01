@@ -5,8 +5,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "server": "node server/index.mjs",
+    "dev:server": "node server/index.mjs",
+    "dev:vite": "vite",
+    "dev": "node server/index.mjs & vite",
     "build": "tsc --noEmit && vite build",
+    "start": "node server/index.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

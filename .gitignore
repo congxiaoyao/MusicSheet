@@ -6,6 +6,9 @@ dist/
 dist-ssr/
 *.local
 
+# 整曲存储(服务端按小节落盘,跨设备共享)
+store/
+
 # 日志
 *.log
 npm-debug.log*

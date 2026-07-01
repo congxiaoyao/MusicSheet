@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>选择框样式对比 · 选一个</title>
+<link rel="stylesheet" href="/src/style.css" />
+<style>
+  .cmp { max-width: 1000px; margin: 0 auto; padding: 28px 24px 60px; }
+  .cmp h1 { font-size: 22px; margin: 0 0 6px; }
+  .cmp p.lead { color: var(--muted); font-size: 13px; margin: 0 0 24px; }
+  .variant {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 20px 22px;
+    margin-bottom: 18px;
+    box-shadow: var(--shadow-sm);
+  }
+  .variant-head { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+  .variant-tag {
+    font-size: 12px; font-weight: 700; color: var(--accent);
+    background: var(--accent-soft); padding: 3px 10px; border-radius: 10px;
+  }
+  .variant-name { font-size: 16px; font-weight: 650; }
+  .variant-desc { font-size: 12px; color: var(--muted); margin-left: auto; }
+  /* 共用书签条容器 */
+  .bar {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 14px 10px;
+    background: #fcfcfd;
+    border-radius: 10px;
+    border: 1px solid var(--line-2);
+  }
+  .blk {
+    position: relative;
+    flex: 0 0 44px; height: 40px;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 10px;
+    font-size: 15px; font-weight: 600; color: var(--ink-2);
+  }
+  .blk.full::after {
+    content: ''; position: absolute; bottom: 5px; left: 50%; transform: translateX(-50%);
+    width: 5px; height: 5px; border-radius: 50%; background: var(--accent);
+  }
+  .add { flex: 0 0 40px; height: 40px; border: 1px dashed var(--line); border-radius: 10px;
+    color: var(--muted); font-size: 22px; display: flex; align-items: center; justify-content: center; }
+
+  /* ── 方案A:半透明底色框(你认可的初版风格)──
+     框 = 半透明 accent 底 + accent 边框,直接盖在书签上(书签在框内仍清晰),
+     无独立把手元素,边缘即把手(hover 时边缘变粗/显拖拽光标)。 */
+  .bar-a .sel-a {
+    position: absolute;
+    top: 14px; height: 40px;
+    /* 盖在第1-2书签(留 padding): left 计算到第1书签左缘,宽=2书签+gap */
+    left: 18px; width: 96px;   /* 10pad + 44 + 8gap + 44 - 边框 */
+    background: rgba(79,70,229,0.10);
+    border: 2px solid var(--accent);
+    border-radius: 12px;
+    box-sizing: border-box;
+    pointer-events: none;
+    box-shadow: 0 4px 12px rgba(79,70,229,0.14);
+  }
+  .bar-a .sel-a::before, .bar-a .sel-a::after {
+    content: ''; position: absolute; top: 50%; transform: translateY(-50%);
+    width: 3px; height: 16px; background: var(--accent); border-radius: 2px; opacity: 0.7;
+  }
+  .bar-a .sel-a::before { left: 3px; }
+  .bar-a .sel-a::after { right: 3px; }
+
+  /* ── 方案B:底色框 + 突出的粗把手(把手在框边缘外侧,圆头)── */
+  .bar-b .sel-b {
+    position: absolute; top: 14px; height: 40px; left: 18px; width: 96px;
+    background: rgba(79,70,229,0.10); border: 2px solid var(--accent);
+    border-radius: 12px; box-sizing: border-box; pointer-events: none;
+    box-shadow: 0 4px 12px rgba(79,70,229,0.14);
+  }
+  .bar-b .grip-b {
+    position: absolute; top: 22px; width: 10px; height: 24px;
+    background: var(--accent); border-radius: 5px;
+    box-shadow: 0 2px 6px rgba(79,70,229,0.4);
+  }
+  .bar-b .grip-b.l { left: 13px; }   /* 框左缘外侧 */
+  .bar-b .grip-b.r { left: 109px; }  /* 框右缘外侧 */
+
+  /* ── 方案C:无底色,仅两端粗立柱(极简,框=两根柱子夹住选中区)── */
+  .bar-c .post-c {
+    position: absolute; top: 12px; width: 5px; height: 44px;
+    background: var(--accent); border-radius: 3px;
+    box-shadow: 0 2px 8px rgba(79,70,229,0.3);
+  }
+  .bar-c .post-c.l { left: 16px; }
+  .bar-c .post-c.r { left: 116px; }
+  .bar-c .shade-c {  /* 极淡连接线,提示这是一段 */
+    position: absolute; top: 33px; height: 2px; left: 21px; width: 95px;
+    background: linear-gradient(90deg, rgba(79,70,229,0.3), rgba(79,70,229,0.1), rgba(79,70,229,0.3));
+  }
+
+  /* ── 方案D:胶囊药丸(选中区整体变成 accent 实心胶囊,书签反白)── */
+  .bar-d .pill-d {
+    position: absolute; top: 14px; height: 40px; left: 18px; width: 96px;
+    background: var(--accent); border-radius: 20px; box-sizing: border-box;
+    pointer-events: none; box-shadow: 0 4px 14px rgba(79,70,229,0.35);
+  }
+  .bar-d .pill-grip {
+    position: absolute; top: 20px; width: 3px; height: 12px; background: #fff; border-radius: 2px; opacity: 0.8;
+  }
+  .bar-d .pill-grip.l { left: 24px; }
+  .bar-d .pill-grip.r { left: 105px; }
+  /* 框内书签反白:用伪元素覆盖(演示效果) */
+  .bar-d .blk-w1, .bar-d .blk-w2 {
+    position: absolute; top: 14px; width: 44px; height: 40px;
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-size: 15px; font-weight: 600; pointer-events: none;
+  }
+  .bar-d .blk-w1 { left: 18px; }   /* 与 pill 左对齐 */
+  .bar-d .blk-w2 { left: 70px; }
+</style>
+</head>
+<body>
+<div class="cmp">
+  <h1>选择框样式 · 选一个</h1>
+  <p class="lead">四种风格,都是「框住第 1–2 小节」。看哪种最顺眼,告诉我编号(A/B/C/D)。</p>
+
+  <div class="variant">
+    <div class="variant-head">
+      <span class="variant-tag">A</span>
+      <span class="variant-name">半透明底色框 + 边缘内把手</span>
+      <span class="variant-desc">初版风格 · 边缘即把手(hover 变粗)</span>
+    </div>
+    <div class="bar bar-a">
+      <div class="blk full">1</div><div class="blk full">2</div><div class="blk full">3</div>
+      <div class="blk">4</div><div class="blk">5</div><div class="blk">6</div><div class="add">+</div>
+      <div class="sel-a"></div>
+    </div>
+  </div>
+
+  <div class="variant">
+    <div class="variant-head">
+      <span class="variant-tag">B</span>
+      <span class="variant-name">半透明底色框 + 外侧粗把手</span>
+      <span class="variant-desc">把手在框外,圆头,醒目</span>
+    </div>
+    <div class="bar bar-b">
+      <div class="blk full">1</div><div class="blk full">2</div><div class="blk full">3</div>
+      <div class="blk">4</div><div class="blk">5</div><div class="blk">6</div><div class="add">+</div>
+      <div class="sel-b"></div>
+      <div class="grip-b l"></div><div class="grip-b r"></div>
+    </div>
+  </div>
+
+  <div class="variant">
+    <div class="variant-head">
+      <span class="variant-tag">C</span>
+      <span class="variant-name">两端粗立柱(无底色)</span>
+      <span class="variant-desc">极简 · 两根柱子夹住选中区,中间淡连接线</span>
+    </div>
+    <div class="bar bar-c">
+      <div class="blk full">1</div><div class="blk full">2</div><div class="blk full">3</div>
+      <div class="blk">4</div><div class="blk">5</div><div class="blk">6</div><div class="add">+</div>
+      <div class="shade-c"></div>
+      <div class="post-c l"></div><div class="post-c r"></div>
+    </div>
+  </div>
+
+  <div class="variant">
+    <div class="variant-head">
+      <span class="variant-tag">D</span>
+      <span class="variant-name">实心胶囊(书签反白)</span>
+      <span class="variant-desc">选中区变 accent 胶囊,书签文字反白,最强对比</span>
+    </div>
+    <div class="bar bar-d">
+      <div class="blk full">1</div><div class="blk full">2</div><div class="blk full">3</div>
+      <div class="blk">4</div><div class="blk">5</div><div class="blk">6</div><div class="add">+</div>
+      <div class="pill-d"></div>
+      <div class="blk-w1">1</div><div class="blk-w2">2</div>
+      <div class="pill-grip l"></div><div class="pill-grip r"></div>
+    </div>
+  </div>
+
+  <p class="lead" style="margin-top:24px">注:书签下方的蓝点 = 该小节有内容(指示点)。框住的是「当前正在编辑的小节」。</p>
+</div>
+</body>
+</html>

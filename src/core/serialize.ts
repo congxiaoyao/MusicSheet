@@ -8,11 +8,16 @@
 // - 版本头保证未来向后兼容：version 升级时在 migrate() 里做迁移。
 // - deserialize 做严格校验，任何字段不合法都抛带提示的 Error，不破坏调用方当前乐谱。
 
-import { Accidental, Clef, DurationValue, KeyName, Note, Piece } from './types';
+import { Accidental, Clef, DurationValue, KeyName, Note, Piece, TimeSig, ViewMode } from './types';
+import { Score, ScoreMeta, MeasureData } from './score';
 
 export const SHEET_FORMAT = 'musicsheet';
 export const SHEET_VERSION = 1;
 export const SHEET_EXTENSION = '.msheet';
+
+/** 整曲(Score)打包格式版本。与 SHEET_VERSION(单 Piece 文件)分开,因为 Score 结构不同。 */
+export const SCORE_FORMAT = 'musicsheet-score';
+export const SCORE_VERSION = 1;
 
 interface SheetFile {
   format: string;
@@ -67,7 +72,7 @@ function validatePiece(p: unknown): Piece {
   if (!VALID_CLEFS.includes(o.clef as Clef)) throw new Error(`无效谱号: ${String(o.clef)}`);
   validateKey(o.key);
   validateTime(o.time);
-  if (typeof o.measureCount !== 'number' || o.measureCount < 1 || o.measureCount > 64 || !Number.isInteger(o.measureCount)) {
+  if (typeof o.measureCount !== 'number' || o.measureCount < 1 || o.measureCount > 256 || !Number.isInteger(o.measureCount)) {
     throw new Error(`无效小节数: ${String(o.measureCount)}`);
   }
   // 双组(treble/bass):新格式。旧格式只有 notes → 兼容读入 treble。
@@ -155,4 +160,129 @@ export function sheetFileName(d = new Date()): string {
   const p = (x: number) => String(x).padStart(2, '0');
   const stamp = `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}`;
   return `乐谱-${stamp}${SHEET_EXTENSION}`;
+}
+
+// ── 整曲(Score)/小节(Measure)级序列化 ────────────────────────────
+// 用途:
+//  - serializeScore/deserializeScore:整曲打包导入导出(.mscore 文件,带 SCORE_FORMAT 头)。
+//  - serializeMeasure/deserializeMeasure:服务端按小节存盘(m0001.json),支持局部覆写。
+// 复用 validateNote/validateKey/validateTime 保证音符结构合法,零信息丢失。
+
+/** 小节文件名(m{4位}.json,零填充便于目录排序)。 */
+export function measureFileName(measureIndex0Based: number): string {
+  return 'm' + String(measureIndex0Based + 1).padStart(4, '0') + '.json';
+}
+
+/** 把单个小节序列化为 JSON 字符符(m0001.json 内容)。 */
+export function serializeMeasure(m: MeasureData): string {
+  return JSON.stringify({ treble: m.treble, bass: m.bass });
+}
+
+/** 解析单个小节 JSON。任何不合法抛 Error(带中文提示)。 */
+export function deserializeMeasure(text: string): MeasureData {
+  let obj: unknown;
+  try { obj = JSON.parse(text); }
+  catch { throw new Error('小节文件不是有效的 JSON'); }
+  if (!obj || typeof obj !== 'object') throw new Error('小节文件内容为空或非对象');
+  const o = obj as Record<string, unknown>;
+  const trebleRaw = Array.isArray(o.treble) ? o.treble : null;
+  const bassRaw = Array.isArray(o.bass) ? o.bass : null;
+  if (!trebleRaw && !bassRaw) throw new Error('小节缺少音符数据(treble/bass)');
+  const treble = trebleRaw ? (trebleRaw as unknown[]).map((n, i) => validateNote(n, i)) : [] as Note[];
+  const bass = bassRaw ? (bassRaw as unknown[]).map((n, i) => validateNote(n, i)) : [] as Note[];
+  return { treble, bass };
+}
+
+/** manifest.json 序列化(整曲元数据)。 */
+export function serializeMeta(meta: ScoreMeta): string {
+  return JSON.stringify(meta, null, 2);
+}
+
+/** 解析 manifest.json。任何不合法抛 Error。 */
+export function deserializeMeta(text: string): ScoreMeta {
+  let obj: unknown;
+  try { obj = JSON.parse(text); }
+  catch { throw new Error('manifest 不是有效的 JSON'); }
+  if (!obj || typeof obj !== 'object') throw new Error('manifest 内容为空或非对象');
+  const o = obj as Record<string, unknown>;
+  if (typeof o.id !== 'string' || !o.id) throw new Error('manifest 缺少 id');
+  if (typeof o.title !== 'string') throw new Error('manifest title 无效');
+  validateKey(o.key);
+  validateTime(o.time);
+  if (typeof o.totalMeasures !== 'number' || o.totalMeasures < 1 || o.totalMeasures > 256 || !Number.isInteger(o.totalMeasures)) {
+    throw new Error(`manifest totalMeasures 无效: ${String(o.totalMeasures)}`);
+  }
+  const VALID_VIEWS: readonly ViewMode[] = ['treble', 'bass', 'grand', 'preview'];
+  if (!VALID_VIEWS.includes(o.viewMode as ViewMode)) throw new Error(`manifest viewMode 无效: ${String(o.viewMode)}`);
+  if (typeof o.updatedAt !== 'number') throw new Error('manifest updatedAt 无效');
+  return {
+    id: o.id,
+    title: o.title,
+    key: o.key as ScoreMeta['key'],
+    time: o.time as TimeSig,
+    totalMeasures: o.totalMeasures,
+    viewMode: o.viewMode as ViewMode,
+    updatedAt: o.updatedAt,
+  };
+}
+
+interface ScoreFile {
+  format: string;
+  version: number;
+  exportedAt: number;
+  score: { meta: ScoreMeta; measures: MeasureData[] };
+}
+
+/** 整曲打包序列化为字符串(整曲导入导出)。 */
+export function serializeScore(score: Score): string {
+  const file: ScoreFile = {
+    format: SCORE_FORMAT,
+    version: SCORE_VERSION,
+    exportedAt: Date.now(),
+    score: { meta: score.meta, measures: score.measures },
+  };
+  return JSON.stringify(file, null, 2);
+}
+
+/** 解析整曲打包字符串。任何不合法抛 Error。 */
+export function deserializeScore(text: string): Score {
+  let obj: unknown;
+  try { obj = JSON.parse(text); }
+  catch { throw new Error('不是有效的 JSON 文件'); }
+  if (!obj || typeof obj !== 'object') throw new Error('文件内容为空或不是对象');
+  const f = obj as Partial<ScoreFile>;
+  if (f.format !== SCORE_FORMAT) {
+    throw new Error('不是 MusicSheet 整曲文件(缺少 ' + SCORE_FORMAT + ' 标识)');
+  }
+  if (typeof f.version !== 'number') throw new Error('缺少版本号');
+  if (f.version !== SCORE_VERSION) {
+    throw new Error(`不支持的整曲版本 v${f.version}(当前支持 v${SCORE_VERSION})`);
+  }
+  if (!f.score) throw new Error('缺少整曲数据(score)');
+  const meta = deserializeMeta(JSON.stringify(f.score.meta));
+  // f.score.measures 走 unknown 重新校验,不信任 wire 格式。
+  const measuresRaw = (f.score as { measures: unknown }).measures;
+  if (!Array.isArray(measuresRaw)) throw new Error('整曲 measures 不是数组');
+  if (measuresRaw.length !== meta.totalMeasures) {
+    throw new Error(`整曲小节数(${measuresRaw.length})与 totalMeasures(${meta.totalMeasures})不符`);
+  }
+  const measures: MeasureData[] = (measuresRaw as unknown[]).map((m, i) => {
+    if (!m || typeof m !== 'object') throw new Error(`第 ${i + 1} 小节格式错误`);
+    const mo = m as Record<string, unknown>;
+    const trebleRaw = Array.isArray(mo.treble) ? mo.treble : null;
+    const bassRaw = Array.isArray(mo.bass) ? mo.bass : null;
+    const treble = trebleRaw ? (trebleRaw as unknown[]).map((n, j) => validateNote(n, j)) : [] as Note[];
+    const bass = bassRaw ? (bassRaw as unknown[]).map((n, j) => validateNote(n, j)) : [] as Note[];
+    return { treble, bass };
+  });
+  return { meta, measures };
+}
+
+/** 整曲导出文件名:标题-sanitized-YYYYMMDD-HHmm.mscore。 */
+export function scoreFileName(title: string, d = new Date()): string {
+  const p = (x: number) => String(x).padStart(2, '0');
+  const stamp = `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}`;
+  // 标题做文件名安全化:去掉路径分隔符/空白压缩,空标题用「未命名」。
+  const safe = (title || '未命名').replace(/[\\/:*?"<>|]/g, '').trim().replace(/\s+/g, '_') || '未命名';
+  return `${safe}-${stamp}.mscore`;
 }

@@ -3,6 +3,9 @@
 /** 谱号 */
 export type Clef = 'treble' | 'bass';
 
+/** 视图模式:高音谱/低音谱/高低音谱/仅预览。曲谱级属性(Score.viewMode)。 */
+export type ViewMode = 'treble' | 'bass' | 'grand' | 'preview';
+
 /** 临时记号 */
 export type Accidental = 'sharp' | 'flat' | 'natural' | null;
 
