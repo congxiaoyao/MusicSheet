@@ -436,8 +436,8 @@
     pointer-events: none;   /* 底色层:纯装饰,在书签下,不挡点击 */
     transition: transform 0.25s cubic-bezier(.34,1.3,.64,1), width 0.25s cubic-bezier(.34,1.3,.64,1);
   }
-  /* 选框边框层:独立叠加元素,只画边框/投影/圆角,z 高于书签,
-     保证框外书签滑过时边框永不被书签白底盖住。pointer-events:none 不挡点击。 */
+  /* 选框边框层:独立叠加元素,只画边框/投影/圆角 + 左右内边缘过渡色(inset shadow)。
+     z 高于书签(边框不被盖),但低于把手(把手在过渡色上面)。 */
   .ms-sel-border {
     position: absolute;
     left: 0; top: 0;
@@ -445,7 +445,9 @@
     box-sizing: border-box;
     border: 2px solid rgba(99,102,241,0.55);
     border-radius: 13px;
-    box-shadow: 0 3px 10px rgba(79,70,229,0.15);
+    box-shadow: 0 3px 10px rgba(79,70,229,0.15),
+      inset 10px 0 8px -6px rgba(99,102,241,0.18),
+      inset -10px 0 8px -6px rgba(99,102,241,0.18);
     z-index: 3;
     pointer-events: none;
     transition: transform 0.25s cubic-bezier(.34,1.3,.64,1), width 0.25s cubic-bezier(.34,1.3,.64,1);
@@ -459,7 +461,7 @@
     background: rgba(99,102,241,0.30);
     border-radius: 3px;
     cursor: ew-resize;
-    z-index: 2;              /* 高于书签(z:1),可命中拖拽 */
+    z-index: 4;              /* 高于选框边框层(z:3),把手在过渡色上面;也高于书签(z:1)可命中 */
     pointer-events: auto;
     touch-action: none;      /* 触屏拖把手不被滚动拦截 */
     transition: transform 0.25s cubic-bezier(.34,1.3,.64,1);

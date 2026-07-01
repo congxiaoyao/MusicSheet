@@ -120,38 +120,30 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
     });
   };
 
-  /** 计算每个元素的 x 坐标 + 选框的位置/尺寸。
-   *  布局:[pad][书签0..start-1 (gap15)][gap10][选框][gap10][书签start+count.. (gap15)][+]
-   *  选框内(视觉):[pad6][把手][gap6][书签..(gap15)][gap6][把手][pad6]
-   *  ★ 不挪窝:框内书签的 x 也由本函数算出(= selX + pad + handle + gap + 偏移),
-   *    用 transform 定位,不走 selInner flex 流。
-   *  返回:{ blockX: Map<idx,x>(含全部书签), selX, selW, selRight, addX, totalW, gripLX, gripRX } */
-  const computeX = () => {
-    const start = state.start, count = state.count, total = state.totalMeasures;
+  /** 计算给定 start/count 的布局(纯函数,不依赖 state,供阻尼算边界用)。
+   *  布局:[pad][书签0..start-1][选框][书签start+count..][+]
+   *  选框内:[pad6][把手][gap6][书签..(gap15)][gap6][把手][pad6] */
+  const computeXAt = (start: number, count: number, total: number) => {
     const blockX = new Map<number, number>();
     let x = PAD_EDGE;
-    // 框左外书签
     for (let i = 0; i < start; i++) { blockX.set(i, x); x += BLOCK_W + (i < start - 1 ? GAP_NORMAL : GAP_SEL_SIDE); }
-    // 选框起点
     const selX = x;
-    // 选框内部宽度:pad + 把手 + gap + count书签(每书签BLOCK_W + 之间gap15) + gap + 把手 + pad
     const innerBlocksW = count * BLOCK_W + (count - 1) * GAP_NORMAL;
     const selW = SEL_PAD_X + HANDLE_W + GAP_GRIP + innerBlocksW + GAP_GRIP + HANDLE_W + SEL_PAD_X;
     const selRight = selX + selW;
-    // 框内书签 x(不挪窝:由 computeX 算,transform 定位)
     const innerStartX = selX + SEL_PAD_X + HANDLE_W + GAP_GRIP;
     for (let k = 0; k < count; k++) blockX.set(start + k, innerStartX + k * (BLOCK_W + GAP_NORMAL));
-    // 框右外书签
     x = selRight + GAP_SEL_SIDE;
     const hasRightOut = start + count < total;
     for (let i = start + count; i < total; i++) { blockX.set(i, x); x += BLOCK_W + (i < total - 1 ? GAP_NORMAL : 0); }
-    // addX:有框右外书签时 = 最后书签右缘 + GAP_NORMAL;无(全选)时 = selRight + GAP_SEL_SIDE(加号紧贴选框)
     const addX = hasRightOut ? x + GAP_NORMAL : selRight + GAP_SEL_SIDE;
-    // 把手 x(跟随选框左右缘内侧)
     const gripLX = selX + SEL_PAD_X;
     const gripRX = selRight - SEL_PAD_X - HANDLE_W;
     return { blockX, selX, selW, selRight, addX, totalW: addX + BLOCK_W + PAD_EDGE, gripLX, gripRX };
   };
+
+  /** 计算当前 state 的布局。 */
+  const computeX = () => computeXAt(state.start, state.count, state.totalMeasures);
 
   /** 稳定的小节中心表(track 坐标):基于"假设 start=refStart"算每个 idx 的稳态中心,
    *  不依赖 DOM getBoundingClientRect(避免拖拽 transition 中位置抖动导致吸附判定不准)。
@@ -284,14 +276,21 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
     const trackLeft = track.getBoundingClientRect().left;
     const mxTrack = e.clientX - trackLeft;
     const axis = blockAxisCenters(drag.initStart);   // 基于 initStart 的稳定中心表(不受 transition 影响)
+    // 阻尼:超出 [min,max] 的部分打 0.3 折(越往外越难拖),放手后 apply(true) 回弹到 clamp 合法位。
+    const damp = (v: number, min: number, max: number) => {
+      if (v < min) return min + (v - min) * 0.3;
+      if (v > max) return max + (v - max) * 0.3;
+      return v;
+    };
 
-    // ── 拖框体横移:选框整体缘跟手(selL=initSelX+偏移 d),count 不变。start=左缘扫过的书签(缘扫过的排出) ──
+    // ── 拖框体横移:选框整体缘跟手(selL=initSelX+偏移 d),count 不变。start=左缘扫过的书签。超范围阻尼 ──
     if (drag.mode === 'm') {
       if (Math.abs(e.clientX - drag.startX) < CLICK_THRESHOLD) return;
-      const selXDrag = drag.initSelX + (e.clientX - drag.startX);
       const count = drag.initCount;
       const maxStart = Math.max(0, state.totalMeasures - count);
-      // start = 第一个中心 > selXDrag 的 idx(左缘扫过的书签被排出,留右侧的第一个为框内首)
+      const minSelX = computeXAt(0, count, state.totalMeasures).selX;
+      const maxSelX = computeXAt(maxStart, count, state.totalMeasures).selX;
+      const selXDrag = damp(drag.initSelX + (e.clientX - drag.startX), minSelX, maxSelX);
       let ns = maxStart;
       for (let s = 0; s <= maxStart; s++) { if ((axis.get(s) ?? Infinity) >= selXDrag) { ns = s; break; } }
       ns = Math.max(0, Math.min(ns, maxStart));
@@ -300,9 +299,11 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
       return;
     }
 
-    // ── 拖右把手:左端(initStart)固定,右缘跟手(selR=mxTrack)。count = 右缘越过的最后一个中心数 ──
+    // ── 拖右把手:左端(initStart)固定,右缘跟手(selR=mxTrack)。count = 右缘越过的中心数。超范围阻尼 ──
     if (drag.mode === 'r') {
-      const selRightDrag = mxTrack;
+      const maxR = computeXAt(drag.initStart, state.totalMeasures - drag.initStart, state.totalMeasures).selRight;
+      const minR = computeXAt(drag.initStart, 1, state.totalMeasures).selRight;
+      const selRightDrag = damp(mxTrack, minR, maxR);
       let lastIdx = drag.initStart;
       for (let i = drag.initStart; i < state.totalMeasures; i++) { if ((axis.get(i) ?? Infinity) <= selRightDrag) lastIdx = i; else break; }
       let nc = lastIdx - drag.initStart + 1;
@@ -312,11 +313,12 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
       return;
     }
 
-    // ── 拖左把手:右端(initEnd)固定,左缘跟手(selL=mxTrack)。start=左缘扫过的书签,count=initEnd-start+1 ──
+    // ── 拖左把手:右端(initEnd)固定,左缘跟手(selL=mxTrack)。start=左缘扫过的书签。超范围阻尼 ──
     const initEnd = drag.initStart + drag.initCount - 1;
-    const selLeftDrag = mxTrack;
-    const selRightFixed = drag.initSelRight;   // 右端固定:拖拽起始的选框右缘
-    // start = 第一个中心 > selLeftDrag 的 idx(左缘扫过的排出)
+    const minL = computeXAt(0, initEnd + 1, state.totalMeasures).selX;
+    const maxL = computeXAt(initEnd, 1, state.totalMeasures).selX;
+    const selLeftDrag = damp(mxTrack, minL, maxL);
+    const selRightFixed = drag.initSelRight;
     let ns = initEnd;
     for (let s = 0; s <= initEnd; s++) { if ((axis.get(s) ?? Infinity) >= selLeftDrag) { ns = s; break; } }
     ns = Math.max(0, Math.min(ns, initEnd));
@@ -338,8 +340,10 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
     if (drag) { finishDrag(); return; }
     if (downInfo) {
       const idx = downInfo.idx; downInfo = null;
-      const { s } = clamp(idx, state.count);
-      state.start = s;
+      // 点书签跳转:start 让点击的书签落在选框内(count 不变)。点击的书签作为选框末尾对齐:
+      // start = min(idx, total-count),保证 [start..start+count) 含 idx 且不越界。
+      const maxStart = Math.max(0, state.totalMeasures - state.count);
+      state.start = Math.max(0, Math.min(idx, maxStart));
       apply(true);
       cb.onChange(state.start, state.count);
     }
