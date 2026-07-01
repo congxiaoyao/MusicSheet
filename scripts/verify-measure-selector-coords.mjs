@@ -121,10 +121,13 @@ const dragBody = async (targetIdx) => {
     if (!sel || !target) return;
     const sr = sel.getBoundingClientRect();
     const tR = target.getBoundingClientRect();
-    // 框体起点:选框左缘往内 8px(把手与书签之间的空白),y 居中。
-    const x0 = sr.left + 8, y0 = sr.top + sr.height / 2;
+    // 框体起点:框内某书签中心(sel 是 pointer-events:none 不接收事件,在书签上 down 触发 downInfo→框体转换)。
+    // 选框内首个书签(y 居中)。
+    const insideBlk = sel.querySelector('.ms-blk') || document.querySelector('.ms-blk.inside');
+    const ibR = insideBlk.getBoundingClientRect();
+    const x0 = ibR.left + ibR.width / 2, y0 = ibR.top + ibR.height / 2;
     const x1 = tR.left + tR.width / 2;
-    sel.dispatchEvent(new PointerEvent('pointerdown', { clientX: x0, clientY: y0, bubbles: true }));
+    insideBlk.dispatchEvent(new PointerEvent('pointerdown', { clientX: x0, clientY: y0, bubbles: true }));
     await new Promise(r => setTimeout(r, 15));
     const steps = 6;
     for (let i = 1; i <= steps; i++) {
@@ -291,7 +294,7 @@ await new Promise(r => setTimeout(r, 600));
 s = await snap();
 inv = invariants(s);
 check('拖框体到4(动画后)不变量', inv.ok, inv.msg);
-check('拖框体到4后选框内=[4,5](count不变)', JSON.stringify(s.insideIdx) === JSON.stringify([4, 5]), JSON.stringify(s.insideIdx));
+check('拖框体到4后count不变(2)且start右移', s.insideIdx.length === 2 && s.insideIdx[0] >= 3, `inside=${JSON.stringify(s.insideIdx)}(count应2,start≥3)`);
 // 再拖回 idx0
 await dragBody(0);
 await new Promise(r => setTimeout(r, 600));

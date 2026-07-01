@@ -52,6 +52,7 @@
     z-index: 2; pointer-events: auto; touch-action: none;
     transition: transform 0.25s cubic-bezier(.34,1.3,.64,1);
   }
+  .ms-grip::before { content: ''; position: absolute; top: -20px; left: -6px; right: -6px; height: 62px; }
   .ms-wrap.ms-dragging .ms-grip { cursor: grabbing; transition: none; }
   .ms-blk {
     position: absolute; left: 0; top: 10px; width: 44px; height: 42px;

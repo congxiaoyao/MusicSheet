@@ -464,6 +464,12 @@
     touch-action: none;      /* 触屏拖把手不被滚动拦截 */
     transition: transform 0.25s cubic-bezier(.34,1.3,.64,1);
   }
+  /* 把手拖拽热区:视觉 5px 太难点中,用透明伪元素撑大到选框满高、左右各扩 6px
+     (覆盖选框边缘到书签之间的 pad+handle+gap 区,不压书签)。命中区 17px×62px,视觉把手不变。 */
+  .ms-grip::before {
+    content: ''; position: absolute;
+    top: -20px; left: -6px; right: -6px; height: 62px;
+  }
   .ms-wrap.ms-dragging .ms-grip { cursor: grabbing; transition: none; }
   .ms-blk {
     position: absolute;
