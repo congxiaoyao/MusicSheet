@@ -20,9 +20,7 @@
     background: #fff; border: 1px solid #d1d5db; border-radius: 10px;
     font-size: 15px; font-weight: 600; color: #3a3f4a;
     cursor: pointer;
-    transition: opacity 0.12s;
   }
-  .ms-blk:hover { opacity: 1 !important; }   /* hover 恢复全亮,覆盖 JS 设的 opacity */
   .ms-sel { position: absolute; left: 0; top: 0; height: 62px; box-sizing: border-box; background: #f0f2ff; border-radius: 13px; z-index: 0; pointer-events: none; }
   .ms-sel-border { position: absolute; left: 0; top: 0; height: 62px; box-sizing: border-box; border: 2px solid rgba(99,102,241,0.55); border-radius: 13px; z-index: 3; pointer-events: none; }
   .ms-grip { position: absolute; left: 0; top: 20px; width: 5px; height: 22px; background: rgba(99,102,241,0.3); border-radius: 3px; z-index: 4; }
@@ -36,9 +34,9 @@
 <body>
   <h1>每书签独立 mask</h1>
   <p class="lead">
-    每个书签根据自己的位置 + 选框缘位置算独立 mask。<b>跨缘书签:框外部分淡,框内部分亮(mask 渐变穿过书签)</b>。<br>
-    hover 某书签 → 该书签 mask 变全显示(恢复清晰)。<br>
-    拖"选框位置"滑块,看跨缘书签的框内亮/框外淡效果。鼠标 hover 书签看恢复。
+    每个书签有自己的 mask-image。书签的框内部分 alpha=1(亮),框外部分 alpha=0.3(淡),框缘处渐变。<br>
+    跨缘书签:左半在框内(亮),右半在框外(淡),mask 自动切割。<br>
+    hover 书签 → 该书签 mask 变全 #000(全亮)。拖滑块看效果。
   </p>
   <div class="demo-host">
     <div class="demo-label">每书签独立 mask(hover 恢复)</div>
@@ -54,9 +52,8 @@
 <script>
 const BLOCK_W = 44, GAP = 15, PAD = 18, TOTAL = 8;
 const blkX = i => PAD + i * (BLOCK_W + GAP);
-const totalW = blkX(TOTAL - 1) + BLOCK_W + GAP + 40 + PAD;
-const FADE = 28;       // 框缘 fade 带宽
-const DIM = 0.3;       // 框外/框缘处书签 alpha
+const FADE = 24;
+const DIM = 'rgba(0,0,0,0.3)';
 
 const track = document.getElementById('track');
 const slider = document.getElementById('slider');
@@ -64,10 +61,48 @@ const wslider = document.getElementById('wslider');
 const info = document.getElementById('selinfo');
 const animBtn = document.getElementById('anim-btn');
 
-/** 书签 opacity:中心在框内=1,框外=0.3。hover 由 CSS :hover 覆盖为 1。 */
-function blkOpacity(bx, bw, selX, selR) {
-  const cx = bx + bw / 2;
-  return (cx >= selX && cx <= selR) ? 1 : 0.3;
+/** 算单个书签的 mask(书签局部坐标 0~bw,选框缘转局部)。
+ *  框外部分 alpha=0.3,框内部分 alpha=1,框缘渐变带 FADE px。
+ *  hover 时返回全 #000(全亮)。 */
+function blkMask(bx, bw, selX, selR, hovered) {
+  if (hovered) return 'linear-gradient(to right, #000, #000)';
+  // 选框缘在书签局部坐标
+  const sX = selX - bx;    // 左缘
+  const sR = selR - bx;    // 右缘
+  // 构造 0~bw 的渐变:
+  // [0..sX]:框外左 → DIM
+  // [sX..sX+FADE]:渐变 DIM→#000
+  // [sX+FADE..sR-FADE]:框内 → #000
+  // [sR-FADE..sR]:渐变 #000→DIM
+  // [sR..bw]:框外右 → DIM
+  const stops = [];
+  // 左端
+  if (sX <= 0) {
+    // 书签左缘已在框内(或选框左缘在书签左侧)
+    stops.push('#000 0');
+  } else if (sX >= bw) {
+    // 整个书签在框左外
+    stops.push(DIM + ' 0', DIM + ' ' + bw + 'px');
+    return `linear-gradient(to right, ${stops.join(', ')})`;
+  } else {
+    // sX 在书签内(跨左缘)
+    stops.push(DIM + ' 0', DIM + ' ' + sX + 'px');
+    const fEnd = Math.min(bw, sX + FADE);
+    stops.push('#000 ' + fEnd + 'px');
+  }
+  // 右端
+  if (sR >= bw) {
+    // 书签右缘在框内(选框右缘在书签右侧)
+    stops.push('#000 ' + bw + 'px');
+  } else if (sR <= 0) {
+    // 整个书签在框右外(但前面已处理全框外,这里不会到)
+    stops.push(DIM + ' ' + bw + 'px');
+  } else {
+    // sR 在书签内(跨右缘)
+    const fStart = Math.max(0, sR - FADE);
+    stops.push('#000 ' + fStart + 'px', DIM + ' ' + sR + 'px', DIM + ' ' + bw + 'px');
+  }
+  return `linear-gradient(to right, ${stops.join(', ')})`;
 }
 
 function render() {
@@ -75,11 +110,9 @@ function render() {
   const selW = parseInt(wslider.value);
   const selR = selX + selW;
   track.innerHTML = '';
-  // 选框底色
   const sel = document.createElement('div'); sel.className = 'ms-sel';
   sel.style.transform = `translateX(${selX}px)`; sel.style.width = selW + 'px';
   track.appendChild(sel);
-  // 书签(每个独立 opacity,CSS hover class 控制恢复)
   const blkEls = [];
   for (let i = 0; i < TOTAL; i++) {
     const bx = blkX(i);
@@ -87,43 +120,48 @@ function render() {
     el.style.transform = `translateX(${bx}px)`;
     el.textContent = i + 1;
     el.dataset.bx = bx;
-    el.dataset.idx = i;
-    // 设 opacity(框外/跨缘/框内)
-    el.style.opacity = blkOpacity(bx, BLOCK_W, selX, selR);
+    const m = blkMask(bx, BLOCK_W, selX, selR, false);
+    el.style.webkitMaskImage = m;
+    el.style.maskImage = m;
+    el.addEventListener('mouseenter', () => {
+      const hm = 'linear-gradient(to right, #000, #000)';
+      el.style.webkitMaskImage = hm; el.style.maskImage = hm;
+    });
+    el.addEventListener('mouseleave', () => {
+      const bx2 = parseFloat(el.dataset.bx);
+      const sX = parseInt(slider.value), sW = parseInt(wslider.value);
+      const m2 = blkMask(bx2, BLOCK_W, sX, sX + sW, false);
+      el.style.webkitMaskImage = m2; el.style.maskImage = m2;
+    });
     track.appendChild(el);
     blkEls.push(el);
   }
-  // 选框边框
   const sb = document.createElement('div'); sb.className = 'ms-sel-border';
   sb.style.transform = `translateX(${selX}px)`; sb.style.width = selW + 'px';
   track.appendChild(sb);
-  // 把手
   const gl = document.createElement('div'); gl.className = 'ms-grip';
   gl.style.transform = `translateX(${selX + 6}px)`;
   const gr = document.createElement('div'); gr.className = 'ms-grip';
   gr.style.transform = `translateX(${selR - 6 - 5}px)`;
   track.appendChild(gl); track.appendChild(gr);
-  // add
   const addX = blkX(TOTAL - 1) + BLOCK_W + GAP;
-  const add = document.createElement('div'); add.className = 'ms-blk'; add.style.cssText += ';width:40px;border:1px dashed #bbb;color:#999;font-size:22px;';
+  const add = document.createElement('div'); add.className = 'ms-blk';
+  add.style.cssText += ';width:40px;border:1px dashed #bbb;color:#999;font-size:22px;';
   add.style.transform = `translateX(${addX}px)`; add.textContent = '+';
   track.appendChild(add);
-  // 存供 slider 更新
   track._blkEls = blkEls;
-  track._selX = selX;
-  track._selR = selR;
   info.textContent = `selX=${selX} selR=${selR} selW=${selW}`;
 }
 
-// slider 只更新 opacity(不重建 DOM)
-function updateOpacities() {
+function updateMasks() {
   const selX = parseInt(slider.value);
   const selW = parseInt(wslider.value);
   const selR = selX + selW;
   if (track._blkEls) {
     track._blkEls.forEach(el => {
       const bx = parseFloat(el.dataset.bx);
-      el.style.opacity = blkOpacity(bx, BLOCK_W, selX, selR);
+      const m = blkMask(bx, BLOCK_W, selX, selR, false);
+      el.style.webkitMaskImage = m; el.style.maskImage = m;
     });
   }
   const sel = track.querySelector('.ms-sel');
@@ -136,8 +174,8 @@ function updateOpacities() {
   info.textContent = `selX=${selX} selR=${selR} selW=${selW}`;
 }
 
-slider.addEventListener('input', updateOpacities);
-wslider.addEventListener('input', updateOpacities);
+slider.addEventListener('input', updateMasks);
+wslider.addEventListener('input', updateMasks);
 
 let animRAF = null, animDir = 1;
 animBtn.addEventListener('click', () => {
@@ -147,13 +185,11 @@ animBtn.addEventListener('click', () => {
     let v = parseInt(slider.value) + animDir * 2;
     if (v >= 400) { v = 400; animDir = -1; }
     if (v <= 0) { v = 0; animDir = 1; }
-    slider.value = v;
-    updateOpacities();
+    slider.value = v; updateMasks();
     animRAF = requestAnimationFrame(loop);
   };
   loop();
 });
-
 render();
 </script>
 </body>
