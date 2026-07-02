@@ -340,19 +340,18 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
 
   const onMove = (e: PointerEvent) => {
     if (!drag) {
-      // 书签 pointerdown 后拖动:若拖动超阈值且该书签在选框内 → 转为框体平移(任意处可拖)。
       if (downInfo && (Math.abs(e.clientX - downInfo.x) > CLICK_THRESHOLD || Math.abs(e.clientY - downInfo.y) > CLICK_THRESHOLD)) {
         const insideSel = downInfo.idx >= state.start && downInfo.idx < state.start + state.count;
         if (insideSel) {
           const x = computeX();
-          // startX 用 pointerdown 的位置(downInfo.x),不是当前 move 的 e.clientX。
-          // 否则选框第一次 apply 会跳 4px(阈值距离)。
-          drag = { mode: 'm', initStart: state.start, initCount: state.count, startX: downInfo.x, initSelX: x.selX, initSelRight: x.selRight, edgeOffset: 0 };
+          // startX 用当前 move 的 clientX(不是 downInfo.x),这样第一次 apply 的偏移=0,
+          // 选框从当前位置开始跟手,不跳。后续每帧 +1 平滑。
+          drag = { mode: 'm', initStart: state.start, initCount: state.count, startX: e.clientX, initSelX: x.selX, initSelRight: x.selRight, edgeOffset: 0 };
           wrap.classList.add('ms-dragging');
         }
         downInfo = null;
       }
-      return;
+      if (!drag) return;
     }
     const trackLeft = track.getBoundingClientRect().left;
     const mxTrack = e.clientX - trackLeft;
@@ -366,7 +365,6 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
 
     // ── 拖框体横移:边界内整体缘跟手(edge:'move');到边界时一缘固定另一缘阻尼(等效把手)。 ──
     if (drag.mode === 'm') {
-      if (Math.abs(e.clientX - drag.startX) < CLICK_THRESHOLD) return;
       const count = drag.initCount;
       const maxStart = Math.max(0, state.totalMeasures - count);
       const minSelX = computeXAt(0, count, state.totalMeasures).selX;
