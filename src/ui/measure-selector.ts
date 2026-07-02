@@ -59,13 +59,31 @@ const MASK_DIM = 'rgba(0,0,0,0.3)';  // mask 框外 alpha
 const blkMask = (bx: number, bw: number, selX: number, selR: number): string => {
   const sX = selX - bx, sR = selR - bx;
   const c = (v: number) => Math.max(0, Math.min(bw, v));
-  const L0 = c(0), L1 = c(sX), L2 = c(sX + MASK_FADE), R1 = c(sR - MASK_FADE), R2 = c(sR), R3 = c(bw);
-  const raw: [number, string][] = [[L0, MASK_DIM], [L1, MASK_DIM], [L2, '#000'], [R1, '#000'], [R2, MASK_DIM], [R3, MASK_DIM]];
+  // 色标:框外左(DIM)→左缘渐变(DIM→#000)→框内(#000)→右缘渐变(#000→DIM)→框外右(DIM)
+  // 框外部分只在选框缘在书签内时才有(sX>0 或 sR<bw)。缘在书签外时,该侧无 DIM。
   const stops: [number, string][] = [];
-  for (const [pos, col] of raw) {
-    if (stops.length === 0 || stops[stops.length - 1][0] !== pos || stops[stops.length - 1][1] !== col) stops.push([pos, col]);
+  // 左侧
+  if (sX > 0) {
+    // 选框左缘在书签内:框外左 + 左缘渐变
+    stops.push([c(0), MASK_DIM], [c(sX), MASK_DIM], [c(sX + MASK_FADE), '#000']);
+  } else {
+    // 选框左缘在书签左侧(或=0):书签左侧在框内,全 #000 起
+    stops.push([c(0), '#000']);
   }
-  return `linear-gradient(to right, ${stops.map(([p, cl]) => `${cl} ${p}px`).join(', ')})`;
+  // 右侧
+  if (sR < bw) {
+    // 选框右缘在书签内:右缘渐变 + 框外右
+    stops.push([c(sR - MASK_FADE), '#000'], [c(sR), MASK_DIM], [c(bw), MASK_DIM]);
+  } else {
+    // 选框右缘在书签右侧:书签右侧在框内,全 #000 终
+    stops.push([c(bw), '#000']);
+  }
+  // 去重相邻同位同色
+  const dedup: [number, string][] = [];
+  for (const [pos, col] of stops) {
+    if (dedup.length === 0 || dedup[dedup.length - 1][0] !== pos || dedup[dedup.length - 1][1] !== col) dedup.push([pos, col]);
+  }
+  return `linear-gradient(to right, ${dedup.map(([p, cl]) => `${cl} ${p}px`).join(', ')})`;
 };
 
 export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureSelectorCallbacks): MeasureSelectorHandle {
@@ -256,8 +274,10 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
       const br = b.el.getBoundingClientRect();
       const bx = br.left - wr.left;
       const m = blkMask(bx, br.width, ms, me);
-      b.el.style.webkitMaskImage = m;
-      b.el.style.maskImage = m;
+      // 只设 -webkit-mask-image(Chrome),不设 mask-image(两者同时设可能冲突导致不生效)
+      b.el.style.setProperty('-webkit-mask-image', m, 'important');
+      b.el.style.setProperty('-webkit-mask-size', '100% 100%', 'important');
+      b.el.style.setProperty('-webkit-mask-repeat', 'no-repeat', 'important');
     });
     requestAnimationFrame(updateMasks);
   };

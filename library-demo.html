@@ -489,8 +489,8 @@
     width: 5px; height: 5px; border-radius: 50%; background: var(--accent);
   }
   /* 框内书签不高亮(去掉 .inside 背景/边框覆盖,选框本身已标识选中区间) */
-  /* hover 框外书签:mask 变全 #000(恢复全亮)。框内书签不受影响(本来就该亮)。
-     拖拽中(.ms-dragging)禁用,避免书签跨格时闪烁。 */
+  /* hover 框外书签:mask 变全 #000(恢复全亮)。框内书签不受影响。
+     拖拽中(.ms-dragging)禁用所有 hover(mask + 删除叉),!important 覆盖。 */
   .ms-blk:not(.inside):hover {
     -webkit-mask-image: linear-gradient(to right, #000, #000) !important;
     mask-image: linear-gradient(to right, #000, #000) !important;
@@ -498,6 +498,9 @@
   .ms-wrap.ms-dragging .ms-blk:hover {
     -webkit-mask-image: none !important;
     mask-image: none !important;
+  }
+  .ms-wrap.ms-dragging .ms-del:hover {
+    opacity: 0 !important; transform: scale(0.5) !important;
   }
   /* 加小节进场:alpha 淡入(~200ms)。只动 opacity,不碰 transform(避免与定位冲突)。 */
   .ms-blk.ms-enter { opacity: 0; transition: none; }
