@@ -67,7 +67,7 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
   const addBtn = document.createElement('button'); addBtn.type = 'button'; addBtn.className = 'ms-add'; addBtn.textContent = '+'; addBtn.title = '末尾加一小节';
   let blocks: { el: HTMLElement; idx: number }[] = [];
 
-  let drag: { mode: 'l' | 'r' | 'm'; initStart: number; initCount: number; startX: number; initSelX: number; initSelRight: number } | null = null;
+  let drag: { mode: 'l' | 'r' | 'm'; initStart: number; initCount: number; startX: number; initSelX: number; initSelRight: number; edgeOffset: number } | null = null;
   let downInfo: { x: number; y: number; idx: number } | null = null;
 
   const clamp = (s: number, c: number) => {
@@ -247,8 +247,12 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
 
   const startDrag = (e: PointerEvent, mode: 'l' | 'r') => {
     e.preventDefault(); e.stopPropagation();
-    const x = computeX();   // 拖拽起始布局
-    drag = { mode, initStart: state.start, initCount: state.count, startX: e.clientX, initSelX: x.selX, initSelRight: x.selRight };
+    const x = computeX();
+    const trackLeft = track.getBoundingClientRect().left;
+    const mxTrack = e.clientX - trackLeft;
+    // edgeOffset:鼠标在选框缘内侧(把手上),补偿"鼠标→选框缘"的距离,消除第一帧跳变。
+    const edge = mode === 'l' ? x.selX : x.selRight;
+    drag = { mode, initStart: state.start, initCount: state.count, startX: e.clientX, initSelX: x.selX, initSelRight: x.selRight, edgeOffset: edge - mxTrack };
     wrap.classList.add('ms-dragging');
   };
 
@@ -271,7 +275,7 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
       });
       if (onBlock) return;
       e.preventDefault();
-      { const x = computeX(); drag = { mode: 'm', initStart: state.start, initCount: state.count, startX: e.clientX, initSelX: x.selX, initSelRight: x.selRight }; }
+      { const x = computeX(); drag = { mode: 'm', initStart: state.start, initCount: state.count, startX: e.clientX, initSelX: x.selX, initSelRight: x.selRight, edgeOffset: 0 }; }
       wrap.classList.add('ms-dragging');
     }
   };
@@ -283,7 +287,7 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
         const insideSel = downInfo.idx >= state.start && downInfo.idx < state.start + state.count;
         if (insideSel) {
           const x = computeX();
-          drag = { mode: 'm', initStart: state.start, initCount: state.count, startX: e.clientX, initSelX: x.selX, initSelRight: x.selRight };
+          drag = { mode: 'm', initStart: state.start, initCount: state.count, startX: e.clientX, initSelX: x.selX, initSelRight: x.selRight, edgeOffset: 0 };
           wrap.classList.add('ms-dragging');
         }
         downInfo = null;
@@ -331,7 +335,7 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
       const maxCount = Math.min(MAX_COUNT, state.totalMeasures - drag.initStart);
       const maxR = computeXAt(drag.initStart, maxCount, state.totalMeasures).selRight;
       const minR = computeXAt(drag.initStart, 1, state.totalMeasures).selRight;
-      const selRightDrag = damp(mxTrack, minR, maxR);
+      const selRightDrag = damp(mxTrack + drag.edgeOffset, minR, maxR);
       let lastIdx = drag.initStart;
       for (let i = drag.initStart; i < state.totalMeasures; i++) { if ((axis.get(i) ?? Infinity) <= selRightDrag) lastIdx = i; else break; }
       let nc = lastIdx - drag.initStart + 1;
@@ -345,7 +349,7 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
     const initEnd = drag.initStart + drag.initCount - 1;
     const minL = computeXAt(0, initEnd + 1, state.totalMeasures).selX;
     const maxL = computeXAt(initEnd, 1, state.totalMeasures).selX;
-    const selLeftDrag = damp(mxTrack, minL, maxL);
+    const selLeftDrag = damp(mxTrack + drag.edgeOffset, minL, maxL);
     let ns = initEnd;
     for (let s = 0; s <= initEnd; s++) { if ((axis.get(s) ?? Infinity) >= selLeftDrag) { ns = s; break; } }
     ns = Math.max(0, Math.min(ns, initEnd));

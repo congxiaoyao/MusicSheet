@@ -255,10 +255,12 @@ for (let i=1;i<=8;i++){
   await page.evaluate((x,y)=>window.dispatchEvent(new PointerEvent('pointermove',{clientX:x,clientY:y,bubbles:true})), mx, gBox2.y);
   await new Promise(r=>setTimeout(r,55));
   const d = await page.evaluate(() => { const s=document.querySelector('.ms-sel').getBoundingClientRect(); const b4=document.querySelector('.ms-blk[data-idx="4"]'); const r4=b4.getBoundingClientRect(); return { selRv: Math.round(s.right), b4cx: Math.round(r4.left+r4.width/2), inside: b4.classList.contains('inside') }; });
-  traceR.push({mx:Math.round(mx), selRv:d.selRv, gap:Math.abs(d.selRv-mx), b4cx:d.b4cx, inside:d.inside});
+  traceR.push({mx:Math.round(mx), selRv:d.selRv, b4cx:d.b4cx, inside:d.inside});
 }
-const maxGap = Math.max(...traceR.map(t=>t.gap));
-check('拖右把手:选框右缘跟手(sellRight≈鼠标x,差<8px)', maxGap < 8, `最大差${maxGap}px`);
+// 跟手度:selR 增量 ≈ 鼠标增量(相对跟手,不依赖 edgeOffset 补偿的绝对偏移)
+const deltas = traceR.map((t,i) => i===0 ? 0 : (t.selRv - traceR[i-1].selRv) - (t.mx - traceR[i-1].mx));
+const maxDeltaErr = Math.max(...deltas.map(Math.abs));
+check('拖右把手:选框右缘跟手(selR增量≈鼠标增量,差<5px)', maxDeltaErr < 5, `最大增量差${maxDeltaErr}px`);
 const b4cxs = traceR.filter(t=>t.inside).map(t=>t.b4cx);
 let maxJump4 = 0;
 for (let i=1;i<b4cxs.length;i++) maxJump4 = Math.max(maxJump4, Math.abs(b4cxs[i]-b4cxs[i-1]));
