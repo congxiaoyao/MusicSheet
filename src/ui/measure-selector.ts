@@ -58,8 +58,9 @@ const MASK_DIM = 'rgba(0,0,0,0.15)';  // 框外固定 alpha(无渐变)
  *  渐变带 MASK_FADE px,位置 clamp 到 [0,bw],连续无跳变。
  *  关键:sX<0 但 sX+FADE>0 时(选框缘在书签左侧但在渐变带内),书签左边仍要有渐变。 */
 const blkMask = (bx: number, bw: number, selX: number, selR: number): string => {
-  const sX = selX - bx, sR = selR - bx;
-  const c = (v: number) => Math.max(0, Math.min(bw, v));
+  // 全部取整,避免浮点亚像素偏差导致 mask 边缘抖动。
+  const sX = Math.round(selX - bx), sR = Math.round(selR - bx), ibw = Math.round(bw);
+  const c = (v: number) => Math.max(0, Math.min(ibw, v));
   const stops: [number, string][] = [];
   // 左侧:选框左缘处的 mask 渐变(selX 处 DIM → selX+FADE 处 #000)
   if (sX > 0) {
@@ -72,13 +73,12 @@ const blkMask = (bx: number, bw: number, selX: number, selR: number): string => 
     stops.push([c(0), '#000']);
   }
   // 右侧:选框右缘处的 mask 渐变(selR-FADE 处 #000 → selR 处 DIM)
-  if (sR < bw) {
-    stops.push([c(sR - MASK_FADE), '#000'], [c(sR), MASK_DIM], [c(bw), MASK_DIM]);
-  } else if (sR - MASK_FADE < bw) {
-    // 缘在书签右侧但在渐变带内:书签右边有残留渐变
-    stops.push([c(sR - MASK_FADE), '#000'], [c(bw), MASK_DIM]);
+  if (sR < ibw) {
+    stops.push([c(sR - MASK_FADE), '#000'], [c(sR), MASK_DIM], [c(ibw), MASK_DIM]);
+  } else if (sR - MASK_FADE < ibw) {
+    stops.push([c(sR - MASK_FADE), '#000'], [c(ibw), MASK_DIM]);
   } else {
-    stops.push([c(bw), '#000']);
+    stops.push([c(ibw), '#000']);
   }
   // 去重相邻同位同色
   const dedup: [number, string][] = [];
