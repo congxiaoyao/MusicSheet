@@ -49,8 +49,8 @@ const PAD_EDGE = 18;        // 轨道两端内边距
 const MAX_COUNT = 8;        // 选框最大宽度(8个小节)
 // 选框最小宽度:两把手间留一个把手宽(不碰)。= pad*2 + handle*2 + grip*2 + handle(中间空隙一个把手宽)
 const MIN_SELW = SEL_PAD_X * 2 + HANDLE_W * 2 + GAP_GRIP * 2 + HANDLE_W;
-const MASK_FADE = 0;        // 调试:纯色 mask(无渐变带)
-const MASK_DIM = 'rgba(0,0,0,0.15)';  // 框外固定 alpha(无渐变)
+const MASK_FADE = 22;       // mask 渐变带宽
+const MASK_DIM = 'rgba(0,0,0,0.12)';  // mask 框外 alpha
 
 /** 算单个书签的 mask-image。
  *  bx/bw=书签左缘/宽(track 坐标),selX/selR=选框缘(track 坐标)。
