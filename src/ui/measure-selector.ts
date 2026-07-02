@@ -196,9 +196,11 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
       finalGripRX = selX + finalSelW - SEL_PAD_X - HANDLE_W;
     } else if (dragOverride?.edge === 'l') {
       const selRF = selX + selW;
-      finalSelX = dragOverride.pos;
-      finalSelW = Math.max(MIN_SELW, selRF - dragOverride.pos);   // 最小宽度
-      finalGripLX = dragOverride.pos + SEL_PAD_X;
+      // 左缘跟手,但宽度最小 MIN_SELW。当 pos 太大(selRF-pos<MIN_SELW)时,
+      // 锁死左缘=selRF-MIN_SELW(右端固定,不让框体右移)。
+      finalSelX = Math.min(dragOverride.pos, selRF - MIN_SELW);
+      finalSelW = selRF - finalSelX;
+      finalGripLX = finalSelX + SEL_PAD_X;
       finalGripRX = selRF - SEL_PAD_X - HANDLE_W;
     } else if (dragOverride?.edge === 'move') {
       finalSelX = dragOverride.pos;
