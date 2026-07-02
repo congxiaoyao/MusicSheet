@@ -50,7 +50,7 @@ const MAX_COUNT = 8;        // 选框最大宽度(8个小节)
 // 选框最小宽度:两把手间留一个把手宽(不碰)。= pad*2 + handle*2 + grip*2 + handle(中间空隙一个把手宽)
 const MIN_SELW = SEL_PAD_X * 2 + HANDLE_W * 2 + GAP_GRIP * 2 + HANDLE_W;
 const MASK_FADE = 22;       // mask 渐变带宽
-const MASK_DIM = 'rgba(0,0,0,0.25)';  // mask 框外 alpha
+const MASK_DIM = 'rgba(0,0,0,0.12)';  // mask 框外 alpha(够低让差异明显)
 
 /** 算单个书签的 mask-image。
  *  bx/bw=书签左缘/宽(track 坐标),selX/selR=选框缘(track 坐标)。
@@ -275,13 +275,12 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
     blocks.forEach(b => {
       const br = b.el.getBoundingClientRect();
       const bx = br.left - wr.left;
-      // mask bw +2:书签边框 1px×2 不在 mask 渲染区内(border-box 的 mask 只覆盖 padding-box),
-      // 多给 2px 让 mask 覆盖边框。bx 也往左偏 1px 对齐。
-      const m = blkMask(bx - 1, br.width + 2, ms, me);
-      // 只设 -webkit-mask-image(Chrome),不设 mask-image(两者同时设可能冲突导致不生效)
+      const m = blkMask(bx, br.width, ms, me);
       b.el.style.setProperty('-webkit-mask-image', m, 'important');
-      b.el.style.setProperty('-webkit-mask-size', '100% calc(100% + 2px)', 'important');
+      b.el.style.setProperty('-webkit-mask-size', '100% 100%', 'important');
       b.el.style.setProperty('-webkit-mask-repeat', 'no-repeat', 'important');
+      b.el.style.setProperty('-webkit-mask-clip', 'border-box', 'important');
+      b.el.style.setProperty('-webkit-mask-origin', 'border-box', 'important');
     });
     requestAnimationFrame(updateMasks);
   };
