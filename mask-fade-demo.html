@@ -9,154 +9,123 @@
   body { padding: 40px; font-family: system-ui, sans-serif; }
   h1 { font-size: 17px; margin: 0 0 4px; }
   p.lead { color: var(--muted); font-size: 13px; margin: 0 0 20px; line-height: 1.6; max-width: 700px; }
-
-  /* 组件容器:模拟 library-demo 的 measure-selector */
   .demo-host { width: 100%; max-width: 700px; border: 1px dashed var(--line-2); border-radius: 10px; padding: 10px; background: #fcfcfd; margin-bottom: 24px; }
   .demo-label { font-size: 11px; color: var(--muted); margin-bottom: 8px; font-weight: 600; }
-
-  .ms-wrap {
-    position: relative; width: 100%; height: 64px;
-    overflow: hidden;   /* 裁掉超出容器的内容 */
-    user-select: none;
-  }
-  .ms-track { position: relative; min-width: 100%; height: 64px; }  /* track 高度=组件高(非1px) */
-
-  /* 书签层:带 mask,选框缘外 fade */
-  .ms-blocks-layer {
-    position: absolute; left: 0; top: 0; width: 100%; height: 100%;
-    z-index: 1;
-    /* mask 由 JS 动态设 */
-  }
-  .ms-blk {
-    position: absolute; left: 0; top: 10px;
-    width: 44px; height: 42px;
-    display: flex; align-items: center; justify-content: center;
-    background: #fff; border: 1px solid #d1d5db; border-radius: 10px;
-    font-size: 15px; font-weight: 600; color: #3a3f4a;
-  }
-  .ms-blk.in { background: #eef2ff; border-color: rgba(99,102,241,0.4); }
-
-  /* 选框 */
-  .ms-sel {
-    position: absolute; left: 0; top: 0; height: 62px; box-sizing: border-box;
-    background: #f0f2ff; border-radius: 13px; z-index: 0; pointer-events: none;
-  }
-  .ms-sel-border {
-    position: absolute; left: 0; top: 0; height: 62px; box-sizing: border-box;
-    border: 2px solid rgba(99,102,241,0.55); border-radius: 13px;
-    box-shadow: 0 3px 10px rgba(79,70,229,0.15); z-index: 3; pointer-events: none;
-  }
-  .ms-grip {
-    position: absolute; left: 0; top: 20px; width: 5px; height: 22px;
-    background: rgba(99,102,241,0.3); border-radius: 3px; z-index: 4;
-  }
-
-  /* + 按钮 */
-  .ms-add {
-    position: absolute; left: 0; top: 10px; width: 40px; height: 42px;
-    display: flex; align-items: center; justify-content: center;
-    border: 1px dashed #bbb; border-radius: 10px; color: #999; font-size: 22px;
-  }
+  .ms-wrap { position: relative; width: 100%; height: 64px; overflow: hidden; user-select: none; }
+  .ms-track { position: relative; min-width: 100%; height: 64px; }
+  .ms-blocks-layer { position: absolute; left: 0; top: 0; width: 100%; height: 100%; z-index: 1; }
+  .ms-blk { position: absolute; left: 0; top: 10px; width: 44px; height: 42px; display: flex; align-items: center; justify-content: center; background: #fff; border: 1px solid #d1d5db; border-radius: 10px; font-size: 15px; font-weight: 600; color: #3a3f4a; }
+  .ms-sel { position: absolute; left: 0; top: 0; height: 62px; box-sizing: border-box; background: #f0f2ff; border-radius: 13px; z-index: 0; pointer-events: none; }
+  .ms-sel-border { position: absolute; left: 0; top: 0; height: 62px; box-sizing: border-box; border: 2px solid rgba(99,102,241,0.55); border-radius: 13px; box-shadow: 0 3px 10px rgba(79,70,229,0.15); z-index: 3; pointer-events: none; }
+  .ms-grip { position: absolute; left: 0; top: 20px; width: 5px; height: 22px; background: rgba(99,102,241,0.3); border-radius: 3px; z-index: 4; }
+  .ms-add { position: absolute; left: 0; top: 10px; width: 40px; height: 42px; display: flex; align-items: center; justify-content: center; border: 1px dashed #bbb; border-radius: 10px; color: #999; font-size: 22px; }
+  .ctrl { margin: 12px 0; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .ctrl label { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+  .ctrl input[type=range] { width: 180px; }
+  .ctrl button { font: inherit; font-size: 12px; padding: 4px 10px; border: 1px solid var(--line); background: var(--card); border-radius: 7px; cursor: pointer; }
+  .info { font-size: 11px; color: var(--muted); font-family: ui-monospace, monospace; }
 </style>
 </head>
 <body>
   <h1>选框边缘 fade 效果</h1>
   <p class="lead">
-    书签层用 CSS mask,选框缘外 24px 范围渐变淡出(alpha→0.2)。选框内书签全显示。<br>
-    拖动滑块改变选框位置,看选框缘外的书签渐变淡出/淡入。<br>
-    <b>对比</b>:下面一行有 fade,上面一行无 fade(对照)。
+    书签层用 CSS mask,选框缘外 28px 范围渐变淡出(alpha→0.15)。<b>拖"选框位置"滑块连续移动</b>,看选框缘外的书签渐变淡出/淡入。<br>
+    上行无 fade(对照),下行有 fade。
   </p>
 
   <div class="demo-host">
-    <div class="demo-label">对照(无 fade):书签全显示</div>
-    <div class="ms-wrap" id="wrap-nofade">
-      <div class="ms-track" id="track-nofade"></div>
-    </div>
+    <div class="demo-label">对照(无 fade)</div>
+    <div class="ms-wrap"><div class="ms-track" id="track-nofade"></div></div>
   </div>
-
   <div class="demo-host">
-    <div class="demo-label">选框边缘 fade(拖滑块改变选框位置)</div>
-    <div class="ms-wrap" id="wrap-fade">
-      <div class="ms-track" id="track-fade"></div>
-    </div>
+    <div class="demo-label">选框边缘 fade</div>
+    <div class="ms-wrap"><div class="ms-track" id="track-fade"></div></div>
   </div>
 
-  <div style="margin: 16px 0;">
-    <label style="font-size:13px; color:var(--muted)">选框起点: <input type="range" id="slider" min="0" max="4" value="2" step="1" style="width:200px"></label>
-    <span id="selinfo" style="font-size:12px; color:var(--muted); margin-left:12px"></span>
+  <div class="ctrl">
+    <label>选框位置 <input type="range" id="slider" min="0" max="400" value="131" step="1"></label>
+    <label>选框宽度 <input type="range" id="width-slider" min="60" max="350" value="137" step="1"></label>
+    <button id="anim-btn">自动滑动演示</button>
+    <span class="info" id="selinfo"></span>
   </div>
 
-<script type="module">
+<script>
 const BLOCK_W = 44, GAP = 15, PAD = 18, SEL_PAD = 6, HANDLE_W = 5, GRIP_GAP = 6, TOTAL = 8;
+// 书签等距排列(不依赖选框):idx0@PAD, 每书签 BLOCK_W+GAP
+const blkX = i => PAD + i * (BLOCK_W + GAP);
+const totalW = blkX(TOTAL-1) + BLOCK_W + GAP + 40 + PAD; // +add
 
-// 算几何:start/count → 所有位置
-function layout(start, count) {
-  const blks = [];
-  let x = PAD;
-  for (let i = 0; i < start; i++) { blks.push({ idx: i, x }); x += BLOCK_W + GAP; }
-  const selX = x;
-  const selW = SEL_PAD*2 + HANDLE_W*2 + GRIP_GAP*2 + count*BLOCK_W + (count-1)*GAP;
-  const selR = selX + selW;
-  const innerStart = selX + SEL_PAD + HANDLE_W + GRIP_GAP;
-  for (let k = 0; k < count; k++) blks.push({ idx: start+k, x: innerStart + k*(BLOCK_W+GAP), in: true });
-  x = selR + GAP;
-  for (let i = start+count; i < TOTAL; i++) { blks.push({ idx: i, x }); x += BLOCK_W + GAP; }
-  const addX = x;
-  const gripL = selX + SEL_PAD, gripR = selR - SEL_PAD - HANDLE_W;
-  return { blks, selX, selR, selW, addX, gripL, gripR };
-}
-
-function render(track, start, count, withFade) {
-  const L = layout(start, count);
-  // 清空
+function render(track, selX, selW, withFade) {
   track.innerHTML = '';
-  const wrap = document.createElement('div'); wrap.style.cssText='position:absolute;left:0;top:0;width:100%;height:100%';
+  const selR = selX + selW;
   // 选框底色
-  const sel = document.createElement('div'); sel.className='ms-sel';
-  sel.style.transform=`translateX(${L.selX}px)`; sel.style.width=L.selW+'px';
+  const sel = document.createElement('div'); sel.className = 'ms-sel';
+  sel.style.transform = `translateX(${selX}px)`; sel.style.width = selW + 'px';
   track.appendChild(sel);
   // 书签层
-  const bl = document.createElement('div'); bl.className='ms-blocks-layer';
-  L.blks.forEach(b => {
-    const el = document.createElement('div'); el.className='ms-blk'+(b.in?' in':'');
-    el.style.transform=`translateX(${b.x}px)`; el.textContent=b.idx+1;
+  const bl = document.createElement('div'); bl.className = 'ms-blocks-layer';
+  for (let i = 0; i < TOTAL; i++) {
+    const el = document.createElement('div'); el.className = 'ms-blk';
+    el.style.transform = `translateX(${blkX(i)}px)`; el.textContent = i + 1;
     bl.appendChild(el);
-  });
+  }
   track.appendChild(bl);
   // 选框边框
-  const sb = document.createElement('div'); sb.className='ms-sel-border';
-  sb.style.transform=`translateX(${L.selX}px)`; sb.style.width=L.selW+'px';
+  const sb = document.createElement('div'); sb.className = 'ms-sel-border';
+  sb.style.transform = `translateX(${selX}px)`; sb.style.width = selW + 'px';
   track.appendChild(sb);
   // 把手
-  const gl = document.createElement('div'); gl.className='ms-grip'; gl.style.transform=`translateX(${L.gripL}px)`;
-  const gr = document.createElement('div'); gr.className='ms-grip'; gr.style.transform=`translateX(${L.gripR}px)`;
+  const gl = document.createElement('div'); gl.className = 'ms-grip';
+  gl.style.transform = `translateX(${selX + SEL_PAD}px)`;
+  const gr = document.createElement('div'); gr.className = 'ms-grip';
+  gr.style.transform = `translateX(${selR - SEL_PAD - HANDLE_W}px)`;
   track.appendChild(gl); track.appendChild(gr);
   // add
-  const add = document.createElement('div'); add.className='ms-add'; add.style.transform=`translateX(${L.addX}px)`; add.textContent='+';
+  const addX = blkX(TOTAL - 1) + BLOCK_W + GAP;
+  const add = document.createElement('div'); add.className = 'ms-add';
+  add.style.transform = `translateX(${addX}px)`; add.textContent = '+';
   track.appendChild(add);
-  // mask:只作用书签层
+  // mask
   if (withFade) {
-    const fade = 24;
-    const mask = `linear-gradient(to right, #000 0, #000 ${L.selX-fade}px, rgba(0,0,0,0.2) ${L.selX}px, #000 ${L.selX}px, #000 ${L.selR}px, rgba(0,0,0,0.2) ${L.selR}px, #000 ${L.selR+fade}px, #000 100%)`;
+    const fade = 28;
+    const mask = `linear-gradient(to right, #000 0, #000 ${selX - fade}px, rgba(0,0,0,0.15) ${selX}px, #000 ${selX}px, #000 ${selR}px, rgba(0,0,0,0.15) ${selR}px, #000 ${selR + fade}px, #000 ${totalW}px)`;
     bl.style.webkitMaskImage = mask;
     bl.style.maskImage = mask;
   }
-  return L;
 }
 
 const tn = document.getElementById('track-nofade');
 const tf = document.getElementById('track-fade');
 const slider = document.getElementById('slider');
+const wslider = document.getElementById('width-slider');
 const info = document.getElementById('selinfo');
+const animBtn = document.getElementById('anim-btn');
 
 function update() {
-  const start = parseInt(slider.value);
-  const count = 2;
-  render(tn, start, count, false);
-  render(tf, start, count, true);
-  info.textContent = `选框 [${start+1}, ${start+2}]`;
+  const selX = parseInt(slider.value);
+  const selW = parseInt(wslider.value);
+  render(tn, selX, selW, false);
+  render(tf, selX, selW, true);
+  info.textContent = `selX=${selX} selW=${selW} selR=${selX+selW}`;
 }
 slider.addEventListener('input', update);
+wslider.addEventListener('input', update);
+
+// 自动滑动演示:选框从左到右扫过,展示 fade 效果
+let animDir = 1, animRAF = null;
+animBtn.addEventListener('click', () => {
+  if (animRAF) { cancelAnimationFrame(animRAF); animRAF = null; animBtn.textContent = '自动滑动演示'; return; }
+  animBtn.textContent = '停止';
+  const loop = () => {
+    let v = parseInt(slider.value) + animDir * 2;
+    if (v >= 400) { v = 400; animDir = -1; }
+    if (v <= 0) { v = 0; animDir = 1; }
+    slider.value = v;
+    update();
+    animRAF = requestAnimationFrame(loop);
+  };
+  loop();
+});
 update();
 </script>
 </body>
