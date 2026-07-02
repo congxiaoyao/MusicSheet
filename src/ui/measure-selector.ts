@@ -47,8 +47,6 @@ const SEL_PAD_X = 6;        // 选框左右 padding(安全区:把手到框边)
 const CLICK_THRESHOLD = 4;
 const PAD_EDGE = 18;        // 轨道两端内边距
 const MAX_COUNT = 8;        // 选框最大宽度(8个小节)
-// 选框最小宽度:两把手间留一个把手宽(不碰)。= pad*2 + handle*2 + grip*2 + handle(中间空隙一个把手宽)
-const MIN_SELW = SEL_PAD_X * 2 + HANDLE_W * 2 + GAP_GRIP * 2 + HANDLE_W;
 const MASK_FADE = 22;       // mask 渐变带宽
 const MASK_DIM = 'rgba(0,0,0,0.12)';  // mask 框外 alpha
 
@@ -229,13 +227,11 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
     let finalSelX = selX, finalSelW = selW, finalGripLX = gripLX, finalGripRX = gripRX;
     if (dragOverride?.edge === 'r') {
       const r = dragOverride.pos;
-      finalSelW = Math.max(MIN_SELW, r - selX);   // 最小宽度:两把手不碰
-      finalGripRX = selX + finalSelW - SEL_PAD_X - HANDLE_W;
+      finalSelW = r - selX;
+      finalGripRX = r - SEL_PAD_X - HANDLE_W;
     } else if (dragOverride?.edge === 'l') {
       const selRF = selX + selW;
-      // 左缘跟手,但宽度最小 MIN_SELW。当 pos 太大(selRF-pos<MIN_SELW)时,
-      // 锁死左缘=selRF-MIN_SELW(右端固定,不让框体右移)。
-      finalSelX = Math.min(dragOverride.pos, selRF - MIN_SELW);
+      finalSelX = dragOverride.pos;
       finalSelW = selRF - finalSelX;
       finalGripLX = finalSelX + SEL_PAD_X;
       finalGripRX = selRF - SEL_PAD_X - HANDLE_W;
@@ -372,10 +368,12 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
     const trackLeft = track.getBoundingClientRect().left;
     const mxTrack = e.clientX - trackLeft;
     const axis = blockAxisCenters(drag.initStart);   // 基于 initStart 的稳定中心表(不受 transition 影响)
-    // 阻尼:超出 [min,max] 的部分打 0.3 折(越往外越难拖),放手后 apply(true) 回弹到 clamp 合法位。
+    // 阻尼:超出 [min,max] 的部分打 0.15 折,行程限制最多 BLOCK_W/2(半书签宽)。放手回弹。
+    const DAMP_FACTOR = 0.15;
+    const DAMP_LIMIT = BLOCK_W / 2;
     const damp = (v: number, min: number, max: number) => {
-      if (v < min) return min + (v - min) * 0.3;
-      if (v > max) return max + (v - max) * 0.3;
+      if (v < min) return min + Math.max((v - min) * DAMP_FACTOR, -DAMP_LIMIT);
+      if (v > max) return max + Math.min((v - max) * DAMP_FACTOR, DAMP_LIMIT);
       return v;
     };
 

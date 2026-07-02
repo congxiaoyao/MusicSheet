@@ -488,9 +488,9 @@
     content: ''; position: absolute; bottom: 5px; left: 50%; transform: translateX(-50%);
     width: 5px; height: 5px; border-radius: 50%; background: var(--accent);
   }
-  /* 框内书签不高亮(去掉 .inside 背景/边框覆盖,选框本身已标识选中区间) */
+  .ms-blk.inside { background: rgba(99,102,241,0.08); border-color: rgba(99,102,241,0.35); }
+  .ms-blk:hover { border-color: var(--accent); }
   /* hover 框外书签:mask 变全 #000(恢复全亮)。框内书签不受影响。
-     拖拽中(.ms-dragging)禁用所有 hover(mask + 删除叉),!important 覆盖。 */
   .ms-blk:not(.inside):hover {
     -webkit-mask-image: linear-gradient(to right, #000, #000) !important;
     mask-image: linear-gradient(to right, #000, #000) !important;
@@ -507,11 +507,11 @@
   /* 删小节退场:alpha 淡出 + 缩小(用 @keyframes,不干扰 transform 定位)。 */
   .ms-blk.ms-leave { opacity: 0; pointer-events: none; z-index: 2; transition: opacity 0.2s ease; }
   .ms-del {
-    position: absolute; top: -7px; right: -7px;
-    width: 19px; height: 19px;
+    position: absolute; top: 2px; right: 2px;
+    width: 16px; height: 16px;
     border: 2px solid var(--card); border-radius: 50%;
     background: #ef4444; color: #fff;
-    font-size: 13px; font-weight: 700; line-height: 1;
+    font-size: 11px; font-weight: 700; line-height: 1;
     padding: 0; cursor: pointer; z-index: 3;
     display: flex; align-items: center; justify-content: center;
     opacity: 0; transform: scale(0.5);
@@ -522,8 +522,8 @@
      opacity:0 的元素 pointer-events 仍有效,故热区可被 hover。 */
   .ms-del::before {
     content: ''; position: absolute;
-    top: -8px; right: -8px;        /* 热区比叉本体更大,覆盖右上角 */
-    width: 24px; height: 24px;
+    top: -4px; right: -4px;
+    width: 20px; height: 20px;
     border-radius: 50%;
   }
   .ms-blk.inside .ms-del { display: none; }   /* 框内书签彻底无叉 */
