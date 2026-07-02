@@ -64,15 +64,10 @@ const wslider = document.getElementById('wslider');
 const info = document.getElementById('selinfo');
 const animBtn = document.getElementById('anim-btn');
 
-/** 算单个书签的 opacity:全框外=0.3,跨缘=0.65,全框内=1。hover 时通过 CSS class 覆盖为 1。 */
+/** 书签 opacity:中心在框内=1,框外=0.3。hover 由 CSS :hover 覆盖为 1。 */
 function blkOpacity(bx, bw, selX, selR) {
   const cx = bx + bw / 2;
-  if (cx < selX || cx > selR) return 0.3;   // 框外
-  // 跨缘检测:书签跨选框缘
-  const leftOut = bx < selX, leftIn = bx + bw > selX;
-  const rightOut = bx + bw > selR, rightIn = bx < selR;
-  if ((leftOut && leftIn) || (rightOut && rightIn)) return 0.65;  // 跨缘
-  return 1;  // 全框内
+  return (cx >= selX && cx <= selR) ? 1 : 0.3;
 }
 
 function render() {
