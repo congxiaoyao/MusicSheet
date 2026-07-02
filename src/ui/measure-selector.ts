@@ -49,33 +49,35 @@ const PAD_EDGE = 18;        // 轨道两端内边距
 const MAX_COUNT = 8;        // 选框最大宽度(8个小节)
 // 选框最小宽度:两把手间留一个把手宽(不碰)。= pad*2 + handle*2 + grip*2 + handle(中间空隙一个把手宽)
 const MIN_SELW = SEL_PAD_X * 2 + HANDLE_W * 2 + GAP_GRIP * 2 + HANDLE_W;
-const MASK_FADE = 44;       // mask 渐变带宽(=一个书签宽,让跨缘书签有明显明暗分界)
+const MASK_FADE = 22;       // mask 渐变带宽
 const MASK_DIM = 'rgba(0,0,0,0.25)';  // mask 框外 alpha
 
-/** 算单个书签的 mask-image(框内 alpha=1,框外 alpha=0.3,框缘渐变)。
+/** 算单个书签的 mask-image。
  *  bx/bw=书签左缘/宽(track 坐标),selX/selR=选框缘(track 坐标)。
- *  5 色标(书签局部 0~bw,clamp):框外左(DIM)→左缘渐变→框内(#000)→右缘渐变→框外右(DIM)。
- *  渐变带永远在(clamp 贴边),连续无跳变。 */
+ *  mask:选框缘处 DIM(0.25),往框内深处渐变到 #000(全亮),框外也是 DIM。
+ *  渐变带 MASK_FADE px,位置 clamp 到 [0,bw],连续无跳变。
+ *  关键:sX<0 但 sX+FADE>0 时(选框缘在书签左侧但在渐变带内),书签左边仍要有渐变。 */
 const blkMask = (bx: number, bw: number, selX: number, selR: number): string => {
   const sX = selX - bx, sR = selR - bx;
   const c = (v: number) => Math.max(0, Math.min(bw, v));
-  // 色标:框外左(DIM)→左缘渐变(DIM→#000)→框内(#000)→右缘渐变(#000→DIM)→框外右(DIM)
-  // 框外部分只在选框缘在书签内时才有(sX>0 或 sR<bw)。缘在书签外时,该侧无 DIM。
   const stops: [number, string][] = [];
-  // 左侧
+  // 左侧:选框左缘处的 mask 渐变(selX 处 DIM → selX+FADE 处 #000)
   if (sX > 0) {
-    // 选框左缘在书签内:框外左 + 左缘渐变
+    // 缘在书签内:0~sX 是框外(DIM),sX~sX+FADE 渐变
     stops.push([c(0), MASK_DIM], [c(sX), MASK_DIM], [c(sX + MASK_FADE), '#000']);
+  } else if (sX + MASK_FADE > 0) {
+    // 缘在书签左侧但在渐变带内:书签左边有残留渐变(从 0 处的中间值到 FADE+sX 处 #000)
+    stops.push([c(0), MASK_DIM], [c(sX + MASK_FADE), '#000']);
   } else {
-    // 选框左缘在书签左侧(或=0):书签左侧在框内,全 #000 起
     stops.push([c(0), '#000']);
   }
-  // 右侧
+  // 右侧:选框右缘处的 mask 渐变(selR-FADE 处 #000 → selR 处 DIM)
   if (sR < bw) {
-    // 选框右缘在书签内:右缘渐变 + 框外右
     stops.push([c(sR - MASK_FADE), '#000'], [c(sR), MASK_DIM], [c(bw), MASK_DIM]);
+  } else if (sR - MASK_FADE < bw) {
+    // 缘在书签右侧但在渐变带内:书签右边有残留渐变
+    stops.push([c(sR - MASK_FADE), '#000'], [c(bw), MASK_DIM]);
   } else {
-    // 选框右缘在书签右侧:书签右侧在框内,全 #000 终
     stops.push([c(bw), '#000']);
   }
   // 去重相邻同位同色
@@ -273,7 +275,9 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
     blocks.forEach(b => {
       const br = b.el.getBoundingClientRect();
       const bx = br.left - wr.left;
-      const m = blkMask(bx, br.width, ms, me);
+      // mask bw +2:书签边框 1px×2 不在 mask 渲染区内(border-box 的 mask 只覆盖 padding-box),
+      // 多给 2px 让 mask 覆盖边框。bx 也往左偏 1px 对齐。
+      const m = blkMask(bx - 1, br.width + 2, ms, me);
       // 只设 -webkit-mask-image(Chrome),不设 mask-image(两者同时设可能冲突导致不生效)
       b.el.style.setProperty('-webkit-mask-image', m, 'important');
       b.el.style.setProperty('-webkit-mask-size', '100% 100%', 'important');
