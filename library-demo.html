@@ -476,8 +476,8 @@
     left: 0; top: 10px;
     width: 44px; height: 42px;
     display: flex; align-items: center; justify-content: center;
-    background: var(--card);
-    border: 1px solid var(--line);
+    background: #ef4444;
+    border: 1px solid #dc2626;
     border-radius: 10px;
     font-size: 15px; font-weight: 600; color: var(--ink-2);
     z-index: 1;
@@ -489,9 +489,9 @@
     width: 5px; height: 5px; border-radius: 50%; background: var(--accent);
   }
   /* 框内书签不高亮(去掉 .inside 背景/边框覆盖,选框本身已标识选中区间) */
-  /* hover 书签:mask 变全 #000(恢复全亮,覆盖 JS 设的框外淡化 mask)。
+  /* hover 框外书签:mask 变全 #000(恢复全亮)。框内书签不受影响(本来就该亮)。
      拖拽中(.ms-dragging)禁用,避免书签跨格时闪烁。 */
-  .ms-blk:hover {
+  .ms-blk:not(.inside):hover {
     -webkit-mask-image: linear-gradient(to right, #000, #000) !important;
     mask-image: linear-gradient(to right, #000, #000) !important;
   }
@@ -526,6 +526,11 @@
   .ms-blk.inside .ms-del { display: none; }   /* 框内书签彻底无叉 */
   .ms-del:hover { opacity: 1; transform: scale(1); }   /* 鼠标进右上角热区 → 出叉 */
   .ms-del:hover:hover { background: #dc2626; transform: scale(1.15); }
+  /* 拖拽中:禁用所有 hover(mask 恢复 + 删除叉显隐),避免跨格闪烁/误触。 */
+  .ms-wrap.ms-dragging .ms-blk:not(.inside):hover {
+    -webkit-mask-image: none !important; mask-image: none !important;
+  }
+  .ms-wrap.ms-dragging .ms-del:hover { opacity: 0 !important; transform: scale(0.5) !important; }
   .ms-add {
     position: absolute; left: 0; top: 10px;
     width: 40px; height: 42px;

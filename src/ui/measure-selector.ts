@@ -427,6 +427,23 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
     // 书签/add 也设稳态(它们有 CSS transition,自然过渡)
     blocks.forEach(b => { b.el.style.transform = `translateX(${cx.blockX.get(b.idx) ?? 0}px)`; });
     addBtn.style.transform = `translateX(${cx.addX}px)`;
+    // 吸附动画期间持续更新书签 mask(选框缘在 animate,mask 必须实时跟随)。
+    const animEnd = performance.now() + 260;
+    const updateMaskLoop = () => {
+      const sb = sel.getBoundingClientRect();
+      const wrapEl = document.querySelector('.ms-wrap');
+      const w = wrapEl ? wrapEl.getBoundingClientRect() : new DOMRect();
+      const ms = sb.left - w.left, me = sb.right - w.left;
+      blocks.forEach(b => {
+        const px = cx.blockX.get(b.idx);
+        if (px !== undefined) {
+          const m = blkMask(px, BLOCK_W, ms, me);
+          b.el.style.webkitMaskImage = m; b.el.style.maskImage = m;
+        }
+      });
+      if (performance.now() < animEnd) requestAnimationFrame(updateMaskLoop);
+    };
+    requestAnimationFrame(updateMaskLoop);
   };
 
   const onUp = () => {

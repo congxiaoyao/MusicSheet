@@ -66,7 +66,7 @@
     width: 5px; height: 5px; border-radius: 50%; background: var(--accent);
   }
   .ms-blk.inside { background: rgba(99,102,241,0.06); border-color: rgba(99,102,241,0.3); }
-  .ms-blk:hover { -webkit-mask-image: linear-gradient(to right, #000, #000) !important; mask-image: linear-gradient(to right, #000, #000) !important; }
+  .ms-blk:not(.inside):hover { -webkit-mask-image: linear-gradient(to right, #000, #000) !important; mask-image: linear-gradient(to right, #000, #000) !important; }
   .ms-wrap.ms-dragging .ms-blk:hover { -webkit-mask-image: none !important; mask-image: none !important; }
   .ms-blk.ms-enter { opacity: 0; transition: none; }
   .ms-blk.ms-leave { opacity: 0; pointer-events: none; z-index: 2; transition: opacity 0.2s ease; }
