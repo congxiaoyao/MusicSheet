@@ -58,9 +58,7 @@ const MASK_DIM = 'rgba(0,0,0,0.12)';  // mask 框外 alpha
  *  渐变带 MASK_FADE px,位置 clamp 到 [0,bw],连续无跳变。
  *  关键:sX<0 但 sX+FADE>0 时(选框缘在书签左侧但在渐变带内),书签左边仍要有渐变。 */
 const blkMask = (bx: number, bw: number, selX: number, selR: number): string => {
-  // sX 用 floor(框左缘取更靠左→框内范围略大),sR 用 ceil(框右缘取更靠右→框内范围略大)。
-  // 框内判定范围 sX~sR 略大于实际,框边缘的书签更可能被判为框内(全亮)。
-  const sX = Math.floor(selX - bx), sR = Math.ceil(selR - bx), ibw = Math.round(bw);
+  const sX = selX - bx, sR = selR - bx, ibw = bw;
   const c = (v: number) => Math.max(0, Math.min(ibw, v));
   const stops: [number, string][] = [];
   // 左侧:选框左缘处的 mask 渐变(selX 处 DIM → selX+FADE 处 #000)
