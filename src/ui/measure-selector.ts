@@ -403,12 +403,12 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
       ns = Math.max(0, Math.min(ns, maxStart));
       state.start = ns; state.count = count;
       if (raw < minSelX) {
-        // 拖到最左:左缘阻尼(超出 minSelX 部分打 0.3 折),edge:'l' 右端用 computeX 稳态。
-        apply(false, { edge: 'l', pos: minSelX + (raw - minSelX) * 0.3 });
+        // 拖到最左:左缘阻尼(edge:'l' 右端用 computeX 稳态)。
+        apply(false, { edge: 'l', pos: minSelX + Math.max((raw - minSelX) * DAMP_FACTOR, -DAMP_LIMIT) });
       } else if (raw > maxSelX) {
-        // 拖到最右:右缘阻尼(超出 maxSelX 部分打 0.3 折),edge:'r' 左端用 computeX 稳态。
+        // 拖到最右:右缘阻尼(edge:'r' 左端用 computeX 稳态)。
         const maxSelR = computeXAt(maxStart, count, state.totalMeasures).selRight;
-        apply(false, { edge: 'r', pos: maxSelR + (raw - maxSelX) * 0.3 });
+        apply(false, { edge: 'r', pos: maxSelR + Math.min((raw - maxSelX) * DAMP_FACTOR, DAMP_LIMIT) });
       } else {
         apply(false, { edge: 'move', pos: raw });
       }
