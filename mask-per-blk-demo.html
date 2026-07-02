@@ -20,7 +20,9 @@
     background: #fff; border: 1px solid #d1d5db; border-radius: 10px;
     font-size: 15px; font-weight: 600; color: #3a3f4a;
     cursor: pointer;
+    transition: opacity 0.12s;
   }
+  .ms-blk:hover { opacity: 1 !important; }   /* hover 恢复全亮,覆盖 JS 设的 opacity */
   .ms-sel { position: absolute; left: 0; top: 0; height: 62px; box-sizing: border-box; background: #f0f2ff; border-radius: 13px; z-index: 0; pointer-events: none; }
   .ms-sel-border { position: absolute; left: 0; top: 0; height: 62px; box-sizing: border-box; border: 2px solid rgba(99,102,241,0.55); border-radius: 13px; z-index: 3; pointer-events: none; }
   .ms-grip { position: absolute; left: 0; top: 20px; width: 5px; height: 22px; background: rgba(99,102,241,0.3); border-radius: 3px; z-index: 4; }
@@ -62,69 +64,15 @@ const wslider = document.getElementById('wslider');
 const info = document.getElementById('selinfo');
 const animBtn = document.getElementById('anim-btn');
 
-/** 算单个书签的 mask-image(基于书签左缘 bx,宽 bw,选框 selX/selR,是否 hover)。
- *  书签的 mask 坐标系是书签自身(0~bw)。需要把选框缘位置转换到书签局部坐标。
- *  - 框内深处:全显示(#000)
- *  - 框缘附近:渐变(#000→rgba(0,0,0,DIM))
- *  - 框外:rgba(0,0,0,DIM)(淡)
- *  hover 时:全显示(忽略 mask 淡化)
- */
-function blkMask(bx, bw, selX, selR, hovered) {
-  if (hovered) return 'none';   // hover 全显示
-  // 选框缘在书签局部坐标的位置
-  const selXLocal = selX - bx;   // 选框左缘在书签内的 x(可能 <0 或 >bw)
-  const selRLocal = selR - bx;
-  const selXFadeL = selXLocal + FADE;  // 左缘 fade 结束(框内深处)
-  const selRFadeR = selRLocal - FADE;  // 右缘 fade 开始(框内深处)
-  // 构造 mask:从书签左(0)到右(bw)
-  // 框外:alpha=DIM。框缘:渐变 DIM→1。框内深:alpha=1。
-  const stops = [];
-  // 书签左侧(0):如果整个在框外左(selRLocal<=0),全 DIM
-  if (selRLocal <= 0) {
-    // 书签全在框左外
-    return `linear-gradient(to right, rgba(0,0,0,${DIM}), rgba(0,0,0,${DIM}))`;
-  }
-  if (selXLocal >= bw) {
-    // 书签全在框右外
-    return `linear-gradient(to right, rgba(0,0,0,${DIM}), rgba(0,0,0,${DIM}))`;
-  }
-  // 书签跨越或完全在框内,构造渐变
-  // 左侧:0 → selXLocal → selXFadeL
-  // 右侧:selRFadeR → selRLocal → bw
-  // 中间:全显示
-  stops.push([0, null]);  // 起点
-  // 左缘处理
-  if (selXLocal > 0) {
-    // 书签左部分在框外左
-    stops.push([Math.max(0, selXLocal), `rgba(0,0,0,${DIM})`]);
-    stops.push([Math.max(0, selXLocal), null]);  // 渐变开始
-    stops.push([Math.max(0, Math.min(bw, selXFadeL)), '#000']);  // 渐变结束(全显示)
-  }
-  // 右缘处理
-  if (selRLocal < bw) {
-    stops.push([Math.max(0, Math.min(bw, selRFadeR)), '#000']);  // 全显示
-    stops.push([Math.max(0, Math.min(bw, selRLocal)), `rgba(0,0,0,${DIM})`]);  // 渐变到淡
-  }
-  stops.push([bw, null]);  // 终点
-
-  // 构造 CSS 渐变字符串:补全 null(继承前一个/后一个的颜色)
-  const parts = [];
-  for (let i = 0; i < stops.length; i++) {
-    const [pos, color] = stops[i];
-    let c = color;
-    if (!c) {
-      // 找前一个有颜色的
-      for (let j = i - 1; j >= 0; j--) { if (stops[j][1]) { c = stops[j][1]; break; } }
-      if (!c) {
-        // 找后一个有颜色的
-        for (let j = i + 1; j < stops.length; j++) { if (stops[j][1]) { c = stops[j][1]; break; } }
-      }
-    }
-    if (pos > 0 && pos < bw) parts.push(`${c} ${pos}px`);
-    else if (pos <= 0) parts.push(`${c} 0`);
-    else parts.push(`${c} ${bw}px`);
-  }
-  return `linear-gradient(to right, ${parts.join(', ')})`;
+/** 算单个书签的 opacity:全框外=0.3,跨缘=0.65,全框内=1。hover 时通过 CSS class 覆盖为 1。 */
+function blkOpacity(bx, bw, selX, selR) {
+  const cx = bx + bw / 2;
+  if (cx < selX || cx > selR) return 0.3;   // 框外
+  // 跨缘检测:书签跨选框缘
+  const leftOut = bx < selX, leftIn = bx + bw > selX;
+  const rightOut = bx + bw > selR, rightIn = bx < selR;
+  if ((leftOut && leftIn) || (rightOut && rightIn)) return 0.65;  // 跨缘
+  return 1;  // 全框内
 }
 
 function render() {
@@ -136,7 +84,7 @@ function render() {
   const sel = document.createElement('div'); sel.className = 'ms-sel';
   sel.style.transform = `translateX(${selX}px)`; sel.style.width = selW + 'px';
   track.appendChild(sel);
-  // 书签(每个独立 mask)
+  // 书签(每个独立 opacity,CSS hover class 控制恢复)
   const blkEls = [];
   for (let i = 0; i < TOTAL; i++) {
     const bx = blkX(i);
@@ -145,20 +93,8 @@ function render() {
     el.textContent = i + 1;
     el.dataset.bx = bx;
     el.dataset.idx = i;
-    // 设 mask
-    const m = blkMask(bx, BLOCK_W, selX, selR, false);
-    el.style.webkitMaskImage = m;
-    el.style.maskImage = m;
-    // hover:mask 变 none(全显示),离开恢复
-    el.addEventListener('mouseenter', () => {
-      el.style.webkitMaskImage = 'none';
-      el.style.maskImage = 'none';
-    });
-    el.addEventListener('mouseleave', () => {
-      const m2 = blkMask(bx, BLOCK_W, selX, selR, false);
-      el.style.webkitMaskImage = m2;
-      el.style.maskImage = m2;
-    });
+    // 设 opacity(框外/跨缘/框内)
+    el.style.opacity = blkOpacity(bx, BLOCK_W, selX, selR);
     track.appendChild(el);
     blkEls.push(el);
   }
@@ -184,20 +120,17 @@ function render() {
   info.textContent = `selX=${selX} selR=${selR} selW=${selW}`;
 }
 
-// slider 只更新 mask(不重建 DOM,避免 hover 监听丢失)
-function updateMasks() {
+// slider 只更新 opacity(不重建 DOM)
+function updateOpacities() {
   const selX = parseInt(slider.value);
   const selW = parseInt(wslider.value);
   const selR = selX + selW;
   if (track._blkEls) {
     track._blkEls.forEach(el => {
       const bx = parseFloat(el.dataset.bx);
-      const m = blkMask(bx, BLOCK_W, selX, selR, false);
-      el.style.webkitMaskImage = m;
-      el.style.maskImage = m;
+      el.style.opacity = blkOpacity(bx, BLOCK_W, selX, selR);
     });
   }
-  // 更新选框/把手位置
   const sel = track.querySelector('.ms-sel');
   const sb = track.querySelector('.ms-sel-border');
   if (sel) { sel.style.transform = `translateX(${selX}px)`; sel.style.width = selW + 'px'; }
@@ -208,8 +141,8 @@ function updateMasks() {
   info.textContent = `selX=${selX} selR=${selR} selW=${selW}`;
 }
 
-slider.addEventListener('input', updateMasks);
-wslider.addEventListener('input', updateMasks);
+slider.addEventListener('input', updateOpacities);
+wslider.addEventListener('input', updateOpacities);
 
 let animRAF = null, animDir = 1;
 animBtn.addEventListener('click', () => {
@@ -220,7 +153,7 @@ animBtn.addEventListener('click', () => {
     if (v >= 400) { v = 400; animDir = -1; }
     if (v <= 0) { v = 0; animDir = 1; }
     slider.value = v;
-    updateMasks();
+    updateOpacities();
     animRAF = requestAnimationFrame(loop);
   };
   loop();
