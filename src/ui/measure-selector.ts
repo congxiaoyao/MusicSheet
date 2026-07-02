@@ -49,8 +49,8 @@ const PAD_EDGE = 18;        // 轨道两端内边距
 const MAX_COUNT = 8;        // 选框最大宽度(8个小节)
 // 选框最小宽度:两把手间留一个把手宽(不碰)。= pad*2 + handle*2 + grip*2 + handle(中间空隙一个把手宽)
 const MIN_SELW = SEL_PAD_X * 2 + HANDLE_W * 2 + GAP_GRIP * 2 + HANDLE_W;
-const MASK_FADE = 22;       // mask 渐变带宽
-const MASK_DIM = 'rgba(0,0,0,0.12)';  // mask 框外 alpha(够低让差异明显)
+const MASK_FADE = 0;        // 调试:纯色 mask(无渐变带)
+const MASK_DIM = 'rgba(0,0,0,0.15)';  // 框外固定 alpha(无渐变)
 
 /** 算单个书签的 mask-image。
  *  bx/bw=书签左缘/宽(track 坐标),selX/selR=选框缘(track 坐标)。
@@ -264,6 +264,20 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
     leftGrip.style.transform = `translateX(${finalGripLX}px)`;
     rightGrip.style.transform = `translateX(${finalGripRX}px)`;
     addBtn.style.transform = `translateX(${addX}px)`;
+    // 同步更新 mask(用 finalSelX/finalSelW,不读 DOM,无延迟):
+    const BORDER_W = 2;
+    const ms = finalSelX + BORDER_W, me = finalSelX + finalSelW - BORDER_W;
+    blocks.forEach(b => {
+      const px = blockX.get(b.idx);
+      if (px !== undefined) {
+        const m = blkMask(px, BLOCK_W, ms, me);
+        b.el.style.setProperty('-webkit-mask-image', m, 'important');
+        b.el.style.setProperty('-webkit-mask-size', '100% 100%', 'important');
+        b.el.style.setProperty('-webkit-mask-repeat', 'no-repeat', 'important');
+        b.el.style.setProperty('-webkit-mask-clip', 'border-box', 'important');
+        b.el.style.setProperty('-webkit-mask-origin', 'border-box', 'important');
+      }
+    });
   };
 
   /** 持续更新书签 mask:按书签实际渲染位置(getBoundingClientRect)和选框实际缘算 mask。
@@ -271,7 +285,10 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
   const updateMasks = () => {
     const wr = wrap.getBoundingClientRect();
     const sr = sel.getBoundingClientRect();
-    const ms = sr.left - wr.left, me = sr.right - wr.left;
+    // 选框边框线宽 2px:border-box 下边框在 width 内,视觉边框线占 selX~selX+2 和 selR-2~selR。
+    // mask 判定框内/外时,selX/selR 往内缩边框宽度,让边框线下的书签被判定为框外(被遮)。
+    const BORDER_W = 2;
+    const ms = sr.left - wr.left + BORDER_W, me = sr.right - wr.left - BORDER_W;
     blocks.forEach(b => {
       const br = b.el.getBoundingClientRect();
       const bx = br.left - wr.left;
