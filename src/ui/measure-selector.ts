@@ -244,16 +244,22 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
     leftGrip.style.transform = `translateX(${finalGripLX}px)`;
     rightGrip.style.transform = `translateX(${finalGripRX}px)`;
     addBtn.style.transform = `translateX(${addX}px)`;
-    // 每书签独立 mask:框内 alpha=1,框外 alpha=0.3,框缘渐变。每帧更新(配合拖拽缘跟手)。
-    const ms = finalSelX, me = finalSelX + finalSelW;
+  };
+
+  /** 持续更新书签 mask:按书签实际渲染位置(getBoundingClientRect)和选框实际缘算 mask。
+   *  用 rAF 循环,覆盖 transition/animate 期间书签滑动的全过程(稳态值 blockX 不够,书签 transition 中实际位置 ≠ 稳态)。 */
+  const updateMasks = () => {
+    const wr = wrap.getBoundingClientRect();
+    const sr = sel.getBoundingClientRect();
+    const ms = sr.left - wr.left, me = sr.right - wr.left;
     blocks.forEach(b => {
-      const px = blockX.get(b.idx);
-      if (px !== undefined) {
-        const m = blkMask(px, BLOCK_W, ms, me);
-        b.el.style.webkitMaskImage = m;
-        b.el.style.maskImage = m;
-      }
+      const br = b.el.getBoundingClientRect();
+      const bx = br.left - wr.left;
+      const m = blkMask(bx, br.width, ms, me);
+      b.el.style.webkitMaskImage = m;
+      b.el.style.maskImage = m;
     });
+    requestAnimationFrame(updateMasks);
   };
 
   const init = () => {
@@ -271,6 +277,7 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
     // 框体拖拽:wrap 上 pointerdown,按坐标命中(选框不再是书签父节点,无法靠事件冒泡)。
     wrap.addEventListener('pointerdown', onWrapDown);
     apply(false);
+    updateMasks();   // 启动 mask rAF 循环(持续按实际渲染位置更新)
   };
 
   const startDrag = (e: PointerEvent, mode: 'l' | 'r') => {
@@ -427,23 +434,7 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
     // 书签/add 也设稳态(它们有 CSS transition,自然过渡)
     blocks.forEach(b => { b.el.style.transform = `translateX(${cx.blockX.get(b.idx) ?? 0}px)`; });
     addBtn.style.transform = `translateX(${cx.addX}px)`;
-    // 吸附动画期间持续更新书签 mask(选框缘在 animate,mask 必须实时跟随)。
-    const animEnd = performance.now() + 260;
-    const updateMaskLoop = () => {
-      const sb = sel.getBoundingClientRect();
-      const wrapEl = document.querySelector('.ms-wrap');
-      const w = wrapEl ? wrapEl.getBoundingClientRect() : new DOMRect();
-      const ms = sb.left - w.left, me = sb.right - w.left;
-      blocks.forEach(b => {
-        const px = cx.blockX.get(b.idx);
-        if (px !== undefined) {
-          const m = blkMask(px, BLOCK_W, ms, me);
-          b.el.style.webkitMaskImage = m; b.el.style.maskImage = m;
-        }
-      });
-      if (performance.now() < animEnd) requestAnimationFrame(updateMaskLoop);
-    };
-    requestAnimationFrame(updateMaskLoop);
+    // mask 由全局 rAF 循环(updateMasks)持续按实际渲染位置更新,无需此处手动更新。
   };
 
   const onUp = () => {
