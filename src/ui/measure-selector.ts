@@ -49,6 +49,24 @@ const PAD_EDGE = 18;        // 轨道两端内边距
 const MAX_COUNT = 8;        // 选框最大宽度(8个小节)
 // 选框最小宽度:两把手间留一个把手宽(不碰)。= pad*2 + handle*2 + grip*2 + handle(中间空隙一个把手宽)
 const MIN_SELW = SEL_PAD_X * 2 + HANDLE_W * 2 + GAP_GRIP * 2 + HANDLE_W;
+const MASK_FADE = 24;       // mask 渐变带宽
+const MASK_DIM = 'rgba(0,0,0,0.3)';  // mask 框外 alpha
+
+/** 算单个书签的 mask-image(框内 alpha=1,框外 alpha=0.3,框缘渐变)。
+ *  bx/bw=书签左缘/宽(track 坐标),selX/selR=选框缘(track 坐标)。
+ *  5 色标(书签局部 0~bw,clamp):框外左(DIM)→左缘渐变→框内(#000)→右缘渐变→框外右(DIM)。
+ *  渐变带永远在(clamp 贴边),连续无跳变。 */
+const blkMask = (bx: number, bw: number, selX: number, selR: number): string => {
+  const sX = selX - bx, sR = selR - bx;
+  const c = (v: number) => Math.max(0, Math.min(bw, v));
+  const L0 = c(0), L1 = c(sX), L2 = c(sX + MASK_FADE), R1 = c(sR - MASK_FADE), R2 = c(sR), R3 = c(bw);
+  const raw: [number, string][] = [[L0, MASK_DIM], [L1, MASK_DIM], [L2, '#000'], [R1, '#000'], [R2, MASK_DIM], [R3, MASK_DIM]];
+  const stops: [number, string][] = [];
+  for (const [pos, col] of raw) {
+    if (stops.length === 0 || stops[stops.length - 1][0] !== pos || stops[stops.length - 1][1] !== col) stops.push([pos, col]);
+  }
+  return `linear-gradient(to right, ${stops.map(([p, cl]) => `${cl} ${p}px`).join(', ')})`;
+};
 
 export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureSelectorCallbacks): MeasureSelectorHandle {
   const state: MeasureSelectorState = { ...initial, hasContent: initial.hasContent ?? [] };
@@ -226,6 +244,16 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
     leftGrip.style.transform = `translateX(${finalGripLX}px)`;
     rightGrip.style.transform = `translateX(${finalGripRX}px)`;
     addBtn.style.transform = `translateX(${addX}px)`;
+    // 每书签独立 mask:框内 alpha=1,框外 alpha=0.3,框缘渐变。每帧更新(配合拖拽缘跟手)。
+    const ms = finalSelX, me = finalSelX + finalSelW;
+    blocks.forEach(b => {
+      const px = blockX.get(b.idx);
+      if (px !== undefined) {
+        const m = blkMask(px, BLOCK_W, ms, me);
+        b.el.style.webkitMaskImage = m;
+        b.el.style.maskImage = m;
+      }
+    });
   };
 
   const init = () => {
