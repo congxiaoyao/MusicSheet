@@ -299,7 +299,6 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
         b.el.style.removeProperty('mask-image');
         return;
       }
-      }
       const br = b.el.getBoundingClientRect();
       const bx = br.left - wr.left;
       const m = blkMask(bx, br.width, ms, me);
