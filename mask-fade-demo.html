@@ -14,7 +14,10 @@
   .ms-wrap { position: relative; width: 100%; height: 64px; overflow: hidden; user-select: none; }
   .ms-track { position: relative; min-width: 100%; height: 64px; }
   .ms-blocks-layer { position: absolute; left: 0; top: 0; width: 100%; height: 100%; z-index: 1; }
-  .ms-blk { position: absolute; left: 0; top: 10px; width: 44px; height: 42px; display: flex; align-items: center; justify-content: center; background: #fff; border: 1px solid #d1d5db; border-radius: 10px; font-size: 15px; font-weight: 600; color: #3a3f4a; }
+  .ms-blk { position: absolute; left: 0; top: 10px; width: 44px; height: 42px; display: flex; align-items: center; justify-content: center; background: #fff; border: 1px solid #d1d5db; border-radius: 10px; font-size: 15px; font-weight: 600; color: #3a3f4a; transition: opacity 0.15s; }
+  /* 框外书签默认半透明(模拟淡化),hover 恢复全显示 */
+  .ms-blk.outside { opacity: 0.35; }
+  .ms-blk.outside:hover { opacity: 1; }
   .ms-sel { position: absolute; left: 0; top: 0; height: 62px; box-sizing: border-box; background: #f0f2ff; border-radius: 13px; z-index: 0; pointer-events: none; }
   .ms-sel-border { position: absolute; left: 0; top: 0; height: 62px; box-sizing: border-box; border: 2px solid rgba(99,102,241,0.55); border-radius: 13px; box-shadow: 0 3px 10px rgba(79,70,229,0.15); z-index: 3; pointer-events: none; }
   .ms-grip { position: absolute; left: 0; top: 20px; width: 5px; height: 22px; background: rgba(99,102,241,0.3); border-radius: 3px; z-index: 4; }
@@ -67,6 +70,9 @@ function render(track, selX, selW, withFade) {
   for (let i = 0; i < TOTAL; i++) {
     const el = document.createElement('div'); el.className = 'ms-blk';
     el.style.transform = `translateX(${blkX(i)}px)`; el.textContent = i + 1;
+    // 框外书签加 outside class(默认半透明,hover 恢复)
+    const cx = blkX(i) + BLOCK_W / 2;
+    if (cx < selX || cx > selR) el.classList.add('outside');
     bl.appendChild(el);
   }
   track.appendChild(bl);
@@ -85,23 +91,18 @@ function render(track, selX, selW, withFade) {
   const add = document.createElement('div'); add.className = 'ms-add';
   add.style.transform = `translateX(${addX}px)`; add.textContent = '+';
   track.appendChild(add);
-  // mask:框内缘 fade。选框缘处书签最淡(alpha 0.25),往框内深处渐变到全显示(alpha 1)。
+  // mask:框内缘 fade。框外全显示(#000 覆盖全宽),框缘内侧渐变(框缘淡→框内深全显示)。
   if (withFade) {
     const fade = 28;
     const mask = `linear-gradient(to right,
-      #000 0, #000 ${selX}px,
-      #000 ${selX + fade}px,
-      rgba(0,0,0,0.25) ${selR - fade}px,
-      #000 ${selR - fade}px, #000 ${selR}px,
-      #000 ${totalW}px)`;
-    // 左缘:selX(淡0.25)→selX+fade(全1)。右缘:selR-fade(全1)→selR(淡0.25)。
-    const mask2 = `linear-gradient(to right,
+      #000 0,
       rgba(0,0,0,0.25) ${selX}px,
       #000 ${selX + fade}px,
       #000 ${selR - fade}px,
-      rgba(0,0,0,0.25) ${selR}px)`;
-    bl.style.webkitMaskImage = mask2;
-    bl.style.maskImage = mask2;
+      rgba(0,0,0,0.25) ${selR}px,
+      #000 ${totalW}px)`;
+    bl.style.webkitMaskImage = mask;
+    bl.style.maskImage = mask;
   }
 }
 
