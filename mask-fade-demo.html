@@ -85,10 +85,17 @@ function render(track, selX, selW, withFade) {
   const add = document.createElement('div'); add.className = 'ms-add';
   add.style.transform = `translateX(${addX}px)`; add.textContent = '+';
   track.appendChild(add);
-  // mask
+  // mask:框内缘 fade(替代 selBorder 的 inset shadow 渐变)。
+  // 选框缘内侧 28px 范围,书签 alpha 从 1(框内深处)→ 0.25(框缘处),框外全显示。
+  // 视觉:选框边缘的书签"淡入淡出",像被选框边缘裁切。
   if (withFade) {
     const fade = 28;
-    const mask = `linear-gradient(to right, #000 0, #000 ${selX - fade}px, rgba(0,0,0,0.15) ${selX}px, #000 ${selX}px, #000 ${selR}px, rgba(0,0,0,0.15) ${selR}px, #000 ${selR + fade}px, #000 ${totalW}px)`;
+    const mask = `linear-gradient(to right,
+      #000 0, #000 ${selX}px,
+      rgba(0,0,0,0.25) ${selX + fade}px,
+      #000 ${selX + fade}px, #000 ${selR - fade}px,
+      rgba(0,0,0,0.25) ${selR}px,
+      #000 ${selR}px, #000 ${totalW}px)`;
     bl.style.webkitMaskImage = mask;
     bl.style.maskImage = mask;
   }
