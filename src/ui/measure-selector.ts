@@ -385,11 +385,12 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
       if (Math.abs(f.x - t.x) < 0.5 && Math.abs(f.w - t.w) < 0.5) {
         el.style.transform = `translateX(${t.x}px)`; el.style.width = t.w + 'px'; return;
       }
+      // fill:'both':动画创建即显示 from(拖拽位),结束停 to。避免启动延迟空窗(像素跳变根因)。
       const anim = el.animate(
         [{ transform: `translateX(${f.x}px)`, width: f.w + 'px' }, { transform: `translateX(${t.x}px)`, width: t.w + 'px' }],
-        { duration: 250, easing: 'cubic-bezier(.4,0,.2,1)', fill: 'none' }
+        { duration: 250, easing: 'cubic-bezier(.25,.1,.25,1)', fill: 'both' }
       );
-      anim.onfinish = () => { el.style.transform = `translateX(${t.x}px)`; el.style.width = t.w + 'px'; };
+      anim.onfinish = () => { el.style.transform = `translateX(${t.x}px)`; el.style.width = t.w + 'px'; anim.cancel(); };
     });
     // 书签/add 也设稳态(它们有 CSS transition,自然过渡)
     blocks.forEach(b => { b.el.style.transform = `translateX(${cx.blockX.get(b.idx) ?? 0}px)`; });
