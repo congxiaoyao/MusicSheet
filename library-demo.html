@@ -488,7 +488,7 @@
     content: ''; position: absolute; bottom: 5px; left: 50%; transform: translateX(-50%);
     width: 5px; height: 5px; border-radius: 50%; background: var(--accent);
   }
-  /* hover 框外书签:mask 变全 #000(恢复全亮)。框内书签不受影响。
+  /* hover 框外书签:mask 变全 #000(恢复全亮)。框内书签(.inside)不响应 hover mask。 */
   .ms-blk:not(.inside):hover {
     -webkit-mask-image: linear-gradient(to right, #000, #000) !important;
     mask-image: linear-gradient(to right, #000, #000) !important;

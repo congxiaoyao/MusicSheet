@@ -263,7 +263,9 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
     const BORDER_W = 2;
     const ms = finalSelX + BORDER_W, me = finalSelX + finalSelW - BORDER_W;
     blocks.forEach(b => {
-      if (b.el.matches(':hover')) {
+      // 只对框外书签:hover 时清除 inline mask 让 CSS :hover 全#000 接管。
+      // 框内书签(.inside)hover 不改变 mask(保持渐变效果)。
+      if (b.el.matches(':hover') && !b.el.classList.contains('inside')) {
         b.el.style.removeProperty('-webkit-mask-image');
         b.el.style.removeProperty('mask-image');
         return;
@@ -290,11 +292,13 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
     const BORDER_W = 2;
     const ms = sr.left - wr.left + BORDER_W, me = sr.right - wr.left - BORDER_W;
     blocks.forEach(b => {
-      if (b.el.matches(':hover')) {
-        // hover:清除 inline mask,让 CSS :hover 规则(全#000)接管。
+      // 只对框外书签:hover 时清除 inline mask 让 CSS :hover 全#000 接管。
+      // 框内书签(.inside)hover 不改变 mask(保持渐变效果)。
+      if (b.el.matches(':hover') && !b.el.classList.contains('inside')) {
         b.el.style.removeProperty('-webkit-mask-image');
         b.el.style.removeProperty('mask-image');
         return;
+      }
       }
       const br = b.el.getBoundingClientRect();
       const bx = br.left - wr.left;
