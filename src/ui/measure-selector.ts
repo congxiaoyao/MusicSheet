@@ -263,7 +263,11 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
     const BORDER_W = 2;
     const ms = finalSelX + BORDER_W, me = finalSelX + finalSelW - BORDER_W;
     blocks.forEach(b => {
-      if (b.el.matches(':hover')) return;   // hover 中跳过(让 CSS :hover 的 mask 全#000 接管)
+      if (b.el.matches(':hover')) {
+        b.el.style.removeProperty('-webkit-mask-image');
+        b.el.style.removeProperty('mask-image');
+        return;
+      }
       const px = blockX.get(b.idx);
       if (px !== undefined) {
         const m = blkMask(px, BLOCK_W, ms, me);
@@ -286,7 +290,12 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
     const BORDER_W = 2;
     const ms = sr.left - wr.left + BORDER_W, me = sr.right - wr.left - BORDER_W;
     blocks.forEach(b => {
-      if (b.el.matches(':hover')) return;   // hover 中跳过
+      if (b.el.matches(':hover')) {
+        // hover:清除 inline mask,让 CSS :hover 规则(全#000)接管。
+        b.el.style.removeProperty('-webkit-mask-image');
+        b.el.style.removeProperty('mask-image');
+        return;
+      }
       const br = b.el.getBoundingClientRect();
       const bx = br.left - wr.left;
       const m = blkMask(bx, br.width, ms, me);
