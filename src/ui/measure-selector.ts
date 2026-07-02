@@ -280,7 +280,7 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
       const m = blkMask(bx - 1, br.width + 2, ms, me);
       // 只设 -webkit-mask-image(Chrome),不设 mask-image(两者同时设可能冲突导致不生效)
       b.el.style.setProperty('-webkit-mask-image', m, 'important');
-      b.el.style.setProperty('-webkit-mask-size', '100% 100%', 'important');
+      b.el.style.setProperty('-webkit-mask-size', '100% calc(100% + 2px)', 'important');
       b.el.style.setProperty('-webkit-mask-repeat', 'no-repeat', 'important');
     });
     requestAnimationFrame(updateMasks);
