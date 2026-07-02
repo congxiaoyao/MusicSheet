@@ -346,7 +346,9 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
         const insideSel = downInfo.idx >= state.start && downInfo.idx < state.start + state.count;
         if (insideSel) {
           const x = computeX();
-          drag = { mode: 'm', initStart: state.start, initCount: state.count, startX: e.clientX, initSelX: x.selX, initSelRight: x.selRight, edgeOffset: 0 };
+          // startX 用 pointerdown 的位置(downInfo.x),不是当前 move 的 e.clientX。
+          // 否则选框第一次 apply 会跳 4px(阈值距离)。
+          drag = { mode: 'm', initStart: state.start, initCount: state.count, startX: downInfo.x, initSelX: x.selX, initSelRight: x.selRight, edgeOffset: 0 };
           wrap.classList.add('ms-dragging');
         }
         downInfo = null;
