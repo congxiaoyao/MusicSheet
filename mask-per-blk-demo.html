@@ -61,48 +61,29 @@ const wslider = document.getElementById('wslider');
 const info = document.getElementById('selinfo');
 const animBtn = document.getElementById('anim-btn');
 
-/** 算单个书签的 mask(书签局部坐标 0~bw,选框缘转局部)。
- *  框外部分 alpha=0.3,框内部分 alpha=1,框缘渐变带 FADE px。
- *  hover 时返回全 #000(全亮)。 */
+/** 算单个书签的 mask。统一构造色标,所有位置 clamp 到 [0,bw],无分支跳变。
+ *  5 个区域(书签局部坐标):框外左(DIM) → 左缘渐变 → 框内(#000) → 右缘渐变 → 框外右(DIM)
+ *  渐变带永远在,位置随选框缘移动(超出书签范围时 clamp),保证连续无跳变。 */
 function blkMask(bx, bw, selX, selR, hovered) {
-  if (hovered) return 'linear-gradient(to right, #000, #000)';
-  // 选框缘在书签局部坐标
-  const sX = selX - bx;    // 左缘
-  const sR = selR - bx;    // 右缘
-  // 构造 0~bw 的渐变:
-  // [0..sX]:框外左 → DIM
-  // [sX..sX+FADE]:渐变 DIM→#000
-  // [sX+FADE..sR-FADE]:框内 → #000
-  // [sR-FADE..sR]:渐变 #000→DIM
-  // [sR..bw]:框外右 → DIM
+  const ALL = 'linear-gradient(to right, #000, #000)';
+  if (hovered) return ALL;
+  const sX = selX - bx;        // 左缘局部坐标(可负/超bw)
+  const sR = selR - bx;        // 右缘局部坐标
+  const c = v => Math.max(0, Math.min(bw, v));   // clamp 到 [0,bw]
+  const L0 = c(0), L1 = c(sX), L2 = c(sX + FADE), R1 = c(sR - FADE), R2 = c(sR), R3 = c(bw);
+  // 按顺序输出色标(去重相邻同色同位)
+  const raw = [
+    [L0, DIM], [L1, DIM], [L2, '#000'],
+    [R1, '#000'], [R2, DIM], [R3, DIM]
+  ];
+  // 去掉位置相同的连续冗余(保留颜色变化点)
   const stops = [];
-  // 左端
-  if (sX <= 0) {
-    // 书签左缘已在框内(或选框左缘在书签左侧)
-    stops.push('#000 0');
-  } else if (sX >= bw) {
-    // 整个书签在框左外
-    stops.push(DIM + ' 0', DIM + ' ' + bw + 'px');
-    return `linear-gradient(to right, ${stops.join(', ')})`;
-  } else {
-    // sX 在书签内(跨左缘)
-    stops.push(DIM + ' 0', DIM + ' ' + sX + 'px');
-    const fEnd = Math.min(bw, sX + FADE);
-    stops.push('#000 ' + fEnd + 'px');
+  for (const [pos, col] of raw) {
+    if (stops.length === 0 || stops[stops.length-1][0] !== pos || stops[stops.length-1][1] !== col) {
+      stops.push([pos, col]);
+    }
   }
-  // 右端
-  if (sR >= bw) {
-    // 书签右缘在框内(选框右缘在书签右侧)
-    stops.push('#000 ' + bw + 'px');
-  } else if (sR <= 0) {
-    // 整个书签在框右外(但前面已处理全框外,这里不会到)
-    stops.push(DIM + ' ' + bw + 'px');
-  } else {
-    // sR 在书签内(跨右缘)
-    const fStart = Math.max(0, sR - FADE);
-    stops.push('#000 ' + fStart + 'px', DIM + ' ' + sR + 'px', DIM + ' ' + bw + 'px');
-  }
-  return `linear-gradient(to right, ${stops.join(', ')})`;
+  return `linear-gradient(to right, ${stops.map(([p,c]) => `${c} ${p}px`).join(', ')})`;
 }
 
 function render() {
