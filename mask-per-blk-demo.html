@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>每书签独立 mask</title>
+<link rel="stylesheet" href="/src/style.css" />
+<style>
+  body { padding: 40px; font-family: system-ui, sans-serif; }
+  h1 { font-size: 17px; margin: 0 0 4px; }
+  p.lead { color: var(--muted); font-size: 13px; margin: 0 0 16px; line-height: 1.6; max-width: 700px; }
+  .demo-host { width: 100%; max-width: 700px; border: 1px dashed var(--line-2); border-radius: 10px; padding: 10px; background: #fcfcfd; margin-bottom: 20px; }
+  .demo-label { font-size: 11px; color: var(--muted); margin-bottom: 8px; font-weight: 600; }
+  .ms-wrap { position: relative; width: 100%; height: 64px; overflow: hidden; user-select: none; }
+  .ms-track { position: relative; min-width: 100%; height: 64px; }
+  .ms-blk {
+    position: absolute; left: 0; top: 10px;
+    width: 44px; height: 42px;
+    display: flex; align-items: center; justify-content: center;
+    background: #fff; border: 1px solid #d1d5db; border-radius: 10px;
+    font-size: 15px; font-weight: 600; color: #3a3f4a;
+    cursor: pointer;
+  }
+  .ms-sel { position: absolute; left: 0; top: 0; height: 62px; box-sizing: border-box; background: #f0f2ff; border-radius: 13px; z-index: 0; pointer-events: none; }
+  .ms-sel-border { position: absolute; left: 0; top: 0; height: 62px; box-sizing: border-box; border: 2px solid rgba(99,102,241,0.55); border-radius: 13px; z-index: 3; pointer-events: none; }
+  .ms-grip { position: absolute; left: 0; top: 20px; width: 5px; height: 22px; background: rgba(99,102,241,0.3); border-radius: 3px; z-index: 4; }
+  .ctrl { margin: 12px 0; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .ctrl label { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+  .ctrl input[type=range] { width: 180px; }
+  .ctrl button { font: inherit; font-size: 12px; padding: 4px 10px; border: 1px solid var(--line); background: var(--card); border-radius: 7px; cursor: pointer; }
+  .info { font-size: 11px; color: var(--muted); font-family: ui-monospace, monospace; }
+</style>
+</head>
+<body>
+  <h1>每书签独立 mask</h1>
+  <p class="lead">
+    每个书签根据自己的位置 + 选框缘位置算独立 mask。<b>跨缘书签:框外部分淡,框内部分亮(mask 渐变穿过书签)</b>。<br>
+    hover 某书签 → 该书签 mask 变全显示(恢复清晰)。<br>
+    拖"选框位置"滑块,看跨缘书签的框内亮/框外淡效果。鼠标 hover 书签看恢复。
+  </p>
+  <div class="demo-host">
+    <div class="demo-label">每书签独立 mask(hover 恢复)</div>
+    <div class="ms-wrap"><div class="ms-track" id="track"></div></div>
+  </div>
+  <div class="ctrl">
+    <label>选框位置 <input type="range" id="slider" min="0" max="400" value="131" step="1"></label>
+    <label>选框宽度 <input type="range" id="wslider" min="60" max="350" value="137" step="1"></label>
+    <button id="anim-btn">自动滑动</button>
+    <span class="info" id="selinfo"></span>
+  </div>
+
+<script>
+const BLOCK_W = 44, GAP = 15, PAD = 18, TOTAL = 8;
+const blkX = i => PAD + i * (BLOCK_W + GAP);
+const totalW = blkX(TOTAL - 1) + BLOCK_W + GAP + 40 + PAD;
+const FADE = 28;       // 框缘 fade 带宽
+const DIM = 0.3;       // 框外/框缘处书签 alpha
+
+const track = document.getElementById('track');
+const slider = document.getElementById('slider');
+const wslider = document.getElementById('wslider');
+const info = document.getElementById('selinfo');
+const animBtn = document.getElementById('anim-btn');
+
+/** 算单个书签的 mask-image(基于书签左缘 bx,宽 bw,选框 selX/selR,是否 hover)。
+ *  书签的 mask 坐标系是书签自身(0~bw)。需要把选框缘位置转换到书签局部坐标。
+ *  - 框内深处:全显示(#000)
+ *  - 框缘附近:渐变(#000→rgba(0,0,0,DIM))
+ *  - 框外:rgba(0,0,0,DIM)(淡)
+ *  hover 时:全显示(忽略 mask 淡化)
+ */
+function blkMask(bx, bw, selX, selR, hovered) {
+  if (hovered) return 'none';   // hover 全显示
+  // 选框缘在书签局部坐标的位置
+  const selXLocal = selX - bx;   // 选框左缘在书签内的 x(可能 <0 或 >bw)
+  const selRLocal = selR - bx;
+  const selXFadeL = selXLocal + FADE;  // 左缘 fade 结束(框内深处)
+  const selRFadeR = selRLocal - FADE;  // 右缘 fade 开始(框内深处)
+  // 构造 mask:从书签左(0)到右(bw)
+  // 框外:alpha=DIM。框缘:渐变 DIM→1。框内深:alpha=1。
+  const stops = [];
+  // 书签左侧(0):如果整个在框外左(selRLocal<=0),全 DIM
+  if (selRLocal <= 0) {
+    // 书签全在框左外
+    return `linear-gradient(to right, rgba(0,0,0,${DIM}), rgba(0,0,0,${DIM}))`;
+  }
+  if (selXLocal >= bw) {
+    // 书签全在框右外
+    return `linear-gradient(to right, rgba(0,0,0,${DIM}), rgba(0,0,0,${DIM}))`;
+  }
+  // 书签跨越或完全在框内,构造渐变
+  // 左侧:0 → selXLocal → selXFadeL
+  // 右侧:selRFadeR → selRLocal → bw
+  // 中间:全显示
+  stops.push([0, null]);  // 起点
+  // 左缘处理
+  if (selXLocal > 0) {
+    // 书签左部分在框外左
+    stops.push([Math.max(0, selXLocal), `rgba(0,0,0,${DIM})`]);
+    stops.push([Math.max(0, selXLocal), null]);  // 渐变开始
+    stops.push([Math.max(0, Math.min(bw, selXFadeL)), '#000']);  // 渐变结束(全显示)
+  }
+  // 右缘处理
+  if (selRLocal < bw) {
+    stops.push([Math.max(0, Math.min(bw, selRFadeR)), '#000']);  // 全显示
+    stops.push([Math.max(0, Math.min(bw, selRLocal)), `rgba(0,0,0,${DIM})`]);  // 渐变到淡
+  }
+  stops.push([bw, null]);  // 终点
+
+  // 构造 CSS 渐变字符串:补全 null(继承前一个/后一个的颜色)
+  const parts = [];
+  for (let i = 0; i < stops.length; i++) {
+    const [pos, color] = stops[i];
+    let c = color;
+    if (!c) {
+      // 找前一个有颜色的
+      for (let j = i - 1; j >= 0; j--) { if (stops[j][1]) { c = stops[j][1]; break; } }
+      if (!c) {
+        // 找后一个有颜色的
+        for (let j = i + 1; j < stops.length; j++) { if (stops[j][1]) { c = stops[j][1]; break; } }
+      }
+    }
+    if (pos > 0 && pos < bw) parts.push(`${c} ${pos}px`);
+    else if (pos <= 0) parts.push(`${c} 0`);
+    else parts.push(`${c} ${bw}px`);
+  }
+  return `linear-gradient(to right, ${parts.join(', ')})`;
+}
+
+function render() {
+  const selX = parseInt(slider.value);
+  const selW = parseInt(wslider.value);
+  const selR = selX + selW;
+  track.innerHTML = '';
+  // 选框底色
+  const sel = document.createElement('div'); sel.className = 'ms-sel';
+  sel.style.transform = `translateX(${selX}px)`; sel.style.width = selW + 'px';
+  track.appendChild(sel);
+  // 书签(每个独立 mask)
+  const blkEls = [];
+  for (let i = 0; i < TOTAL; i++) {
+    const bx = blkX(i);
+    const el = document.createElement('div'); el.className = 'ms-blk';
+    el.style.transform = `translateX(${bx}px)`;
+    el.textContent = i + 1;
+    el.dataset.bx = bx;
+    el.dataset.idx = i;
+    // 设 mask
+    const m = blkMask(bx, BLOCK_W, selX, selR, false);
+    el.style.webkitMaskImage = m;
+    el.style.maskImage = m;
+    // hover:mask 变 none(全显示),离开恢复
+    el.addEventListener('mouseenter', () => {
+      el.style.webkitMaskImage = 'none';
+      el.style.maskImage = 'none';
+    });
+    el.addEventListener('mouseleave', () => {
+      const m2 = blkMask(bx, BLOCK_W, selX, selR, false);
+      el.style.webkitMaskImage = m2;
+      el.style.maskImage = m2;
+    });
+    track.appendChild(el);
+    blkEls.push(el);
+  }
+  // 选框边框
+  const sb = document.createElement('div'); sb.className = 'ms-sel-border';
+  sb.style.transform = `translateX(${selX}px)`; sb.style.width = selW + 'px';
+  track.appendChild(sb);
+  // 把手
+  const gl = document.createElement('div'); gl.className = 'ms-grip';
+  gl.style.transform = `translateX(${selX + 6}px)`;
+  const gr = document.createElement('div'); gr.className = 'ms-grip';
+  gr.style.transform = `translateX(${selR - 6 - 5}px)`;
+  track.appendChild(gl); track.appendChild(gr);
+  // add
+  const addX = blkX(TOTAL - 1) + BLOCK_W + GAP;
+  const add = document.createElement('div'); add.className = 'ms-blk'; add.style.cssText += ';width:40px;border:1px dashed #bbb;color:#999;font-size:22px;';
+  add.style.transform = `translateX(${addX}px)`; add.textContent = '+';
+  track.appendChild(add);
+  // 存供 slider 更新
+  track._blkEls = blkEls;
+  track._selX = selX;
+  track._selR = selR;
+  info.textContent = `selX=${selX} selR=${selR} selW=${selW}`;
+}
+
+// slider 只更新 mask(不重建 DOM,避免 hover 监听丢失)
+function updateMasks() {
+  const selX = parseInt(slider.value);
+  const selW = parseInt(wslider.value);
+  const selR = selX + selW;
+  if (track._blkEls) {
+    track._blkEls.forEach(el => {
+      const bx = parseFloat(el.dataset.bx);
+      const m = blkMask(bx, BLOCK_W, selX, selR, false);
+      el.style.webkitMaskImage = m;
+      el.style.maskImage = m;
+    });
+  }
+  // 更新选框/把手位置
+  const sel = track.querySelector('.ms-sel');
+  const sb = track.querySelector('.ms-sel-border');
+  if (sel) { sel.style.transform = `translateX(${selX}px)`; sel.style.width = selW + 'px'; }
+  if (sb) { sb.style.transform = `translateX(${selX}px)`; sb.style.width = selW + 'px'; }
+  const grips = track.querySelectorAll('.ms-grip');
+  if (grips[0]) grips[0].style.transform = `translateX(${selX + 6}px)`;
+  if (grips[1]) grips[1].style.transform = `translateX(${selR - 6 - 5}px)`;
+  info.textContent = `selX=${selX} selR=${selR} selW=${selW}`;
+}
+
+slider.addEventListener('input', updateMasks);
+wslider.addEventListener('input', updateMasks);
+
+let animRAF = null, animDir = 1;
+animBtn.addEventListener('click', () => {
+  if (animRAF) { cancelAnimationFrame(animRAF); animRAF = null; animBtn.textContent = '自动滑动'; return; }
+  animBtn.textContent = '停止';
+  const loop = () => {
+    let v = parseInt(slider.value) + animDir * 2;
+    if (v >= 400) { v = 400; animDir = -1; }
+    if (v <= 0) { v = 0; animDir = 1; }
+    slider.value = v;
+    updateMasks();
+    animRAF = requestAnimationFrame(loop);
+  };
+  loop();
+});
+
+render();
+</script>
+</body>
+</html>
