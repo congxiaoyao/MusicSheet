@@ -1,0 +1,419 @@
+/* ── 曲谱库一级页(首屏)──
+   设计目标:像 Logic/GarageBand 启动项目选择器,而非标题栏附属控件。
+   核心理念:卡片即入口(点卡片进曲子),卡片本身就是真实五线谱缩略图(一眼认出曲子)。
+   样式从 library-demo.html 抽取,共用 src/style.css 的 :root 设计令牌。 */
+
+.lib {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 28px 28px 60px;
+}
+
+/* 顶部:标题 + 工具条 */
+.lib-top {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 22px;
+  flex-wrap: wrap;
+}
+.lib-title h1 {
+  margin: 0 0 4px;
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.lib-title .count {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-soft);
+  padding: 2px 9px;
+  border-radius: 20px;
+}
+.lib-title p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* 工具条:搜索 + 排序 + 视图 + 新建 */
+.lib-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.lib-search {
+  position: relative;
+}
+.lib-search input {
+  font: inherit;
+  font-size: 14px;
+  width: 220px;
+  padding: 9px 12px 9px 34px;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: var(--card);
+  color: var(--ink);
+  outline: none;
+  transition: all 0.16s;
+}
+.lib-search input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-ring);
+  width: 260px;
+}
+.lib-search svg {
+  position: absolute;
+  left: 11px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--muted);
+  pointer-events: none;
+}
+.lib-seg {
+  display: flex;
+  gap: 2px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  padding: 3px;
+}
+.lib-seg button {
+  font: inherit;
+  font-size: 13px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  padding: 6px 12px;
+  border-radius: 16px;
+  cursor: pointer;
+  transition: all 0.14s;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.lib-seg button:hover { color: var(--ink); }
+.lib-seg button.active {
+  background: var(--ink);
+  color: #fff;
+}
+.lib-new {
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  color: #fff;
+  background: var(--accent);
+  border: 0;
+  border-radius: 20px;
+  padding: 9px 16px 9px 13px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  box-shadow: 0 4px 12px rgba(79, 70, 229, 0.28);
+  transition: transform 0.14s cubic-bezier(.34,1.56,.64,1), box-shadow 0.14s;
+}
+.lib-new:hover {
+  transform: translateY(-1px) scale(1.02);
+  box-shadow: 0 6px 18px rgba(79, 70, 229, 0.36);
+}
+.lib-new:active { transform: translateY(0) scale(0.99); }
+
+/* ── 网格视图 ── */
+.lib-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 18px;
+}
+/* 列表视图 */
+.lib-grid.list {
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
+/* ── 曲谱卡片 ── */
+.score-card {
+  position: relative;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+  cursor: pointer;
+  transition: transform 0.22s cubic-bezier(.34,1.4,.64,1), box-shadow 0.22s, border-color 0.16s;
+  box-shadow: var(--shadow-sm);
+  outline: none;
+}
+.score-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 32px rgba(16, 24, 40, 0.12);
+  border-color: transparent;
+}
+.score-card.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-ring), 0 12px 32px rgba(79, 70, 229, 0.18);
+}
+.score-card:focus-visible {
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+
+/* 缩略图:真实五线谱渲染(前两小节),卡片的核心识别区 */
+.sc-thumb {
+  height: 110px;
+  background: linear-gradient(180deg, #fcfcfd 0%, #f4f5f8 100%);
+  border-bottom: 1px solid var(--line-2);
+  overflow: hidden;
+  position: relative;
+  display: flex;
+  align-items: center;
+  padding: 6px 10px;
+}
+.sc-thumb svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+  transition: transform 0.3s cubic-bezier(.34,1.3,.64,1);
+}
+.score-card:hover .sc-thumb svg { transform: scale(1.04); }
+/* 缩略图右下角:小节数徽章 */
+.sc-bars {
+  position: absolute;
+  right: 8px;
+  bottom: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-2);
+  background: rgba(255,255,255,0.88);
+  backdrop-filter: blur(4px);
+  padding: 2px 8px;
+  border-radius: 10px;
+  border: 1px solid var(--line-2);
+}
+/* 空曲谱:占位提示 */
+.sc-thumb.empty::after {
+  content: '空曲谱';
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  font-size: 13px;
+}
+/* 缩略图加载中占位 */
+.sc-thumb.loading::after {
+  content: '加载中…';
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* 卡片信息区 */
+.sc-body {
+  padding: 12px 14px 13px;
+}
+.sc-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 7px;
+}
+.sc-title {
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--ink);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 调号/拍号 徽章 */
+.sc-badges {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.sc-badge {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-2);
+  background: var(--bg);
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+.sc-badge.key { color: var(--accent); background: var(--accent-soft); }
+.sc-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--muted);
+}
+/* 内容指示:已写多少小节(进度点) */
+.sc-fill {
+  display: flex;
+  gap: 3px;
+  align-items: center;
+}
+.sc-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--line);
+  transition: background 0.2s;
+}
+.sc-dot.filled { background: var(--accent); }
+
+/* 卡片操作浮层(hover 出现):重命名/导出/删除 */
+.sc-actions {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: opacity 0.16s, transform 0.16s;
+}
+.score-card:hover .sc-actions,
+.score-card.selected .sc-actions {
+  opacity: 1;
+  transform: translateY(0);
+}
+.sc-act {
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 7px;
+  background: rgba(255,255,255,0.92);
+  backdrop-filter: blur(6px);
+  color: var(--ink-2);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: var(--shadow-sm);
+  transition: all 0.14s;
+}
+.sc-act:hover { background: var(--card); color: var(--accent); transform: scale(1.08); }
+.sc-act.danger:hover { color: #ef4444; }
+
+/* 新建占位卡:虚线边框,点开 inline 输入 */
+.score-card.new-card {
+  border: 2px dashed var(--line);
+  background: transparent;
+  box-shadow: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 220px;
+  color: var(--muted);
+  transition: all 0.18s;
+}
+.score-card.new-card:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-soft);
+  transform: translateY(-2px);
+}
+.new-card-inner {
+  text-align: center;
+}
+.new-card-inner .plus {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  margin-bottom: 8px;
+  transition: transform 0.25s cubic-bezier(.34,1.56,.64,1);
+}
+.score-card.new-card:hover .plus { transform: rotate(90deg) scale(1.1); }
+
+/* 列表视图下的卡片:横向布局 */
+.lib-grid.list .score-card {
+  display: flex;
+  align-items: stretch;
+  min-height: 64px;
+}
+.lib-grid.list .sc-thumb {
+  width: 140px;
+  height: auto;
+  border-bottom: 0;
+  border-right: 1px solid var(--line-2);
+  flex-shrink: 0;
+}
+.lib-grid.list .sc-body {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.lib-grid.list .sc-title-row { margin: 0; flex: 1; }
+.lib-grid.list .sc-badges,
+.lib-grid.list .sc-meta { margin: 0; }
+.lib-grid.list .new-card { min-height: 64px; }
+
+/* 进入曲谱的过渡(点卡片 → 进入编辑) */
+.lib-entering {
+  animation: libFade 0.4s ease forwards;
+}
+@keyframes libFade {
+  to { opacity: 0; transform: scale(0.96); }
+}
+
+/* 空状态:无搜索结果 */
+.lib-empty {
+  text-align: center;
+  padding: 60px 20px;
+  color: var(--muted);
+}
+.lib-empty .big { font-size: 40px; margin-bottom: 12px; opacity: 0.4; }
+.lib-empty h2 {
+  font-size: 18px;
+  font-weight: 650;
+  color: var(--ink);
+  margin: 0 0 6px;
+}
+.lib-empty p { margin: 0 0 18px; font-size: 13px; }
+.lib-empty .lib-new { margin-top: 4px; }
+
+/* 隐藏的库宿主(切到编辑器时) */
+.library-host[hidden] { display: none; }
+.editor-host[hidden] { display: none; }
+
+/* 编辑器顶部的"返回曲谱库"入口(最小化,不重构 project-bar) */
+.back-to-library {
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-2);
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  padding: 7px 14px 7px 10px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-right: 12px;
+  transition: all 0.16s cubic-bezier(.34,1.3,.64,1);
+  white-space: nowrap;
+}
+.back-to-library:hover { border-color: var(--accent); color: var(--accent); transform: translateX(-2px); }
+.back-to-library:active { transform: translateX(0); }

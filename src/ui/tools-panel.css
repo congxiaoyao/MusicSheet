@@ -1,0 +1,200 @@
+/* ── 工具盘(二级编辑页,三行分组)──
+   样式从 library-demo.html 抽取,共用 src/style.css 的 :root 设计令牌。
+   三行:① 输入修饰(时值/附点/和音/连音/休止/临时记号)
+         ② 曲子属性(调号/拍号) + 编辑动作(退格/清空)
+         ③ 小节导航(MeasureSelector 宿主) */
+
+.sv-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 14px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  margin-bottom: 16px;
+  box-shadow: var(--shadow-sm);
+  position: sticky;
+  top: 10px;
+  z-index: 5;
+}
+.sv-tools-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+/* 单元格:一个标签 + 控件,卡片化分组(更大点击区、留白) */
+.sv-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: var(--bg);
+  border-radius: 11px;
+  padding: 5px 10px;
+}
+.sv-tlabel {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+}
+.sv-select {
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 7px 10px;
+  cursor: pointer;
+  outline: none;
+  min-width: 60px;
+}
+.sv-select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
+.sv-action {
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  height: 36px;
+  padding: 0 13px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--ink-2);
+  border-radius: 9px;
+  cursor: pointer;
+  transition: all 0.12s;
+}
+.sv-action:hover { border-color: var(--accent); color: var(--accent); }
+.sv-acc {
+  font: inherit;
+  font-size: 19px;
+  width: 36px; height: 36px;
+  border: 0;
+  background: transparent;
+  color: var(--ink-2);
+  cursor: pointer;
+  border-radius: 7px;
+  line-height: 1;
+}
+.sv-acc:hover { color: var(--ink); background: rgba(255,255,255,0.6); }
+.sv-acc.active { background: var(--card); color: var(--accent); box-shadow: var(--shadow-sm); }
+.sv-range-hint {
+  font-size: 13px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.sv-range-hint b { color: var(--accent); font-weight: 650; }
+/* 小节导航行:MeasureSelector 区填满剩余宽度(可独立横滑) */
+.sv-tools-measures { padding-top: 4px; }
+.sv-tools-measures .sv-measures-host { flex: 1 1 auto; min-width: 0; }
+.sv-tool-group {
+  display: flex;
+  gap: 2px;
+  background: rgba(255,255,255,0.5);
+  padding: 3px;
+  border-radius: var(--radius-sm);
+}
+.sv-dur {
+  font: inherit;
+  font-size: 19px;
+  min-width: 42px;
+  height: 36px;
+  border: 0;
+  background: transparent;
+  color: var(--ink-2);
+  cursor: pointer;
+  border-radius: 8px;
+  transition: all 0.12s;
+  padding: 0 8px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.sv-dur:hover { color: var(--ink); background: rgba(255,255,255,0.6); }
+.sv-dur.active { background: var(--card); color: var(--accent); box-shadow: var(--shadow-sm); }
+.sv-dur:disabled { opacity: 0.35; cursor: not-allowed; }
+.sv-dur svg { display: block; }
+.sv-toggle {
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  height: 36px;
+  min-width: 38px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--ink-2);
+  border-radius: 9px;
+  cursor: pointer;
+  line-height: 1;
+  transition: all 0.12s;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.sv-toggle:hover { border-color: var(--accent); color: var(--accent); }
+.sv-toggle.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+.sv-sep { width: 1px; height: 24px; background: var(--line); margin: 0 4px; }
+.sv-ghost {
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink-2);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 7px 12px;
+  cursor: pointer;
+  transition: all 0.14s;
+}
+.sv-ghost:hover { border-color: var(--accent); color: var(--accent); }
+.sv-ghost.danger:hover { border-color: #ef4444; color: #ef4444; }
+
+/* ── 视图组(行2) + 小节 pill(行3) ── */
+/* 视图按钮:icon + 文案 */
+.view-btn {
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  border-radius: 8px;
+  padding: 0 11px;
+  line-height: 1;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.12s;
+  white-space: nowrap;
+}
+.view-btn:hover { color: var(--ink); background: rgba(255,255,255,0.6); }
+.view-btn.active { background: var(--card); color: var(--accent); box-shadow: var(--shadow-sm); font-weight: 600; }
+/* 谱号字符:用 Bravura(编辑区同款字体),墨迹在 em 框内居中优于 serif。 */
+.view-gly { font-size: 17px; font-family: "Bravura", serif; line-height: 1; }
+/* 双谱:gClef + fClef,Bravura 字形本身有 advance 宽度,正常间距即可,不压紧 */
+.view-gly.clef-pair { letter-spacing: 1px; }
+
+/* 小节行:矮 pill(50px),包"小节"标签 + MeasureSelector,选框上下冒出 */
+.measure-row { display: flex; align-items: center; padding: 8px 0; }
+.measure-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;              /* 与其它 .sv-cell 标签↔选项间距一致 */
+  background: var(--bg);
+  border-radius: 12px;
+  padding: 5px 14px;
+  height: 50px;
+  overflow: visible;
+  position: relative;
+}
+.measure-pill .sv-measures-host { position: relative; min-width: 0; max-width: 460px; }
+/* MeasureSelector 轨道有 PAD_EDGE=18px 起始留白,选框(.ms-sel)从 18px 处开始绘制,
+   导致"小节"标签到选框左缘 = 25px(远大于时值组标签→选项组 7px)。
+   负 margin 吃掉这 18px,让选框靠近标签(标签→选框 ≈ 7px,与时值组一致)。
+   组件内部用 track.getBoundingClientRect() 算坐标,ms-wrap 左移不影响(都相对 track)。 */
+.measure-pill .ms-wrap { margin-left: -18px; }

@@ -1,0 +1,154 @@
+/* ── 二级编辑页顶栏(appbar)──
+   样式从 library-demo.html 抽取,共用 src/style.css 的 :root 设计令牌。
+   小节书签/翻页已由 MeasureSelector 组件接替(在工具盘第三行),本文件只含 appbar。 */
+
+/* appbar:左(返回) · 中(曲名+调号拍号徽章 + 视图模式) · 右(预览) */
+.appbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 0 20px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--line-2);
+  flex-wrap: wrap;
+}
+.appbar-back {
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink-2);
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  padding: 9px 16px 9px 12px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.16s cubic-bezier(.34,1.3,.64,1);
+}
+.appbar-back:hover { border-color: var(--accent); color: var(--accent); transform: translateX(-2px); }
+.appbar-back:active { transform: translateX(0); }
+.appbar-center {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+.appbar-name {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  outline: none;
+  border-radius: 6px;
+  padding: 2px 6px;
+  margin-left: -6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+.appbar-name:focus { background: var(--accent-soft); box-shadow: 0 0 0 2px var(--accent-ring); }
+.appbar-badge {
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-2);
+  background: var(--bg);
+  padding: 5px 10px;
+  border-radius: 12px;
+  flex-shrink: 0;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid transparent;
+  transition: all 0.14s;
+}
+.appbar-badge:hover { border-color: var(--accent); color: var(--accent); }
+.appbar-badge.key { color: var(--accent); background: var(--accent-soft); }
+.appbar-badge.key:hover { background: #e0e7ff; }
+.appbar-badge .caret {
+  display: inline-block;
+  width: 0; height: 0;
+  border-left: 3px solid transparent;
+  border-right: 3px solid transparent;
+  border-top: 4px solid currentColor;
+  opacity: 0.5;
+}
+/* 徽章下拉 */
+.badge-drop { position: relative; }
+.badge-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 50;
+  min-width: 100%;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 8px 28px rgba(16,24,40,.14), 0 2px 6px rgba(16,24,40,.06);
+  padding: 5px;
+  display: none;
+}
+.badge-menu.open { display: block; animation: dropIn 0.14s ease; }
+@keyframes dropIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+.badge-menu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 7px 12px;
+  border: 0;
+  background: transparent;
+  color: var(--ink-2);
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.badge-menu button:hover { background: #f1f5f9; color: var(--ink); }
+.badge-menu button.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.appbar-right { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.appbar-preview {
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-2);
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  padding: 8px 14px;
+  cursor: pointer;
+  transition: all 0.14s;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.appbar-preview:hover { border-color: var(--accent); color: var(--accent); }
+
+/* 编辑器入场动画(从库切到编辑器时) */
+.editor-enter {
+  animation: editorEnter 0.2s var(--ease-out-cubic, cubic-bezier(0.33,1,0.68,1));
+}
+@keyframes editorEnter {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* 编辑卡片顶部工具条:范围提示 + 退格/清空 */
+.edit-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 0 12px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--line-2);
+}
+.edit-range { font-size: 13px; color: var(--muted); }
+.edit-range b { color: var(--accent); font-weight: 650; }
+.edit-act { font-size: 12.5px; padding: 6px 12px; }
+.edit-act.danger:hover { border-color: #ef4444; color: #ef4444; }
