@@ -1,7 +1,7 @@
 // 应用装配：工具栏 ↔ 画布 ↔ 简谱 ↔ 播放 ↔ 导出 ↔ 快捷键
 // 录入模型：追加式（短信验证码）—— 只能往末尾加，只能从末尾删。
 
-import { Note, Piece, DurationValue, durationBeats } from '../core/types';
+import { Note, Piece, DurationValue, durationBeats, ViewMode, KeyName, TimeSig } from '../core/types';
 import { KEYS, resolvePitch } from '../core/theory';
 import { createPiece, appendNote, popNote, remainingBeats, remainingBeatsInCurrentBar, capacityBeats, totalBeats, totalBeatsBoth, noteStartBeats } from '../core/model';
 import { computeLayout } from '../render/layout';
@@ -9,15 +9,18 @@ import { buildSVG, exportPNG, buildGrandSVG } from '../render/export';
 import { ensureFontLoaded } from '../render/glyphs';
 import { clickYToMidi } from '../render/staff';
 import { computeBeams, indexBeamMap } from '../render/beam';
-import { buildToolbar, defaultTool, ToolState, TUPLET_CONFIG, TupletMode, tupletModeForActual } from './toolbar';
+import { defaultTool, ToolState, TUPLET_CONFIG, TupletMode, tupletModeForActual } from './toolbar';
+import { buildToolsPanel, ToolsPanelHandle } from './tools-panel';
+import { buildMeasureSelector, MeasureSelectorHandle } from './measure-selector';
 import { Player, PlayState } from '../audio/player';
 import { buildPlaybackCard, loadFingering, loadShow, saveFingering, saveShow, Fingering, ShowFlags, PlaybackView } from './playback-card';
 import { deserializeScore, scoreFileName } from '../core/serialize';
 import { twinkleExample } from './examples';
 import { Score, ScoreMeta, MeasureData, rangeToPiece, pieceBackToScore, emptyMeasure } from '../core/score';
 import { listPieces, createPiece as apiCreatePiece, getPiece as apiGetPiece, updateMeta as apiUpdateMeta, putMeasure, deletePiece as apiDeletePiece, exportPiece as apiExportScore, MeasureFlusher } from '../core/storage';
-import { buildProjectBar, ProjectBarHandle } from './project-bar';
 import { buildPreviewModal, PreviewModalHandle } from './score-preview-modal';
+import { buildLibrary, LibraryHandle } from './library';
+import { buildEditorBar, EditorBarHandle } from './editor-bar';
 
 interface HoverState { midi: number; x: number; }
 
@@ -95,8 +98,22 @@ export class App {
   private show: ShowFlags;
   private player: Player;
   private toolbar!: HTMLElement;
-  private projectBar: ProjectBarHandle | null = null;
+  /** 工具盘(demo .sv-tools,含时值/修饰/调号拍号/退格清空 + MeasureSelector)。 */
+  private toolsPanel: ToolsPanelHandle | null = null;
+  /** MeasureSelector 句柄(挂在工具盘第三行)。 */
+  private msHandle: MeasureSelectorHandle | null = null;
+  private editorBar: EditorBarHandle | null = null;
+  /** 编辑卡片顶部工具条的元素:范围提示 + 退格/清空(从工具盘移来)。 */
+  private editRangeEl: HTMLElement | null = null;
   private previewModal: PreviewModalHandle | null = null;
+  /** 当前视图层级:library=曲谱库首屏;editor=编辑器(二级页)。 */
+  private appView: 'library' | 'editor' = 'library';
+  /** 库视图宿主(一级页)。 */
+  private libraryHost: HTMLElement | null = null;
+  /** 编辑器宿主(包住现有全部编辑器 DOM,二级页)。 */
+  private editorHost: HTMLElement | null = null;
+  /** 库句柄。 */
+  private library: LibraryHandle | null = null;
   private playbackCard!: HTMLElement;
   private hover: HoverState | null = null;
   /** hover 试听音效开关(默认关)。 */
@@ -159,25 +176,37 @@ export class App {
     void this.initFromServer();
   }
 
-  /** 启动:拉曲谱列表 → 选最近一个或新建 → 加载整曲 → 设范围视图。
-   *  失败(如服务器未启动)时降级为内存中的空 piece,编辑不落盘但不阻塞 UI。 */
+  /** 启动:拉曲谱列表 → 渲染曲谱库首屏(不自动进编辑器)。
+   *  失败(如服务器未启动)时降级为内存中的空 piece,编辑不落盘但不阻塞库 UI。 */
   private async initFromServer(): Promise<void> {
+    // 缩略图依赖 Bravura 字体,等字体加载完再渲染库(避免缩略图渲染成 fallback 符号)。
+    try { await ensureFontLoaded(); } catch { /* 忽略:字体失败也继续 */ }
     try {
       const { pieces } = await listPieces();
       this.pieces = pieces;
-      if (pieces.length === 0) {
-        // 无曲谱:自动建一个默认曲谱(2 小节 C 大调 4/4)。
-        const meta = await apiCreatePiece({ title: '未命名曲谱', totalMeasures: 4, viewMode: this.tool.viewMode });
-        this.pieces = [meta];
-        await this.loadScoreById(meta.id);
-        this.flash('已创建默认曲谱');
-      } else {
-        await this.loadScoreById(pieces[0].id);
-      }
+      this.buildLibraryView(pieces);
     } catch (err) {
       console.warn('[app] 加载曲谱失败,降级为内存模式:', err);
       this.flash('未连接存储服务器(仅内存模式)');
+      // 仍渲染库(空状态 + 新建卡),让用户看到首屏而非空白。
+      this.buildLibraryView([]);
     }
+  }
+
+  /** 构建/重建曲谱库视图(一级页)。metas 变化时用 library.refresh 增量刷新。 */
+  private buildLibraryView(metas: ScoreMeta[]): void {
+    if (this.library) {
+      this.library.refresh(metas);
+      return;
+    }
+    this.library = buildLibrary(metas, {
+      onOpen: (id) => void this.openScoreFromLibrary(id),
+      onNew: () => void this.createNewPieceInLibrary(),
+      onRename: (id, title) => void this.renamePieceInLibrary(id, title),
+      onExport: (id) => void this.exportPieceFromLibrary(id),
+      onDelete: (id) => void this.deletePieceFromLibrary(id),
+    });
+    this.libraryHost?.appendChild(this.library.el);
   }
 
   /** 加载某曲谱整曲 → 设 this.score → 按 currentStartMeasure + tool.measureCount 切范围视图。 */
@@ -214,7 +243,7 @@ export class App {
     this.tupletProgress = null;
     this.rebuildCards();
     this.rebuildToolbar();
-    this.refreshProjectBar();
+    this.refreshEditorBar();
     this.render();
   }
 
@@ -226,26 +255,74 @@ export class App {
     this.piece = rangeToPiece(this.score, this.currentStartMeasure, this.tool.measureCount, activeStaff);
   }
 
-  /** 刷新项目面板(曲谱下拉 + 小节书签)状态。 */
-  private refreshProjectBar(): void {
-    this.projectBar?.refresh({
-      pieces: this.pieces,
-      currentId: this.score?.meta.id ?? null,
-      totalMeasures: this.score?.meta.totalMeasures ?? 0,
-      currentStartMeasure: this.currentStartMeasure,
-      measuresPerLine: this.tool.measureCount,
+  /** 刷新编辑器顶栏(appbar:曲名/调号拍号徽章)+ 视图 active(工具盘)+ MeasureSelector + 范围提示。 */
+  private refreshEditorBar(): void {
+    this.editorBar?.refresh({
+      title: this.score?.meta.title ?? '未命名',
+      key: this.tool.key,
+      time: this.tool.time,
     });
+    this.toolsPanel?._setViewMode(this.viewMode);
+    this.refreshMeasureSelector();
+    this.updateRangeHint();
   }
 
-  // ── 项目面板回调 ──────────────────────────────────────────
+  /** 算每小节是否有内容(treble/bass 任一非空)。供 appbar 书签圆点。 */
+  private measureHasContent(): boolean[] {
+    if (!this.score) return [];
+    return this.score.measures.map(m => !!(m && (m.treble.length > 0 || m.bass.length > 0)));
+  }
 
-  /** 新建曲谱:弹框输入标题 → 调服务端建 → 加载它。 */
-  private async createNewPiece(): Promise<void> {
+  // ── 编辑器顶栏(appbar)回调 ────────────────────────────────
+
+  /** appbar 曲名改名:落盘 + 同步 pieces/score meta。 */
+  private async renameInEditor(newTitle: string): Promise<void> {
+    if (!this.score) return;
+    if ((this.score.meta.title || '') === newTitle) return;
+    try {
+      const meta = await apiUpdateMeta(this.score.meta.id, { title: newTitle });
+      this.score.meta = meta;
+      this.pieces = this.pieces.map(p => p.id === meta.id ? meta : p);
+      this.flash('已改名');
+    } catch (err) {
+      this.flash('改名失败:' + (err as Error).message);
+    }
+  }
+
+  /** appbar 视图 radio:同步 tool.viewMode 后走 onToolChange(复用现有重建/落盘)。 */
+  private changeViewMode(v: ViewMode): void {
+    if (this.tool.viewMode === v) return;
+    this.tool.viewMode = v;
+    this.onToolChange();
+  }
+
+  /** appbar 调号徽章:同步 tool.key 后走 onToolChange(落盘 + 重建)。 */
+  private changeKey(k: KeyName): void {
+    if (this.tool.key === k) return;
+    this.tool.key = k;
+    this.onToolChange();
+  }
+
+  /** appbar 拍号徽章:同步 tool.time 后走 onToolChange(拍号变会清空整曲小节)。 */
+  private changeTime(t: TimeSig): void {
+    if (this.tool.time.num === t.num && this.tool.time.den === t.den) return;
+    this.tool.time = t;
+    this.onToolChange();
+  }
+
+  // ── 曲谱库一级页回调 ──────────────────────────────────────
+
+  /** 库 → 打开某曲谱:加载整曲 → 切到编辑器。 */
+  private async openScoreFromLibrary(id: string): Promise<void> {
+    await this.loadScoreById(id);
+    this.switchToEditor();
+  }
+
+  /** 库 → 新建曲谱:建好后留在库并选中新卡(不自动进编辑器)。 */
+  private async createNewPieceInLibrary(): Promise<void> {
     const title = prompt('曲谱标题:', '未命名曲谱');
     if (title === null) return;
     try {
-      // 切前先 flush 旧改动。
-      if (this.flusher) await this.flusher.flush();
       const meta = await apiCreatePiece({
         title: title.trim() || '未命名曲谱',
         totalMeasures: 4,
@@ -254,66 +331,97 @@ export class App {
         time: { ...this.tool.time },
       });
       this.pieces = [meta, ...this.pieces];
-      await this.loadScoreById(meta.id);
-      this.flash('已新建曲谱');
+      // 刷新库(新曲谱排在最前),新卡自动选中(库 render 默认选第一个)。
+      this.buildLibraryView(this.pieces);
     } catch (err) {
       this.flash('新建失败:' + (err as Error).message);
     }
   }
 
-  /** 删除当前曲谱(确认后)。删后选最近一个或新建。 */
-  private async deleteCurrentPiece(): Promise<void> {
-    if (!this.score) return;
-    if (this.pieces.length <= 1) { this.flash('至少保留 1 个曲谱'); return; }
-    if (!confirm(`删除曲谱「${this.score.meta.title}」?此操作不可撤销。`)) return;
+  /** 库 → 重命名:落盘 meta → 刷新库。 */
+  private async renamePieceInLibrary(id: string, newTitle: string): Promise<void> {
     try {
-      if (this.flusher) await this.flusher.flush();
-      const id = this.score.meta.id;
-      await apiDeletePiece(id);
-      this.pieces = this.pieces.filter(p => p.id !== id);
-      // 选列表里第一个。
-      await this.loadScoreById(this.pieces[0].id);
-      this.flash('已删除曲谱');
+      const meta = await apiUpdateMeta(id, { title: newTitle });
+      this.pieces = this.pieces.map(p => p.id === id ? meta : p);
+      this.buildLibraryView(this.pieces);
     } catch (err) {
-      this.flash('删除失败:' + (err as Error).message);
+      this.flash('重命名失败:' + (err as Error).message);
     }
   }
 
-  /** 导出当前整曲为 .mscore 文件(曲谱级打包)。 */
-  private async exportCurrentScore(): Promise<void> {
-    if (!this.score) { this.flash('无曲谱可导出'); return; }
+  /** 库 → 导出整曲为 .mscore(下载)。复用 exportCurrentScore 的下载逻辑,
+   *  但操作任意 id(不依赖当前打开的 score)。 */
+  private async exportPieceFromLibrary(id: string): Promise<void> {
+    const meta = this.pieces.find(p => p.id === id);
+    if (!meta) { this.flash('无曲谱可导出'); return; }
     try {
-      if (this.flusher) await this.flusher.flush();   // 导出前先落盘最新改动
-      const text = await apiExportScore(this.score.meta.id);
+      const text = await apiExportScore(id);
       const blob = new Blob([text], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = scoreFileName(this.score.meta.title);
+      a.download = scoreFileName(meta.title);
       document.body.appendChild(a);
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
-      this.flash('已导出整曲');
     } catch (err) {
       this.flash('导出失败:' + (err as Error).message);
     }
   }
 
-  /** 导入 .mscore 整曲文件 → 新建一曲谱 → 把内容铺进去。 */
-  private importScoreFile(): void {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = '.mscore,application/json';
-    input.addEventListener('change', () => {
-      const f = input.files?.[0];
-      if (!f) return;
-      void f.text().then(t => this.importScoreText(t));
-    });
-    input.click();
+  /** 库 → 删除曲谱:删后刷新库(库为空也不强制建,显示空状态)。 */
+  private async deletePieceFromLibrary(id: string): Promise<void> {
+    try {
+      // 若删的是当前正在编辑的曲谱,先 flush 再清空编辑器引用。
+      if (this.score && this.score.meta.id === id) {
+        if (this.flusher) await this.flusher.flush();
+        this.score = null;
+      }
+      await apiDeletePiece(id);
+      this.pieces = this.pieces.filter(p => p.id !== id);
+      this.buildLibraryView(this.pieces);
+    } catch (err) {
+      this.flash('删除失败:' + (err as Error).message);
+    }
   }
 
-  /** 由 .mscore 文本导入整曲(文件选择与拖拽共用)。 */
+  /** 切到编辑器(二级页):显示编辑器,隐藏库,并触发一次渲染填充五线谱。 */
+  private switchToEditor(): void {
+    this.appView = 'editor';
+    if (this.libraryHost) this.libraryHost.hidden = true;
+    if (this.editorHost) this.editorHost.hidden = false;
+    // applyScore 的 render 在库视图下早退(此时编辑器隐藏),切到编辑器后补一次,
+    // 让卡片五线谱/简谱真正填充。卡片宽度依赖可见后的 clientWidth,故必须切显后再渲染。
+    this.rebuildCards();
+    this.refreshEditorBar();
+    this.render();
+    // 入场动画:opacity + translateY(200ms easeOutCubic),与 mode-enter 同款。
+    if (this.editorHost) {
+      this.editorHost.classList.add('editor-enter');
+      window.setTimeout(() => this.editorHost?.classList.remove('editor-enter'), 220);
+    }
+  }
+
+  /** 切回曲谱库(一级页):flush 编辑改动 + 停播放 + 刷新库(更新时间/顺序) + 显示库。 */
+  private async switchToLibrary(): Promise<void> {
+    if (this.flusher) await this.flusher.flush();
+    this.player.stop();
+    this.playingIndex = -1;
+    this.currentBeat = 0;
+    this.playState = 'stopped';
+    this.appView = 'library';
+    if (this.editorHost) this.editorHost.hidden = true;
+    if (this.libraryHost) this.libraryHost.hidden = false;
+    // 刷新库:updatedAt 可能因编辑变化,排序需更新;新缩略图按需拉取。
+    try {
+      const { pieces } = await listPieces();
+      this.pieces = pieces;
+      this.buildLibraryView(pieces);
+    } catch { /* 忽略:保留旧列表 */ }
+  }
+
+  /** 由 .mscore 文本导入整曲(拖拽共用)。 */
   private async importScoreText(text: string): Promise<void> {
     try {
       const imported = deserializeScore(text);
@@ -338,58 +446,6 @@ export class App {
     }
   }
 
-  /** 末尾追加一小节(扩 totalMeasures)。服务端补空小节文件,本地 score 同步。 */
-  private async addMeasure(): Promise<void> {
-    if (!this.score) return;
-    if (this.score.meta.totalMeasures >= 256) { this.flash('已达最大小节数 256'); return; }
-    try {
-      const newTotal = this.score.meta.totalMeasures + 1;
-      const meta = await apiUpdateMeta(this.score.meta.id, { totalMeasures: newTotal });
-      this.score.meta = meta;
-      this.score.measures.push(emptyMeasure());
-      // 若 window 大小不够、当前窗口末尾已到曲末 → 无需移窗。
-      // 确保 window 不越界。
-      if (this.currentStartMeasure + this.tool.measureCount > this.score.meta.totalMeasures) {
-        this.currentStartMeasure = Math.max(0, this.score.meta.totalMeasures - this.tool.measureCount);
-      }
-      this.rebuildRangePiece();
-      this.refreshProjectBar();
-      this.rebuildCards();
-      this.render();
-    } catch (err) {
-      this.flash('加小节失败:' + (err as Error).message);
-    }
-  }
-
-  /** 末尾删除一小节(缩 totalMeasures)。若删的是当前窗口范围外则不影响编辑区。 */
-  private async removeMeasure(): Promise<void> {
-    if (!this.score) return;
-    if (this.score.meta.totalMeasures <= 1) { this.flash('至少保留 1 小节'); return; }
-    // 末尾小节若有内容,确认。
-    const last = this.score.measures[this.score.measures.length - 1];
-    const hasContent = last && (last.treble.length > 0 || last.bass.length > 0);
-    if (hasContent && !confirm(`删除最后一小节(含 ${last.treble.length + last.bass.length} 个音符)?`)) return;
-    try {
-      const newTotal = this.score.meta.totalMeasures - 1;
-      const meta = await apiUpdateMeta(this.score.meta.id, { totalMeasures: newTotal });
-      this.score.meta = meta;
-      this.score.measures.pop();
-      // 确保窗口不越界。
-      if (this.currentStartMeasure >= this.score.meta.totalMeasures) {
-        this.currentStartMeasure = Math.max(0, this.score.meta.totalMeasures - this.tool.measureCount);
-      }
-      this.tool.measureCount = Math.min(this.tool.measureCount, this.score.meta.totalMeasures);
-      this.tool.measureCount = Math.max(1, this.tool.measureCount);
-      this.rebuildRangePiece();
-      this.refreshProjectBar();
-      this.rebuildCards();
-      this.rebuildToolbar();
-      this.render();
-    } catch (err) {
-      this.flash('减小节失败:' + (err as Error).message);
-    }
-  }
-
   /** 点小节书签:切编辑区到「从第 n 小节起的 N 个连续小节」。保留其它小节。 */
   private selectMeasure(n0Based: number): void {
     if (!this.score) return;
@@ -405,7 +461,7 @@ export class App {
     this.hover = null;
     this.currentChordId = null;
     this.tupletProgress = null;
-    this.refreshProjectBar();
+    this.refreshEditorBar();
     this.rebuildCards();
     this.render();
   }
@@ -420,28 +476,29 @@ export class App {
     this.root.innerHTML = '';
     this.root.className = 'app';
 
-    const header = document.createElement('header');
-    header.className = 'app-header';
-    header.innerHTML = `<h1>简谱翻译 <span class="dot">·</span> <em>MusicSheet</em></h1>
-      <p class="hint">点击五线谱放音 → 下方实时显示简谱 · 类似短信验证码：只能往右追加，退格删除最后一个</p>`;
-    this.root.appendChild(header);
+    // 一级页:曲谱库宿主(启动首屏)。
+    this.libraryHost = document.createElement('div');
+    this.libraryHost.className = 'library-host';
+    this.root.appendChild(this.libraryHost);
 
-    // 项目面板(标题右侧,两行:曲谱选择 + 小节书签)。
-    this.projectBar = buildProjectBar(
-      { pieces: this.pieces, currentId: this.score?.meta.id ?? null, totalMeasures: this.score?.meta.totalMeasures ?? 0, currentStartMeasure: this.currentStartMeasure, measuresPerLine: this.tool.measureCount },
+    // 二级页:编辑器宿主(包住现有全部编辑器 DOM,初始隐藏)。
+    this.editorHost = document.createElement('div');
+    this.editorHost.className = 'editor-host';
+    this.editorHost.hidden = true;
+    this.root.appendChild(this.editorHost);
+
+    // 二级页顶栏(appbar):返回 + 曲名 + 调号拍号徽章(可点改) + 预览。
+    this.editorBar = buildEditorBar(
+      { title: this.score?.meta.title ?? '未命名', key: this.tool.key, time: this.tool.time },
       {
-        onSelectPiece: (id) => void this.loadScoreById(id),
-        onCreatePiece: () => void this.createNewPiece(),
-        onDeletePiece: () => void this.deleteCurrentPiece(),
-        onExportScore: () => void this.exportCurrentScore(),
-        onImportScore: () => void this.importScoreFile(),
-        onAddMeasure: () => void this.addMeasure(),
-        onRemoveMeasure: () => void this.removeMeasure(),
-        onSelectMeasure: (n) => this.selectMeasure(n),
+        onBack: () => void this.switchToLibrary(),
+        onRename: (t) => void this.renameInEditor(t),
+        onChangeKey: (k) => this.changeKey(k),
+        onChangeTime: (t) => this.changeTime(t),
         onOpenPreview: () => this.openPreview(),
       },
     );
-    this.root.appendChild(this.projectBar.el);
+    this.editorHost.appendChild(this.editorBar.el);
 
     // 整曲预览弹窗(惰性 open)。
     this.previewModal = buildPreviewModal({
@@ -449,16 +506,29 @@ export class App {
       getScore: () => this.score,
     });
 
-    this.toolbar = buildToolbar(this.tool, {
-      onChange: () => this.onToolChange(),
-      onRest: () => this.appendRest(),
-      onTie: () => this.tieRepeat(),
-      onToggleChord: () => this.onToggleChord(),
-    });
-    this.root.appendChild(this.toolbar);
+    this.toolbar = this.buildToolsPanelEl();
+    this.editorHost.appendChild(this.toolbar);
 
     this.stageWrap = document.createElement('div');
     this.stageWrap.className = 'stage';
+    // 编辑卡片顶部工具条:范围提示 + 退格/清空(从工具盘移来)
+    const editToolbar = document.createElement('div');
+    editToolbar.className = 'edit-toolbar';
+    const editRange = document.createElement('span');
+    editRange.className = 'edit-range';
+    editRange.innerHTML = '第 <b>1–2</b> 小节';
+    this.editRangeEl = editRange;
+    const undoBtn = mkBtn('⌫ 退格', 'ghost', () => this.deleteLastNote());
+    undoBtn.className = 'btn btn-ghost edit-act';
+    undoBtn.title = '退格删除最后一个音 (Backspace)';
+    const editClearBtn = mkBtn('清空当前范围', 'ghost', () => this.clear());
+    editClearBtn.className = 'btn btn-ghost edit-act danger';
+    editClearBtn.title = '清空当前范围';
+    const editSpacer = document.createElement('div');
+    editSpacer.className = 'spacer';
+    editToolbar.append(editRange, editSpacer, undoBtn, editClearBtn);
+    this.stageWrap.appendChild(editToolbar);
+
     this.statusEl = document.createElement('div');
     this.statusEl.className = 'status';
     // status 行内左侧:hover 试听音效开关(无文案,图标用 speaker SVG)
@@ -484,7 +554,7 @@ export class App {
     this.statusEl.appendChild(statusText);
     this.statusTextEl = statusText;
     this.stageWrap.appendChild(this.statusEl);
-    this.root.appendChild(this.stageWrap);
+    this.editorHost.appendChild(this.stageWrap);
 
     // 按 viewMode 创建卡片
     this.rebuildCards();
@@ -499,17 +569,16 @@ export class App {
       onFingering: (f) => { this.fingering = f; saveFingering(f); this.refreshCard(); },
       onShow: (key, on) => { this.show = { ...this.show, [key]: on }; saveShow(this.show); this.refreshCard(); },
     });
-    this.root.appendChild(this.playbackCard);
+    this.editorHost.appendChild(this.playbackCard);
 
     // 编辑操作栏（示例/清空 + PNG 导出）—— 次要操作，放卡片下一行。
     // 曲谱级导入/导出/删除 已移到项目面板。
     const editBar = document.createElement('div');
     editBar.className = 'edit-bar';
     const exampleBtn = mkBtn('示例：小星星', 'ghost', () => this.loadExample());
-    const clearBtn = mkBtn('清空当前行', 'ghost', () => this.clear());
     const pngBtn = mkBtn('⬇ 导出 PNG', 'ghost', () => { void this.doExport(); });
-    editBar.append(spacer(), exampleBtn, clearBtn, pngBtn);
-    this.root.appendChild(editBar);
+    editBar.append(spacer(), exampleBtn, pngBtn);
+    this.editorHost.appendChild(editBar);
 
     this.bindKeys();
     // 拖拽 .mscore 文件导入整曲(复用 importScoreFile 的解析+建曲谱逻辑)。
@@ -1097,7 +1166,7 @@ export class App {
   private closeChordMode(): void {
     this.tool.chordMode = false;
     this.currentChordId = null;
-    (this.toolbar as any)._setChordMode?.(false);
+    (this.toolsPanel as any)._setChordMode?.(false);
   }
 
   /** 计算下一个音的 tuplet 字段（若处于 tuplet 输入模式）。
@@ -1127,7 +1196,7 @@ export class App {
       // 组凑齐，关闭模式
       this.tupletProgress = null;
       this.tool.tupletMode = 'off';
-      (this.toolbar as any)._setTupletMode?.('off');
+      (this.toolsPanel as any)._setTupletMode?.('off');
     }
   }
 
@@ -1154,7 +1223,7 @@ export class App {
       }
     }
     this.tool.tupletMode = newMode;
-    (this.toolbar as any)._setTupletMode?.(newMode);
+    (this.toolsPanel as any)._setTupletMode?.(newMode);
     this.render();
   }
 
@@ -1172,7 +1241,7 @@ export class App {
     // 把范围视图 Piece 切回 score.measures(按小节拍边界),并标记 dirty 小节做 3 秒防抖落盘。
     this.syncRangePieceToScore();
     // 追加后重置一次性修饰（附点/升降/休止），符合行业惯例
-    (this.toolbar as any)._resetModifiers?.();
+    (this.toolsPanel as any)._resetModifiers?.();
     this.hover = null;
     this.syncPlayerAfterEdit();
     this.render();
@@ -1292,8 +1361,11 @@ export class App {
     if (oldViewMode !== this.viewMode) {
       this.rebuildCards();
     }
-    // 窗口大小变了 → 书签条的 in-window 高亮范围变了,刷新面板。
-    if (oldMeasureCount !== this.tool.measureCount) this.refreshProjectBar();
+    // 窗口大小变了 → 书签条的 in-window 高亮范围变了,刷新 appbar。
+    // 视图/调号/拍号也可能变了(toolbar 改),统一刷新 appbar(徽章 + 视图 active + 书签)。
+    if (oldMeasureCount !== this.tool.measureCount || oldViewMode !== this.viewMode || oldKey !== newKey || oldTime !== newTime) {
+      this.refreshEditorBar();
+    }
     this.render();
   }
 
@@ -1308,7 +1380,7 @@ export class App {
         case '4': this.changeDuration('eighth'); break;
         case '5': this.changeDuration('sixteenth'); break;
         case '6': this.changeDuration('thirtysecond'); break;
-        case '.': this.tool.dotted = !this.tool.dotted; (this.toolbar as any)._resetModifiers?.(); this.render(); break;
+        case '.': this.tool.dotted = !this.tool.dotted; (this.toolsPanel as any)._resetModifiers?.(); this.render(); break;
         case 't': this.tieRepeat(); break;
         case 'c': this.toggleChordKey(); break;
         case 'r': this.toggleTupletMode('triplet'); break;
@@ -1330,7 +1402,7 @@ export class App {
   /** c 键切换和弦模式:与工具栏 chip 共用同一开关逻辑 */
   private toggleChordKey(): void {
     this.tool.chordMode = !this.tool.chordMode;
-    (this.toolbar as any)._setChordMode?.(this.tool.chordMode);
+    (this.toolsPanel as any)._setChordMode?.(this.tool.chordMode);
     this.onToggleChord();
   }
 
@@ -1358,7 +1430,7 @@ export class App {
         // 组删空:清模式 + 进度,toolbar 复位
         this.tupletProgress = null;
         this.tool.tupletMode = 'off';
-        (this.toolbar as any)._setTupletMode?.('off');
+        (this.toolsPanel as any)._setTupletMode?.('off');
       } else {
         // 组还有残音:恢复/回退 tupletProgress,让用户继续补齐
         const mode = tupletModeForActual(removedTup.actual);
@@ -1370,7 +1442,7 @@ export class App {
             actual: removedTup.actual,
             normal: removedTup.normal,
           };
-          (this.toolbar as any)._setTupletMode?.(mode);
+          (this.toolsPanel as any)._setTupletMode?.(mode);
         }
       }
     }
@@ -1385,13 +1457,13 @@ export class App {
         // 组删空:才关模式
         this.currentChordId = null;
         this.tool.chordMode = false;
-        (this.toolbar as any)._setChordMode?.(false);
+        (this.toolsPanel as any)._setChordMode?.(false);
       } else {
         // 还有残音(含只剩1个):恢复 currentChordId + 开和弦模式,可继续补声部。
         // 此时 nextSlot 锁回和弦首音位置(chordAnchor),指示器叠在和弦起始位,符合「继续补这个和弦」直觉。
         this.currentChordId = removedChord;
         this.tool.chordMode = true;
-        (this.toolbar as any)._setChordMode?.(true);
+        (this.toolsPanel as any)._setChordMode?.(true);
       }
     } else {
       // 删的是普通音(非和弦成员):绝不恢复和弦模式。
@@ -1401,7 +1473,7 @@ export class App {
       this.currentChordId = null;
       if (this.tool.chordMode) {
         this.tool.chordMode = false;
-        (this.toolbar as any)._setChordMode?.(false);
+        (this.toolsPanel as any)._setChordMode?.(false);
       }
     }
     this.syncPlayerAfterEdit();
@@ -1546,13 +1618,127 @@ export class App {
 
   private rebuildToolbar(): void {
     const old = this.toolbar;
-    this.toolbar = buildToolbar(this.tool, {
+    this.toolbar = this.buildToolsPanelEl();
+    old.replaceWith(this.toolbar);
+  }
+
+  /** 构建工具盘 el(buildToolsPanel)+ 挂载 MeasureSelector 到第三行宿主。
+   *  rebuildToolbar/buildDOM 共用:每次重建工具盘都重建 MS 实例(状态由 refresh 注入)。 */
+  private buildToolsPanelEl(): HTMLElement {
+    this.msHandle = null;
+    // 直接传 this.tool 引用:toolsPanel 改 duration/key/time 等会同步到 this.tool,
+    // onToolChange 读 this.tool 即正确值(与原 toolbar 一致)。
+    const panel = buildToolsPanel(this.tool, {
       onChange: () => this.onToolChange(),
       onRest: () => this.appendRest(),
       onTie: () => this.tieRepeat(),
       onToggleChord: () => this.onToggleChord(),
+      onChangeViewMode: (v) => this.changeViewMode(v),
     });
-    old.replaceWith(this.toolbar);
+    this.toolsPanel = panel;
+    // 挂 MeasureSelector 到第三行宿主。
+    const total = this.score?.meta.totalMeasures ?? 0;
+    this.msHandle = buildMeasureSelector(
+      { totalMeasures: total, start: this.currentStartMeasure, count: this.tool.measureCount, hasContent: this.measureHasContent() },
+      {
+        onChange: (start, count) => this.onMeasureSelectorChange(start, count),
+        onDeleteMeasure: (idx) => void this.deleteMeasureAt(idx),
+        onAddMeasure: () => void this.addMeasureAtEnd(),
+      },
+    );
+    panel.measuresHost.appendChild(this.msHandle.el);
+    this.updateRangeHint();
+    return panel.el;
+  }
+
+  /** 更新工具盘「第 X–Y 小节」范围提示。 */
+  private updateRangeHint(): void {
+    if (!this.score || !this.editRangeEl) return;
+    const start = this.currentStartMeasure;
+    const count = Math.min(this.tool.measureCount, this.score.meta.totalMeasures - start);
+    this.editRangeEl.innerHTML = `第 <b>${start + 1}–${start + count}</b> 小节`;
+  }
+
+  /** MeasureSelector onChange:更新编辑区范围视图 + 轻量重渲(保留 MS 实例,不重建工具盘)。
+   *  只 rebuildRangePiece + 重建卡片 + 局部 render(复刻 demo reRenderStaff 思路)。 */
+  private onMeasureSelectorChange(start: number, count: number): void {
+    if (!this.score) return;
+    void this.flusher?.flush();
+    this.currentStartMeasure = start;
+    this.tool.measureCount = count;
+    this.player.stop();
+    this.playingIndex = -1;
+    this.currentBeat = 0;
+    this.playState = 'stopped';
+    this.hover = null;
+    this.currentChordId = null;
+    this.tupletProgress = null;
+    this.rebuildRangePiece();
+    this.rebuildCards();
+    this.updateRangeHint();
+    this.render();
+  }
+
+  /** MeasureSelector onAddMeasure:末尾加空小节 + 落盘 + MS.refresh(新书签进场动画)。 */
+  private async addMeasureAtEnd(): Promise<void> {
+    if (!this.score) return;
+    if (this.score.meta.totalMeasures >= 256) { this.flash('已达最大小节数 256'); return; }
+    try {
+      const newTotal = this.score.meta.totalMeasures + 1;
+      const meta = await apiUpdateMeta(this.score.meta.id, { totalMeasures: newTotal });
+      this.score.meta = meta;
+      this.score.measures.push(emptyMeasure());
+      this.pieces = this.pieces.map(p => p.id === meta.id ? meta : p);
+      this.rebuildRangePiece();
+      this.refreshMeasureSelector();
+      this.updateRangeHint();
+      this.render();
+    } catch (err) {
+      this.flash('加小节失败:' + (err as Error).message);
+    }
+  }
+
+  /** MeasureSelector onDeleteMeasure:删该小节音 + totalMeasures-1 + 落盘 + clamp + MS.refresh。 */
+  private async deleteMeasureAt(idx: number): Promise<void> {
+    if (!this.score) return;
+    if (this.score.meta.totalMeasures <= 1) { this.flash('至少保留 1 小节'); return; }
+    const m = this.score.measures[idx];
+    const hasContent = m && (m.treble.length > 0 || m.bass.length > 0);
+    if (hasContent && !confirm(`删除第 ${idx + 1} 小节(含 ${m.treble.length + m.bass.length} 个音符)?后续小节前移。`)) return;
+    try {
+      // 删该小节:splice,然后 totalMeasures-1。各小节内容前移(已 splice)。落盘:删尾 + 后续小节重排需逐个 PUT。
+      this.score.measures.splice(idx, 1);
+      const newTotal = this.score.meta.totalMeasures - 1;
+      const meta = await apiUpdateMeta(this.score.meta.id, { totalMeasures: newTotal });
+      this.score.meta = meta;
+      // 落盘被影响的小节(idx 之后的所有小节内容都前移了)。逐个 PUT(并发乱序,顺序 await)。
+      for (let i = idx; i < newTotal; i++) {
+        const mm = this.score.measures[i] || emptyMeasure();
+        await putMeasure(this.score.meta.id, i, { treble: mm.treble, bass: mm.bass });
+      }
+      this.pieces = this.pieces.map(p => p.id === meta.id ? meta : p);
+      // clamp start/count
+      this.currentStartMeasure = Math.min(this.currentStartMeasure, Math.max(0, newTotal - this.tool.measureCount));
+      this.tool.measureCount = Math.min(this.tool.measureCount, newTotal);
+      this.tool.measureCount = Math.max(1, this.tool.measureCount);
+      this.rebuildRangePiece();
+      this.refreshMeasureSelector();
+      this.updateRangeHint();
+      this.render();
+    } catch (err) {
+      this.flash('删小节失败:' + (err as Error).message);
+    }
+  }
+
+  /** 刷新 MeasureSelector 状态(保留实例,触发书签增删动画)。 */
+  private refreshMeasureSelector(): void {
+    if (!this.score || !this.msHandle) return;
+    this.msHandle.refresh({
+      totalMeasures: this.score.meta.totalMeasures,
+      start: this.currentStartMeasure,
+      count: this.tool.measureCount,
+      hasContent: this.measureHasContent(),
+    });
   }
 
   private async doExport(): Promise<void> {
@@ -1572,6 +1758,8 @@ export class App {
 
   /** 渲染所有卡片 + 刷新状态栏/播放头。遍历 cards 调 renderCard。 */
   private render(): void {
+    // 曲谱库一级页:不渲染编辑器(避免操作隐藏 DOM、白跑 rAF)。库自渲染。
+    if (this.appView === 'library') return;
     // 预览模式:单独渲染双谱表预览卡,不走常规卡片流程
     if (this.viewMode === 'preview') {
       this.renderPreview();
@@ -1585,7 +1773,7 @@ export class App {
       const rem = remainingBeats(this.piece);
       const pct = Math.round((totalBeats(this.piece) / capacityBeats(this.piece)) * 100);
       this.statusTextEl.textContent = total + ' \u4e2a\u97f3\u7b26 \u00b7 \u5df2\u7528 ' + pct + '% \u00b7 \u9884\u89c8\u6a21\u5f0f';
-      (this.toolbar as any)._refreshCapacity?.(remainingBeatsInCurrentBar(this.piece), rem);
+      (this.toolsPanel as any)._refreshCapacity?.(remainingBeatsInCurrentBar(this.piece), rem);
       this.refreshCard();
       return;
     }
@@ -1600,7 +1788,7 @@ export class App {
     const rem = remainingBeats(this.piece);
     const pct = Math.round((totalBeats(this.piece) / capacityBeats(this.piece)) * 100);
     this.statusTextEl.textContent = total + ' \u4e2a\u97f3\u7b26 \u00b7 \u5df2\u7528 ' + pct + '% \u00b7 \u8fd8\u80fd\u518d\u5199\u7ea6 ' + rem.toFixed(1) + ' \u62cd';
-    (this.toolbar as any)._refreshCapacity?.(remainingBeatsInCurrentBar(this.piece), rem);
+    (this.toolsPanel as any)._refreshCapacity?.(remainingBeatsInCurrentBar(this.piece), rem);
     this.refreshCard();
     this.updatePlayheadAndHighlight();
   }
