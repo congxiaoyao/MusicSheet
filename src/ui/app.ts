@@ -1707,8 +1707,23 @@ export class App {
   /** MeasureSelector onChange:更新编辑区范围视图 + 轻量重渲(保留 MS 实例,不重建工具盘)。
    *  仅当 start/count 实际变化时才 rebuildCards + render(避免拖拽回弹/范围未变时无谓重建触发动画)。 */
   private onMeasureSelectorChange(start: number, count: number): void {
-    if (this.viewMode === 'preview') return;   // 预览只读:禁止拖拽改范围(会触发 flush)
     if (!this.score) return;
+    // 预览模式:允许切换小节范围(刷新预览区),但不触发 flush / 编辑状态清理(预览只读)。
+    if (this.viewMode === 'preview') {
+      const prevStart = this.currentStartMeasure;
+      const prevCount = this.tool.measureCount;
+      this.currentStartMeasure = start;
+      this.tool.measureCount = count;
+      if (start === prevStart && count === prevCount) return;   // 范围未变
+      this.player.stop();
+      this.playingIndex = -1;
+      this.currentBeat = 0;
+      this.playState = 'stopped';
+      this.rebuildRangePiece();
+      this.updateRangeHint();
+      this.render();
+      return;
+    }
     void this.flusher?.flush();
     const prevStart = this.currentStartMeasure;
     const prevCount = this.tool.measureCount;

@@ -92,17 +92,20 @@ const blkMask = (bx: number, bw: number, selX: number, selR: number): string => 
 };
 
 export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureSelectorCallbacks): MeasureSelectorHandle {
-  // 调试日志收集器(挂在 window)。console 用:__msLogClear() 清空;__msLogSave() 上传到服务器落盘 ms-log.json。
+  // 调试日志收集器(挂在 window)。用法见 docs/调试日志收集器.md。
+  // console: __msLogClear() 清空; __msLogSave() 上传到 server/log-sink.mjs 落盘 ms-log.json。
+  // 业务代码用 log('tag', {...}) 记录事件(默认未调用,调试时手动在关键点加 log(...) 调用)。
   const __log: { t: number; tag: string; data: unknown }[] = [];
-  (window as unknown as { __msLog?: unknown[]; __msLogClear?: () => void; __msLogSave?: () => void }).__msLog = __log;
+  const log = (tag: string, data: unknown = {}) => __log.push({ t: Math.round(performance.now() * 100) / 100, tag, data });
+  (window as unknown as { __msLog?: unknown[]; __msLogClear?: () => void; __msLogSave?: () => void; __msLogFn?: typeof log }).__msLog = __log;
+  (window as unknown as { __msLogFn?: typeof log }).__msLogFn = log;
   (window as unknown as { __msLogClear?: () => void }).__msLogClear = () => { __log.length = 0; };
   (window as unknown as { __msLogSave?: () => void }).__msLogSave = () => {
-    // POST 到独立日志接收服务(同主机 4174 端口,用当前页面 hostname 避免跨主机/localhost 歧义)
     const sink = `http://${location.hostname}:4174/ms-log`;
     fetch(sink, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(__log) })
       .then(r => r.json()).then(d => console.log('[ms-log] 已上传', d)).catch(e => console.error('[ms-log] 上传失败', e));
   };
-  const log = (tag: string, data: unknown = {}) => __log.push({ t: Math.round(performance.now() * 100) / 100, tag, data });
+  void log;   // 默认无业务调用点,保留供调试注入(见文档)
   const state: MeasureSelectorState = { ...initial, hasContent: initial.hasContent ?? [] };
   const wrap = document.createElement('div');
   wrap.className = 'ms-wrap';
@@ -252,7 +255,7 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
    *  设 _hovered 标记:apply/updateMasks 跑时跳过 hovered 书签(避免覆盖清除)。
    *  拖拽中(drag)不响应(避免掠过书签闪烁)。 */
   const setBlkHover = (b: { el: HTMLElement; idx: number; _hovered?: boolean }, hovered: boolean) => {
-    if (drag) { log('hover_SKIP', { idx: b.idx, hovered }); return; }
+    if (drag) return;
     // 框内书签不需要 hover 标记(它本就全亮,mask 由 updateMasks 正常管)。
     // 只在框外书签上设 _hovered(框外书签 hover 时清除 mask 变亮)。
     // 否则框内书签被设 _hovered=true 后,离开框体变框外,_hovered 还挂着 → updateMasks 跳过 → 残留。
@@ -261,7 +264,6 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
     if (hovered) {
       b.el.style.removeProperty('-webkit-mask-image');
       b.el.style.removeProperty('mask-image');
-      log('hover_CLEAR', { idx: b.idx });
     } else {   // !hovered:恢复框外渐变 mask
       const wr = wrap.getBoundingClientRect();
       const sr = sel.getBoundingClientRect();
@@ -272,7 +274,6 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
       b.el.style.setProperty('-webkit-mask-repeat', 'no-repeat', 'important');
       b.el.style.setProperty('-webkit-mask-clip', 'border-box', 'important');
       b.el.style.setProperty('-webkit-mask-origin', 'border-box', 'important');
-      log('hover_RESTORE', { idx: b.idx });
     }
   };
 
@@ -374,7 +375,7 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
     const ms = sr.left - wr.left + BORDER_W, me = sr.right - wr.left - BORDER_W;
     blocks.forEach(b => {
       // 跳过 hovered 书签:setBlkHover 已处理(清除或恢复),此处不重设避免覆盖。
-      if (b._hovered && !b.el.classList.contains('inside')) { log('mask_SKIP', { idx: b.idx }); return; }
+      if (b._hovered && !b.el.classList.contains('inside')) return;
       const br = b.el.getBoundingClientRect();
       const bx = br.left - wr.left;
       const m = blkMask(bx, br.width, ms, me);
@@ -400,16 +401,6 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
     } else {
       updateMasks();   // 最后再跑一帧确保稳态值准确
       maskRafId = 0;
-      const wr0 = wrap.getBoundingClientRect();
-      const sr0 = sel.getBoundingClientRect();
-      log('mask_STOP', { start: state.start, count: state.count,
-        selL: Math.round(sr0.left - wr0.left), selR: Math.round(sr0.right - wr0.left),
-        blocks: blocks.map(b => {
-          const br = b.el.getBoundingClientRect();
-          return { i: b.idx, ins: b.el.classList.contains('inside'), h: !!b._hovered,
-            bx: Math.round(br.left - wr0.left), bw: Math.round(br.width),
-            m: b.el.style.getPropertyValue('-webkit-mask-image') || '' };
-        }) });
     }
   };
   /** 启动/延长 mask 运行(拖拽中不调,因 onMove 每帧直接调 updateMasks)。 */
@@ -447,7 +438,6 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
     const edge = mode === 'l' ? x.selX : x.selRight;
     drag = { mode, initStart: state.start, initCount: state.count, startX: e.clientX, initSelX: x.selX, initSelRight: x.selRight, edgeOffset: edge - mxTrack };
     wrap.classList.add('ms-dragging');
-    log('drag_start', { mode: 'grip_' + mode, start: state.start, count: state.count });
   };
 
   /** wrap pointerdown:坐标命中测试。
@@ -469,7 +459,7 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
       });
       if (onBlock) return;
       e.preventDefault();
-      { const x = computeX(); drag = { mode: 'm', initStart: state.start, initCount: state.count, startX: e.clientX, initSelX: x.selX, initSelRight: x.selRight, edgeOffset: 0 }; log('drag_start', { mode: 'wrap_blank', start: state.start, count: state.count }); }
+      { const x = computeX(); drag = { mode: 'm', initStart: state.start, initCount: state.count, startX: e.clientX, initSelX: x.selX, initSelRight: x.selRight, edgeOffset: 0 }; }
       wrap.classList.add('ms-dragging');
     }
   };
@@ -482,7 +472,6 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
           const x = computeX();
           drag = { mode: 'm', initStart: state.start, initCount: state.count, startX: e.clientX, initSelX: x.selX, initSelRight: x.selRight, edgeOffset: 0 };
           wrap.classList.add('ms-dragging');
-          log('drag_start', { mode: 'block', fromIdx: downInfo.idx, start: state.start, count: state.count });
         }
         downInfo = null;
       }
@@ -555,14 +544,12 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
 
   const finishDrag = () => {
     if (!drag) return;
-    const hoveredBefore = blocks.map(b => ({ i: b.idx, h: !!b._hovered }));
     drag = null;
     wrap.classList.remove('ms-dragging');
     downInfo = null;
     // 拖拽中 mouseleave 被 setBlkHover 的 if(drag)return 拦截,_hovered 可能卡在 true,
     // 导致 apply/updateMasks 跳过该书签不更新 mask → 残留。拖拽结束统一清除。
     blocks.forEach(b => { b._hovered = false; });
-    log('drag_end', { start: state.start, count: state.count, hoveredBefore });
     cb.onChange(state.start, state.count);
     // 抬手吸附:用 Web Animations API(element.animate)从拖拽位平滑到稳态。
     // 绕过 CSS transition 的时序问题(从 inline transition:none 切到 CSS 值时 Chrome 不触发过渡)。
