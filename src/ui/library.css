@@ -98,6 +98,7 @@
   align-items: center;
   gap: 5px;
 }
+.lib-seg button svg { width: 15px; height: 15px; }
 .lib-seg button:hover { color: var(--ink); }
 .lib-seg button.active {
   background: var(--ink);
@@ -119,6 +120,7 @@
   box-shadow: 0 4px 12px rgba(79, 70, 229, 0.28);
   transition: transform 0.14s cubic-bezier(.34,1.56,.64,1), box-shadow 0.14s;
 }
+.lib-new svg { width: 16px; height: 16px; }
 .lib-new:hover {
   transform: translateY(-1px) scale(1.02);
   box-shadow: 0 6px 18px rgba(79, 70, 229, 0.36);
@@ -305,7 +307,9 @@
   justify-content: center;
   box-shadow: var(--shadow-sm);
   transition: all 0.14s;
+  padding: 0;
 }
+.sc-act svg { width: 15px; height: 15px; pointer-events: none; }
 .sc-act:hover { background: var(--card); color: var(--accent); transform: scale(1.08); }
 .sc-act.danger:hover { color: #ef4444; }
 
@@ -339,17 +343,27 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 24px;
   margin-bottom: 8px;
   transition: transform 0.25s cubic-bezier(.34,1.56,.64,1);
 }
+.new-card-inner .plus svg { display: block; }
 .score-card.new-card:hover .plus { transform: rotate(90deg) scale(1.1); }
 
-/* 列表视图下的卡片:横向布局 */
+/* 列表视图下的卡片:横向布局。
+   关键:列表模式下 .sc-actions 不再用 absolute 浮层(会盖住标题/徽章),
+   而是作为卡片的正常文档流尾部元素(thumb/body/actions 三个平级子元素),永远不遮内容。
+   右侧 padding 留出贴边呼吸距,避免操作按钮组紧贴卡片右边缘。 */
 .lib-grid.list .score-card {
   display: flex;
   align-items: stretch;
   min-height: 64px;
+  padding-right: 12px;     /* 给最右侧的 .sc-actions 留呼吸距 */
+}
+.lib-grid.list .score-card:hover {
+  /* 横向条目不再上跳(translateY 违和),改用边框/阴影高亮。 */
+  transform: none;
+  box-shadow: 0 4px 14px rgba(16, 24, 40, 0.08);
+  border-color: var(--accent);
 }
 .lib-grid.list .sc-thumb {
   width: 140px;
@@ -360,21 +374,53 @@
 }
 .lib-grid.list .sc-body {
   flex: 1;
+  min-width: 0;            /* 防溢出,让标题 ellipsis 生效 */
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 16px;               /* 右侧信息组内(badges/meta/actions)的紧凑间距 */
+  padding: 10px 16px;      /* 列表行内边距(覆盖卡片的纵向 padding,让行更紧凑) */
 }
-.lib-grid.list .sc-title-row { margin: 0; flex: 1; }
-.lib-grid.list .sc-badges,
-.lib-grid.list .sc-meta { margin: 0; }
+/* 标题:取自然宽度 + ellipsis,不无限拉伸(否则右侧会被推散)。
+   flex:0 1 auto + max-width 限定视觉宽度。 */
+.lib-grid.list .sc-title-row {
+  margin: 0;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 360px;
+}
+/* 右侧信息组靠右聚拢:用 margin-left:auto 把 badges 推到行尾,
+   badges/meta/actions 三者随后在 body 的 gap(16px) 内紧凑排列,
+   不再被大间隙打散。 */
+.lib-grid.list .sc-badges { margin: 0 0 0 auto; flex-shrink: 0; gap: 6px; }
+.lib-grid.list .sc-meta { margin: 0; flex-shrink: 0; gap: 8px; }
+/* 列表模式:操作区脱离 absolute 浮层,变为 body 末尾的常规元素。
+   始终可见(不依赖 hover),避免布局抖动;hover 时整体高亮。
+   用 margin-left 推开,与左侧信息组形成更宽的分隔(操作区是"动作",语义上独立)。 */
+.lib-grid.list .sc-actions {
+  position: static;
+  opacity: 1;
+  transform: none;
+  flex-shrink: 0;
+  align-self: center;
+  margin-left: 8px;        /* 在 body 的 24px gap 基础上再加一点,突出操作区 */
+}
+.lib-grid.list .sc-act {
+  /* 列表里操作按钮去掉磨砂背景(不再浮在图上),改成纯透明,降低视觉权重 */
+  background: transparent;
+  box-shadow: none;
+  opacity: 0.55;
+}
+.lib-grid.list .score-card:hover .sc-act,
+.lib-grid.list .score-card.selected .sc-act { opacity: 1; }
 .lib-grid.list .new-card { min-height: 64px; }
 
-/* 进入曲谱的过渡(点卡片 → 进入编辑) */
-.lib-entering {
-  animation: libFade 0.4s ease forwards;
+/* 进入曲谱的过渡:整库淡出 + 轻微上移(像翻页推进),不再单卡缩小(那样像删除)。 */
+.lib-leaving {
+  animation: libLeave 0.26s ease forwards;
+  pointer-events: none;
 }
-@keyframes libFade {
-  to { opacity: 0; transform: scale(0.96); }
+@keyframes libLeave {
+  to { opacity: 0; transform: translateY(-10px); }
 }
 
 /* 空状态:无搜索结果 */
@@ -383,7 +429,8 @@
   padding: 60px 20px;
   color: var(--muted);
 }
-.lib-empty .big { font-size: 40px; margin-bottom: 12px; opacity: 0.4; }
+.lib-empty .big { margin-bottom: 12px; opacity: 0.4; display: flex; justify-content: center; }
+.lib-empty .big svg { display: block; }
 .lib-empty h2 {
   font-size: 18px;
   font-weight: 650;

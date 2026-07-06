@@ -19,6 +19,7 @@ import { twinkleExample } from './examples';
 import { Score, ScoreMeta, MeasureData, rangeToPiece, pieceBackToScore, emptyMeasure } from '../core/score';
 import { listPieces, createPiece as apiCreatePiece, getPiece as apiGetPiece, updateMeta as apiUpdateMeta, putMeasure, deletePiece as apiDeletePiece, exportPiece as apiExportScore, MeasureFlusher } from '../core/storage';
 import { buildPreviewModal, PreviewModalHandle } from './score-preview-modal';
+import { buildPromptModal, PromptModalHandle } from './prompt-modal';
 import { buildLibrary, LibraryHandle } from './library';
 import { buildEditorBar, EditorBarHandle } from './editor-bar';
 
@@ -106,6 +107,8 @@ export class App {
   /** 编辑卡片顶部工具条的元素:范围提示 + 退格/清空(从工具盘移来)。 */
   private editRangeEl: HTMLElement | null = null;
   private previewModal: PreviewModalHandle | null = null;
+  /** 通用自定义弹窗(新建起名等),替代原生 prompt。 */
+  private promptModal: PromptModalHandle = buildPromptModal();
   /** 当前视图层级:library=曲谱库首屏;editor=编辑器(二级页)。 */
   private appView: 'library' | 'editor' = 'library';
   /** 库视图宿主(一级页)。 */
@@ -318,21 +321,26 @@ export class App {
     this.switchToEditor();
   }
 
-  /** 库 → 新建曲谱:建好后留在库并选中新卡(不自动进编辑器)。 */
+  /** 库 → 新建曲谱:弹自定义起名弹窗 → 建谱 → 直接进入二级编辑页。 */
   private async createNewPieceInLibrary(): Promise<void> {
-    const title = prompt('曲谱标题:', '未命名曲谱');
-    if (title === null) return;
+    const title = await this.promptModal.promptText({
+      title: '新建曲谱',
+      placeholder: '曲谱标题',
+      initial: '未命名曲谱',
+      confirmText: '创建',
+    });
+    if (title === null) return;   // 取消
     try {
       const meta = await apiCreatePiece({
-        title: title.trim() || '未命名曲谱',
+        title: title || '未命名曲谱',
         totalMeasures: 4,
         viewMode: this.tool.viewMode,
         key: KEYS[this.tool.key],
         time: { ...this.tool.time },
       });
       this.pieces = [meta, ...this.pieces];
-      // 刷新库(新曲谱排在最前),新卡自动选中(库 render 默认选第一个)。
-      this.buildLibraryView(this.pieces);
+      // 建好后直接进入二级编辑页(不再留在库)。
+      await this.openScoreFromLibrary(meta.id);
     } catch (err) {
       this.flash('新建失败:' + (err as Error).message);
     }

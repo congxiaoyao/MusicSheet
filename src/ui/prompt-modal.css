@@ -1,0 +1,123 @@
+/* ── 通用自定义弹窗(prompt / confirm)
+   替代原生 window.prompt / window.confirm,统一视觉风格。
+   动画思路复刻 score-preview-modal:.open / .closing 类切换 + 160ms 过渡,
+   但用独立 .pm-* 类名(窄卡片、垂直居中,与预览弹窗的宽卡/顶部对齐不同)。 */
+
+.pm-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  z-index: 1100;            /* 比预览弹窗(1000)更高,避免叠加时被压住 */
+  opacity: 0;
+  transition: background 0.16s ease, opacity 0.16s ease;
+}
+.pm-overlay.open {
+  background: rgba(15, 23, 42, 0.45);
+  opacity: 1;
+}
+.pm-overlay.closing {
+  opacity: 0;
+  background: rgba(15, 23, 42, 0);
+}
+.pm-card {
+  background: var(--card);
+  border-radius: var(--radius);
+  box-shadow: 0 12px 40px rgba(15, 23, 42, 0.25);
+  width: 100%;
+  max-width: 400px;
+  padding: 18px 20px 16px;
+  transform: translateY(12px) scale(0.98);
+  transition: transform 0.16s var(--ease-out-cubic, ease);
+}
+.pm-overlay.open .pm-card {
+  transform: translateY(0) scale(1);
+}
+
+.pm-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.pm-title {
+  font-size: 16px;
+  font-weight: 650;
+  color: var(--ink);
+  flex: 1;
+  min-width: 0;
+}
+.pm-close {
+  font: inherit;
+  width: 28px;
+  height: 28px;
+  line-height: 1;
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.pm-close:hover { background: var(--bg); color: var(--ink); }
+.pm-close svg { width: 16px; height: 16px; }
+
+.pm-message {
+  font-size: 13px;
+  color: var(--muted);
+  margin: 0 0 14px;
+  line-height: 1.5;
+}
+
+.pm-input {
+  font: inherit;
+  font-size: 14px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--card);
+  color: var(--ink);
+  outline: none;
+  transition: border-color 0.14s, box-shadow 0.14s;
+  margin: 10px 0 16px;
+}
+.pm-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+
+.pm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.pm-btn {
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  padding: 8px 16px;
+  cursor: pointer;
+  transition: all 0.14s;
+}
+.pm-btn.cancel {
+  color: var(--ink-2);
+  background: var(--bg);
+  border-color: var(--line);
+}
+.pm-btn.cancel:hover { background: var(--line-2); }
+.pm-btn.confirm {
+  color: #fff;
+  background: var(--accent);
+}
+.pm-btn.confirm:hover { background: var(--accent-2); }
+.pm-btn.confirm.danger { background: #ef4444; }
+.pm-btn.confirm.danger:hover { background: #dc2626; }

@@ -10,6 +10,24 @@ import { rangeToPiece } from '../core/score';
 import { getPiece } from '../core/storage';
 import { computeLayout } from '../render/layout';
 import { buildSVG } from '../render/export';
+import { buildPromptModal } from './prompt-modal';
+
+// ── 图标(内联 SVG,stroke=currentColor,与搜索框图标同款)──
+// 严禁使用 emoji;曲谱库页面所有图标统一走 SVG。
+const ICON = {
+  // 视图分段:网格 / 列表
+  grid: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>',
+  list: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h13M8 12h13M8 18h13"/><circle cx="3.5" cy="6" r="1.2" fill="currentColor" stroke="none"/><circle cx="3.5" cy="12" r="1.2" fill="currentColor" stroke="none"/><circle cx="3.5" cy="18" r="1.2" fill="currentColor" stroke="none"/></svg>',
+  // 新建(按钮 + 占位大卡)
+  plus: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
+  plusBig: '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
+  // 卡片操作:重命名 / 导出 / 删除
+  pencil: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>',
+  download: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>',
+  trash: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M10 11v6M14 11v6"/></svg>',
+  // 空状态:音符
+  note: '<svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l10-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="16" cy="16" r="3"/></svg>',
+};
 
 // ── 类型 ──────────────────────────────────────────────────
 
@@ -108,8 +126,8 @@ export function buildLibrary(initial: ScoreMeta[], cb: LibraryCallbacks): Librar
     metas: initial.slice(),
     scores: new Map(),
   };
-  /** 搜索框是否需要在下次 render 后夺回焦点(input 后保持焦点)。 */
-  let refocusSearch = false;
+  /** 重命名 / 删除用的自定义弹窗(替代原生 prompt/confirm)。 */
+  const modal = buildPromptModal();
   /** 已对哪些 id 发起过缩略图加载(避免重复请求)。 */
   const thumbLoaded = new Set<string>();
 
@@ -124,11 +142,16 @@ export function buildLibrary(initial: ScoreMeta[], cb: LibraryCallbacks): Librar
   }
 
   // ── 渲染 ──
+  // 渲染分两层:
+  //   render()      —— 重建整体骨架(标题/工具栏/搜索框/分段/列表容器)。仅在首次、
+  //                    view/sort 切换、或库结构变化时调用。重建会销毁搜索框 → 打断 IME,
+  //                    故搜索 input 事件绝不能走 render()。
+  //   renderList()  —— 只换列表区(.lib-content 内的网格/空状态),不动顶部工具栏,
+  //                    搜索输入态下用它刷新,保证输入框不被重建、IME 不被打断。
   function render(): void {
+    // 选中项归位(可能因过滤而失配)。
     const list = filteredSorted();
-    // 选中项若已不在列表里(被删/被过滤),清空选中。
     if (state.selectedId && !list.some(s => s.id === state.selectedId)) state.selectedId = null;
-    // 首次无选中且列表非空 → 默认选中第一个(便于键盘导航)。
     if (!state.selectedId && list.length > 0) state.selectedId = list[0].id;
 
     const sortBtn = (key: string, label: string) =>
@@ -152,66 +175,77 @@ export function buildLibrary(initial: ScoreMeta[], cb: LibraryCallbacks): Librar
               ${sortBtn('bars', '小节')}
             </div>
             <div class="lib-seg" data-seg="view">
-              <button class="${state.view === 'grid' ? 'active' : ''}" data-view="grid">▦ 网格</button>
-              <button class="${state.view === 'list' ? 'active' : ''}" data-view="list">☰ 列表</button>
+              <button class="${state.view === 'grid' ? 'active' : ''}" data-view="grid">${ICON.grid}<span>网格</span></button>
+              <button class="${state.view === 'list' ? 'active' : ''}" data-view="list">${ICON.list}<span>列表</span></button>
             </div>
-            <button class="lib-new" data-action="new">＋ 新建曲谱</button>
+            <button class="lib-new" data-action="new">${ICON.plus}<span>新建曲谱</span></button>
           </div>
         </div>
+        <div class="lib-content"></div>
       </div>
     `;
-    const libRoot = host.querySelector('.lib') as HTMLElement;
 
-    // 空状态:库本身为空 vs 搜索无结果。
+    bindTopEvents();
+    renderList();
+
+    // 滚动选中卡到可见区(键盘导航后)
+    if (state.selectedId) {
+      const card = host.querySelector(`.score-card[data-id="${state.selectedId}"]`) as HTMLElement | null;
+      card?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    }
+  }
+
+  /** 只重建列表区(网格 / 空状态),不动顶部工具栏与搜索框。
+   *  搜索输入、缩略图到达、选中变化都用它刷新,避免重建 input 打断 IME。 */
+  function renderList(): void {
+    const content = host.querySelector('.lib-content') as HTMLElement | null;
+    if (!content) return;
+    content.innerHTML = '';
+
+    const list = filteredSorted();
+    // 选中项归位。
+    if (state.selectedId && !list.some(s => s.id === state.selectedId)) state.selectedId = null;
+    if (!state.selectedId && list.length > 0) state.selectedId = list[0].id;
+
     if (list.length === 0) {
       const empty = document.createElement('div');
       empty.className = 'lib-empty';
       if (state.metas.length === 0) {
         empty.innerHTML = `
-          <div class="big">🎵</div>
+          <div class="big">${ICON.note}</div>
           <h2>曲谱库还是空的</h2>
           <p>新建第一首曲谱开始创作</p>
-          <button class="lib-new" data-action="new">＋ 新建曲谱</button>
+          <button class="lib-new" data-action="new">${ICON.plus}<span>新建曲谱</span></button>
         `;
       } else {
         empty.innerHTML = `
-          <div class="big">🎵</div>
-          没有匹配「${state.query}」的曲谱
+          <div class="big">${ICON.note}</div>
+          没有匹配「${escapeHtml(state.query)}」的曲谱
         `;
       }
-      libRoot.appendChild(empty);
+      content.appendChild(empty);
     } else {
-      // 卡片网格
       const grid = document.createElement('div');
       grid.className = 'lib-grid' + (state.view === 'list' ? ' list' : '');
       for (const s of list) {
         grid.appendChild(buildCard(s));
       }
-      // 新建占位卡(仅网格视图、且无搜索时显示)
+      // 新建占位卡(仅网格视图、且无搜索时显示)。
+      // 注意:不要给占位卡加 data-action="new",否则会被工具栏的 [data-action="new"]
+      // 选择器和卡片的 .new-card 分支各绑一次,导致新建两遍。占位卡只走卡片分支。
       if (state.view === 'grid' && !state.query) {
         const nc = document.createElement('div');
         nc.className = 'score-card new-card';
         nc.tabIndex = 0;
-        nc.dataset.action = 'new';
-        nc.innerHTML = `<div class="new-card-inner"><div class="plus">＋</div><div>新建曲谱</div></div>`;
+        nc.innerHTML = `<div class="new-card-inner"><div class="plus">${ICON.plusBig}</div><div>新建曲谱</div></div>`;
         grid.appendChild(nc);
       }
-      libRoot.appendChild(grid);
+      content.appendChild(grid);
     }
 
-    bindEvents();
+    bindCardEvents();
 
-    // 搜索框夺回焦点(输入态保持光标)
-    if (refocusSearch) {
-      const inp = host.querySelector('.lib-search input') as HTMLInputElement | null;
-      if (inp) {
-        inp.focus();
-        inp.setSelectionRange(inp.value.length, inp.value.length);
-      }
-      refocusSearch = false;
-    }
-
-    // 滚动选中卡到可见区(键盘导航后)
+    // 滚动选中卡到可见区(键盘导航 / 过滤后)
     if (state.selectedId) {
       const card = host.querySelector(`.score-card[data-id="${state.selectedId}"]`) as HTMLElement | null;
       card?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
@@ -251,9 +285,9 @@ export function buildLibrary(initial: ScoreMeta[], cb: LibraryCallbacks): Librar
         </div>
       </div>
       <div class="sc-actions">
-        <button class="sc-act" data-action="rename" title="重命名">✎</button>
-        <button class="sc-act" data-action="export" title="导出">⬇</button>
-        <button class="sc-act danger" data-action="delete" title="删除">🗑</button>
+        <button class="sc-act" data-action="rename" title="重命名">${ICON.pencil}</button>
+        <button class="sc-act" data-action="export" title="导出">${ICON.download}</button>
+        <button class="sc-act danger" data-action="delete" title="删除">${ICON.trash}</button>
       </div>
     `;
     // 填实进度点
@@ -262,15 +296,26 @@ export function buildLibrary(initial: ScoreMeta[], cb: LibraryCallbacks): Librar
   }
 
   // ── 事件 ──
-  function bindEvents(): void {
-    // 搜索
+  // 绑定顶部工具栏(搜索框 / 分段 / 新建按钮)。仅在 render() 重建骨架时调用一次。
+  function bindTopEvents(): void {
+    // 搜索:用 compositionstart/end 守卫 IME 中文输入;输入只刷新列表区(renderList),
+    // 不重建搜索框本身,避免打断输入法。
     const search = host.querySelector('.lib-search input') as HTMLInputElement | null;
-    search?.addEventListener('input', (e) => {
-      state.query = (e.target as HTMLInputElement).value;
-      refocusSearch = true;
-      render();
-    });
-    // 排序 / 视图 分段
+    if (search) {
+      let composing = false;
+      search.addEventListener('compositionstart', () => { composing = true; });
+      search.addEventListener('compositionend', (e) => {
+        composing = false;
+        state.query = (e.target as HTMLInputElement).value;
+        renderList();
+      });
+      search.addEventListener('input', (e) => {
+        if (composing) return;          // 拼音上屏中,不刷新
+        state.query = (e.target as HTMLInputElement).value;
+        renderList();
+      });
+    }
+    // 排序 / 视图 分段(切 view/sort 需重排结构 → 走 render,但不会发生在输入态)
     host.querySelectorAll<HTMLButtonElement>('.lib-seg button').forEach(b => {
       b.addEventListener('click', () => {
         const seg = (b.closest('.lib-seg') as HTMLElement).dataset.seg;
@@ -279,11 +324,13 @@ export function buildLibrary(initial: ScoreMeta[], cb: LibraryCallbacks): Librar
         render();
       });
     });
-    // 工具栏新建
+    // 工具栏新建(仅匹配工具栏 .lib-new[data-action=new];占位卡已不带 data-action)
     host.querySelectorAll('[data-action="new"]').forEach(b =>
       b.addEventListener('click', (e) => { e.stopPropagation(); cb.onNew(); }));
+  }
 
-    // 卡片
+  /** 绑定卡片(普通卡 + 占位新建卡)。每次 renderList 重建列表后调用。 */
+  function bindCardEvents(): void {
     host.querySelectorAll<HTMLElement>('.score-card').forEach(card => {
       if (card.classList.contains('new-card')) {
         card.addEventListener('click', () => cb.onNew());
@@ -311,26 +358,39 @@ export function buildLibrary(initial: ScoreMeta[], cb: LibraryCallbacks): Librar
     });
   }
 
-  function enterScore(id: string, card: HTMLElement): void {
+  /** 进入曲谱:整库淡出上移(不再单卡缩小,避免像删除),动画后回调 onOpen。 */
+  function enterScore(id: string, _card: HTMLElement): void {
     state.selectedId = id;
-    card.classList.add('lib-entering');
-    setTimeout(() => cb.onOpen(id), 320);
+    const libRoot = host.querySelector('.lib') as HTMLElement | null;
+    libRoot?.classList.add('lib-leaving');
+    setTimeout(() => cb.onOpen(id), 240);
   }
 
-  function doRename(id: string): void {
+  async function doRename(id: string): Promise<void> {
     const meta = state.metas.find(m => m.id === id);
     if (!meta) return;
-    const t = prompt('重命名:', meta.title);
+    const t = await modal.promptText({
+      title: '重命名曲谱',
+      initial: meta.title || '',
+      placeholder: '曲谱标题',
+      confirmText: '保存',
+    });
     if (t === null) return;
-    const newTitle = t.trim() || '未命名';
+    const newTitle = t || '未命名';
     if (newTitle === meta.title) return;
     cb.onRename(id, newTitle);
   }
 
-  function doDelete(id: string): void {
+  async function doDelete(id: string): Promise<void> {
     const meta = state.metas.find(m => m.id === id);
     if (!meta) return;
-    if (!confirm(`删除曲谱「${meta.title || '未命名'}」?此操作不可撤销。`)) return;
+    const ok = await modal.confirm({
+      title: '删除曲谱',
+      message: `删除「${meta.title || '未命名'}」?此操作不可撤销。`,
+      confirmText: '删除',
+      danger: true,
+    });
+    if (!ok) return;
     cb.onDelete(id);
   }
 
@@ -356,7 +416,7 @@ export function buildLibrary(initial: ScoreMeta[], cb: LibraryCallbacks): Librar
     }
     if (next === curIdx) return;
     state.selectedId = list[next].id;
-    render();
+    renderList();
     // 把焦点放到新选中卡(便于连续方向键)
     const card = host.querySelector(`.score-card[data-id="${state.selectedId}"]`) as HTMLElement | null;
     card?.focus();
@@ -434,13 +494,13 @@ export function buildLibrary(initial: ScoreMeta[], cb: LibraryCallbacks): Librar
       inp?.focus();
       return;
     }
-    // 搜索框内:Esc 清空搜索
+    // 搜索框内:Esc 清空搜索(只刷列表区,保留 input 不重建)
     if (inField && e.key === 'Escape') {
       const inp = host.querySelector('.lib-search input') as HTMLInputElement | null;
       if (inp && inp.value) {
         inp.value = '';
         state.query = '';
-        render();
+        renderList();
         inp.focus();
       } else {
         (ae as HTMLElement).blur();
