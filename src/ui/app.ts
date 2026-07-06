@@ -104,8 +104,12 @@ export class App {
   /** MeasureSelector 句柄(挂在工具盘第三行)。 */
   private msHandle: MeasureSelectorHandle | null = null;
   private editorBar: EditorBarHandle | null = null;
-  /** 编辑卡片顶部工具条的元素:范围提示 + 退格/清空(从工具盘移来)。 */
+  /** 编辑卡片顶部工具条的元素:范围提示(常驻)。 */
   private editRangeEl: HTMLElement | null = null;
+  /** 退格/清空按钮组(编辑模式可见,预览模式隐藏)。 */
+  private editActionsEl: HTMLElement | null = null;
+  /** 预览模式的 五线谱/简谱/两者 radio(挂在 edit-toolbar 内,仅预览可见)。 */
+  private previewRadioEl: HTMLElement | null = null;
   private previewModal: PreviewModalHandle | null = null;
   /** 通用自定义弹窗(新建起名等),替代原生 prompt。 */
   private promptModal: PromptModalHandle = buildPromptModal();
@@ -519,7 +523,8 @@ export class App {
 
     this.stageWrap = document.createElement('div');
     this.stageWrap.className = 'stage';
-    // 编辑卡片顶部工具条:范围提示 + 退格/清空(从工具盘移来)
+    // 编辑卡片顶部工具条:左侧范围提示(常驻) + 右侧编辑动作(退格/清空) 或 预览 radio。
+    // 预览模式下退格/清空隐藏,改显示 五线谱/简谱/两者 radio(由 syncEditToolbar 切换)。
     const editToolbar = document.createElement('div');
     editToolbar.className = 'edit-toolbar';
     const editRange = document.createElement('span');
@@ -532,9 +537,17 @@ export class App {
     const editClearBtn = mkBtn('清空当前范围', 'ghost', () => this.clear());
     editClearBtn.className = 'btn btn-ghost edit-act danger';
     editClearBtn.title = '清空当前范围';
+    // 退格/清空包进 edit-actions 容器(整体显隐)
+    const editActions = document.createElement('div');
+    editActions.className = 'edit-actions';
+    editActions.append(undoBtn, editClearBtn);
+    this.editActionsEl = editActions;
+    // 预览 radio(复用 makePreviewRadio,驱动 this.previewMode);默认隐藏,预览模式显示
+    this.previewRadioEl = this.makePreviewRadio();
+    this.previewRadioEl.classList.add('hidden');
     const editSpacer = document.createElement('div');
     editSpacer.className = 'spacer';
-    editToolbar.append(editRange, editSpacer, undoBtn, editClearBtn);
+    editToolbar.append(editRange, editSpacer, editActions, this.previewRadioEl);
     this.stageWrap.appendChild(editToolbar);
 
     this.statusEl = document.createElement('div');
@@ -621,23 +634,20 @@ export class App {
     }
     this.cards = [];
     this.activeCard = null;
-    // 清旧预览卡 + 预览 radio 工具条(防反复切模式堆积)
+    // 清旧预览卡(radio 已移到 edit-toolbar 内,不再随模式重建)
     if (this.previewHost) { this.previewHost.remove(); this.previewHost = null; this.previewPlayheadEl = null; this.previewLayout = null; this.previewBassLayout = null; }
     this.stageWrap.querySelectorAll('.preview-bar').forEach(el => el.remove());
-    // 预览模式:radio 在卡片上方(不压谱子)+ 只读双谱表卡
+    // 预览模式:只读双谱表卡(radio 在 edit-toolbar 内,由 syncEditToolbar 切显隐)
     if (this.viewMode === 'preview') {
       this.previewHost = this.createPreviewHost();
       this.previewHost.classList.add('mode-enter');
-      // radio 放卡片上方(独立元素,不叠在 SVG 上)
-      const radioBar = document.createElement('div');
-      radioBar.className = 'preview-bar';
-      radioBar.appendChild(this.makePreviewRadio());
-      this.stageWrap.insertBefore(radioBar, this.statusEl);
       this.stageWrap.insertBefore(this.previewHost, this.statusEl);
       this.bindPreviewHost();
+      this.syncEditToolbar();
       setTimeout(() => this.previewHost?.classList.remove('mode-enter'), 130);
       return;
     }
+    this.syncEditToolbar();
     const staves: ('treble' | 'bass')[] = this.viewMode === 'bass' ? ['bass'] : this.viewMode === 'grand' ? ['treble', 'bass'] : ['treble'];
     for (const staff of staves) {
       const card = this.createCard(staff);
@@ -1091,6 +1101,7 @@ export class App {
   }
 
   private appendNoteWithPitch(midi: number): void {
+    if (this.viewMode === 'preview') return;   // 预览只读
     const tuplet = this.computeTupletForNextNote();
     const note: Note = { midi, duration: this.tool.duration, dotted: this.tool.dotted, accidental: this.tool.accidental, tuplet };
     // 和弦模式:给音带上 chordId。若末尾音已是当前和弦组(首音),复用同 id → 这个音成为尾音(同时);
@@ -1115,6 +1126,7 @@ export class App {
   }
 
   private appendRest(): void {
+    if (this.viewMode === 'preview') return;   // 预览只读
     // 休止符占独立时间位,与和弦不兼容 → 输入休止时若在和弦模式,先关闭和弦(推进到新时间位)
     if (this.tool.chordMode) this.closeChordMode();
     const note: Note = { midi: null, duration: this.tool.duration, dotted: this.tool.dotted, accidental: null };
@@ -1127,6 +1139,7 @@ export class App {
    *  - 单音:简单复制+配对
    *  - 和弦:复制整个和弦组(各声部),新组与旧组音高 multiset 天然全等 → 逐声部配对打 tie */
   private tieRepeat(): void {
+    if (this.viewMode === 'preview') return;   // 预览只读
     const notes = this.piece.notes;
     if (notes.length === 0) { this.flash('前面没有可连音的音'); return; }
     // 和弦模式下的 tie 无意义(要在同时间位内延音)→ 先关闭
@@ -1381,6 +1394,8 @@ export class App {
     window.addEventListener('keydown', (e) => {
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'SELECT' || tag === 'INPUT') return;
+      // 预览模式只读:除空格(播放控制)外,禁止所有编辑类快捷键。
+      if (this.viewMode === 'preview' && e.key !== ' ') return;
       switch (e.key) {
         case '1': this.changeDuration('whole'); break;
         case '2': this.changeDuration('half'); break;
@@ -1421,6 +1436,7 @@ export class App {
    *    让用户补齐;若组删空则关闭模式
    *  chord:currentChordId 不在末尾时清掉避免误复用 */
   private deleteLastNote(): void {
+    if (this.viewMode === 'preview') return;   // 预览只读
     const notes = this.piece.notes;
     if (notes.length === 0) return;
     // 抓删除前的末音(判断是否属于 tuplet 组)
@@ -1484,8 +1500,10 @@ export class App {
         (this.toolsPanel as any)._setChordMode?.(false);
       }
     }
-    this.syncPlayerAfterEdit();
-    this.render();
+    // 删除后走与输入相同的同步路径:syncRangePieceToScore(把 piece 切回 score +
+    // markDirty 落盘)+ syncPlayerAfterEdit + render。否则只 pop 了 piece.notes,
+    // score.measures 未更新,一旦 rebuildRangePiece(切范围/视图/谱号等)被删音会复活。
+    this.afterEdit();
   }
 
   /** 键盘改了 duration 后，把工具栏高亮同步过来 */
@@ -1575,6 +1593,7 @@ export class App {
   }
 
   private clear(): void {
+    if (this.viewMode === 'preview') return;   // 预览只读
     if (this.score) {
       // 清空当前范围(编辑区显示的几个小节)的音符,标记 dirty 落盘。其它小节保留。
       const start = this.currentStartMeasure;
@@ -1667,9 +1686,18 @@ export class App {
     this.editRangeEl.innerHTML = `第 <b>${start + 1}–${start + count}</b> 小节`;
   }
 
+  /** 切换 edit-toolbar 右侧内容:编辑模式显示退格/清空,预览模式显示 五线谱/简谱/两者 radio。
+   *  在 rebuildCards(切模式)和 render(预览态 radio active 同步)后调用。 */
+  private syncEditToolbar(): void {
+    const isPreview = this.viewMode === 'preview';
+    this.editActionsEl?.classList.toggle('hidden', isPreview);
+    this.previewRadioEl?.classList.toggle('hidden', !isPreview);
+  }
+
   /** MeasureSelector onChange:更新编辑区范围视图 + 轻量重渲(保留 MS 实例,不重建工具盘)。
    *  只 rebuildRangePiece + 重建卡片 + 局部 render(复刻 demo reRenderStaff 思路)。 */
   private onMeasureSelectorChange(start: number, count: number): void {
+    if (this.viewMode === 'preview') return;   // 预览只读:禁止拖拽改范围(会触发 flush)
     if (!this.score) return;
     void this.flusher?.flush();
     this.currentStartMeasure = start;
@@ -1689,6 +1717,7 @@ export class App {
 
   /** MeasureSelector onAddMeasure:末尾加空小节 + 落盘 + MS.refresh(新书签进场动画)。 */
   private async addMeasureAtEnd(): Promise<void> {
+    if (this.viewMode === 'preview') return;   // 预览只读
     if (!this.score) return;
     if (this.score.meta.totalMeasures >= 256) { this.flash('已达最大小节数 256'); return; }
     try {
@@ -1708,6 +1737,7 @@ export class App {
 
   /** MeasureSelector onDeleteMeasure:删该小节音 + totalMeasures-1 + 落盘 + clamp + MS.refresh。 */
   private async deleteMeasureAt(idx: number): Promise<void> {
+    if (this.viewMode === 'preview') return;   // 预览只读
     if (!this.score) return;
     if (this.score.meta.totalMeasures <= 1) { this.flash('至少保留 1 小节'); return; }
     const m = this.score.measures[idx];
@@ -1771,9 +1801,9 @@ export class App {
     // 预览模式:单独渲染双谱表预览卡,不走常规卡片流程
     if (this.viewMode === 'preview') {
       this.renderPreview();
-      // 刷新预览 radio 的 active 状态(radio 在 rebuildCards 时创建,onclick 只调 render
+      // 刷新预览 radio 的 active 状态(radio 在 edit-toolbar 内,onclick 只调 render
       // 不重建 radio → 切换后 active 停留旧值。此处每次 render 同步一次 active class)。
-      this.stageWrap.querySelectorAll('.preview-bar .seg-btn').forEach((btn, i) => {
+      this.previewRadioEl?.querySelectorAll('.seg-btn').forEach((btn, i) => {
         const modes = ['staff', 'jianpu', 'both'] as const;
         btn.classList.toggle('active', modes[i] === this.previewMode);
       });

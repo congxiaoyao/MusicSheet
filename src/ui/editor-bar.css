@@ -139,7 +139,8 @@
   to { opacity: 1; transform: translateY(0); }
 }
 
-/* 编辑卡片顶部工具条:范围提示 + 退格/清空 */
+/* 编辑卡片顶部工具条:左侧范围提示(常驻) + 右侧编辑动作(退格/清空) 或 预览 radio。
+   预览模式下退格/清空隐藏,改显示 五线谱/简谱/两者 radio(由 syncEditToolbar 切换)。 */
 .edit-toolbar {
   display: flex;
   align-items: center;
@@ -150,5 +151,10 @@
 }
 .edit-range { font-size: 13px; color: var(--muted); }
 .edit-range b { color: var(--accent); font-weight: 650; }
+/* 退格/清空按钮组(整体显隐);预览模式加 .hidden 隐藏 */
+.edit-actions { display: inline-flex; align-items: center; gap: 8px; }
+.edit-actions.hidden { display: none; }
+/* 预览 radio:复用 .preview-radio + .seg-btn 样式;非预览模式加 .hidden 隐藏 */
+.preview-radio.hidden { display: none; }
 .edit-act { font-size: 12.5px; padding: 6px 12px; }
 .edit-act.danger:hover { border-color: #ef4444; color: #ef4444; }
