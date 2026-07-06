@@ -40,13 +40,19 @@ export interface MeasureSelectorHandle {
 // 尺寸常量(px)。
 const BLOCK_W = 44;
 const GAP_NORMAL = 15;      // 正常书签间距(框外/框内)
-const GAP_SEL_SIDE = GAP_NORMAL;  // 选框与左右书签的间距:与正常间距一致(消除翻转跳变;选框"紧贴"感靠选框内部 padding/handle 区)
+const GAP_SEL_SIDE = 10;      // 选框与左右外侧书签的间距(比正常间距紧,突出选框)
 const GAP_GRIP = 6;         // 把手到框内书签的间距
 const HANDLE_W = 5;
 const SEL_PAD_X = 6;        // 选框左右 padding(安全区:把手到框边)
 const CLICK_THRESHOLD = 4;
-const PAD_EDGE = 18;        // 轨道两端内边距
+// 轨道左缘内边距:0(书签直接贴 track 左缘 = host 左缘,经 pill 的 label+gap 提供对齐留白)。
+//   左侧无留白是为了让 wrap 撑满 host(=灰底右缘),横滑区域不内缩。
+const PAD_EDGE_L = 0;
+const ADD_W = 40;           // 加号按钮宽(与 .ms-add CSS width 一致)
 const MAX_COUNT = 8;        // 选框最大宽度(8个小节)
+// host(外层宿主)的视觉宽度上限:8 书签 + 加号 + 两端 PAD 的 track 总宽(computeXAt(0,8,8).totalW ≈ 582)。
+// host 宽 = min(track 实际宽, 此上限):N≤8 全见不滑;N>8 横滑。见 tools-panel.css 注释。
+const HOST_WIDTH_CAP = 600;
 const MASK_FADE = 22;       // mask 渐变带宽
 const MASK_DIM = 'rgba(0,0,0,0.12)';  // mask 框外 alpha
 
@@ -86,6 +92,17 @@ const blkMask = (bx: number, bw: number, selX: number, selR: number): string => 
 };
 
 export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureSelectorCallbacks): MeasureSelectorHandle {
+  // 调试日志收集器(挂在 window)。console 用:__msLogClear() 清空;__msLogSave() 上传到服务器落盘 ms-log.json。
+  const __log: { t: number; tag: string; data: unknown }[] = [];
+  (window as unknown as { __msLog?: unknown[]; __msLogClear?: () => void; __msLogSave?: () => void }).__msLog = __log;
+  (window as unknown as { __msLogClear?: () => void }).__msLogClear = () => { __log.length = 0; };
+  (window as unknown as { __msLogSave?: () => void }).__msLogSave = () => {
+    // POST 到独立日志接收服务(同主机 4174 端口,用当前页面 hostname 避免跨主机/localhost 歧义)
+    const sink = `http://${location.hostname}:4174/ms-log`;
+    fetch(sink, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(__log) })
+      .then(r => r.json()).then(d => console.log('[ms-log] 已上传', d)).catch(e => console.error('[ms-log] 上传失败', e));
+  };
+  const log = (tag: string, data: unknown = {}) => __log.push({ t: Math.round(performance.now() * 100) / 100, tag, data });
   const state: MeasureSelectorState = { ...initial, hasContent: initial.hasContent ?? [] };
   const wrap = document.createElement('div');
   wrap.className = 'ms-wrap';
@@ -100,7 +117,7 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
   const leftGrip = document.createElement('div'); leftGrip.className = 'ms-grip ms-grip-l';
   const rightGrip = document.createElement('div'); rightGrip.className = 'ms-grip ms-grip-r';
   const addBtn = document.createElement('button'); addBtn.type = 'button'; addBtn.className = 'ms-add'; addBtn.textContent = '+'; addBtn.title = '末尾加一小节';
-  let blocks: { el: HTMLElement; idx: number }[] = [];
+  let blocks: { el: HTMLElement; slot: HTMLElement; idx: number; _hovered?: boolean }[] = [];
 
   let drag: { mode: 'l' | 'r' | 'm'; initStart: number; initCount: number; startX: number; initSelX: number; initSelRight: number; edgeOffset: number } | null = null;
   let downInfo: { x: number; y: number; idx: number } | null = null;
@@ -112,20 +129,44 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
     return { s, c };
   };
 
-  /** 创建单个书签。enterAnim:创建时是否带进场动画(加小节用)。 */
-  const makeBlock = (idx: number, enterAnim = false): HTMLElement => {
+  /** 创建单个书签 + 配套的删除叉号槽(独立元素,挂 track,不受书签 mask 裁切)。
+   *  enterAnim:创建时是否带进场动画(加小节用)。返回 {el, slot}:
+   *    el=书签(只含数字),slot=叉号容器(translateX 跟随书签,内含 .ms-del)。 */
+  const makeBlock = (idx: number, enterAnim = false): { el: HTMLElement; slot: HTMLElement } => {
     const el = document.createElement('div');
     el.className = 'ms-blk';
     el.dataset.idx = String(idx);
     el.innerHTML = `<span class="ms-num">${idx + 1}</span>`;
+    // 叉号独立成 slot(挂 track),不再嵌在书签内 —— 书签的 mask(渐变变暗 + mask-clip:border-box)
+    // 会把越出书签 border-box 的子元素裁掉,叉号 top:-7/right:-7 越界正好被裁。
+    // 独立后 slot 无 mask,叉号完整可见。slot 用 translateX 跟随书签位置(同过渡动画)。
+    const slot = document.createElement('div');
+    slot.className = 'ms-del-slot';
+    slot.dataset.idx = String(idx);
     const del = document.createElement('button');
     del.type = 'button'; del.className = 'ms-del'; del.textContent = '×';
     del.title = `删除第 ${idx + 1} 小节`;
+    // pointerdown 阻止冒泡:否则会冒泡到 wrap 设 downInfo,抬手 onUp 触发跳转,
+    // 与 del 的 click(删除)冲突 → 一次点击同时删除+跳转。
+    del.addEventListener('pointerdown', (e) => e.stopPropagation());
     del.addEventListener('click', (e) => { e.stopPropagation(); cb.onDeleteMeasure(idx); });
-    el.appendChild(del);
+    // hover 联动:叉号独立成 slot 后,hover 叉号时书签本身不再被 :hover 命中。
+    // 统一调 setBlkHover(按 idx 找 blocks 项),清除/恢复书签 mask。
+    const hoverCb = (h: boolean) => (ev: Event) => {
+      const b = blocks.find(x => x.idx === idx);
+      if (b) setBlkHover(b, h);
+      ev.stopPropagation();   // 防止冒泡触发书签的 mouseleave 叉号(避免重复)
+    };
+    del.addEventListener('mouseenter', hoverCb(true));
+    del.addEventListener('mouseleave', hoverCb(false));
+    slot.appendChild(del);
+    // 书签本身的 hover:清除/恢复 mask(与叉号统一调 setBlkHover)。
+    // 注意:鼠标在"书签主体 ↔ 叉号"之间移动时,叉号 ::before(24×24)无缝衔接,不会闪烁。
     el.addEventListener('pointerdown', (e) => { downInfo = { x: e.clientX, y: e.clientY, idx }; });
-    if (enterAnim) el.classList.add('ms-enter');
-    return el;
+    el.addEventListener('mouseenter', () => { const b = blocks.find(x => x.idx === idx); if (b) setBlkHover(b, true); });
+    el.addEventListener('mouseleave', () => { const b = blocks.find(x => x.idx === idx); if (b) setBlkHover(b, false); });
+    if (enterAnim) { el.classList.add('ms-enter'); slot.classList.add('ms-enter'); }
+    return { el, slot };
   };
 
   /** 同步书签到当前 totalMeasures(增量,保留旧元素以获得补位/退场过渡)。
@@ -137,21 +178,23 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
     const prev = blocks.length;
     if (total > prev) {
       for (let i = prev; i < total; i++) {
-        const el = makeBlock(i, animateNew);
+        const { el, slot } = makeBlock(i, animateNew);
         track.appendChild(el);
-        blocks.push({ el, idx: i });
+        track.appendChild(slot);   // slot 挂 track(与书签平级),z-index 高于书签
+        blocks.push({ el, slot, idx: i });
       }
     } else if (total < prev) {
       const removed = blocks.splice(total);
       removed.forEach(b => {
         b.el.classList.add('ms-leave');
-        const host = b.el;
-        setTimeout(() => host.remove(), 220);
+        b.slot.classList.add('ms-leave');
+        setTimeout(() => { b.el.remove(); b.slot.remove(); }, 220);
       });
     }
     blocks.forEach((b, i) => {
       b.idx = i;
       b.el.dataset.idx = String(i);
+      b.slot.dataset.idx = String(i);
       const num = b.el.querySelector('.ms-num');
       if (num) num.textContent = String(i + 1);
       b.el.classList.toggle('has-content', !!state.hasContent?.[i]);
@@ -163,7 +206,7 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
    *  选框内:[pad6][把手][gap6][书签..(gap15)][gap6][把手][pad6] */
   const computeXAt = (start: number, count: number, total: number) => {
     const blockX = new Map<number, number>();
-    let x = PAD_EDGE;
+    let x = PAD_EDGE_L;
     for (let i = 0; i < start; i++) { blockX.set(i, x); x += BLOCK_W + (i < start - 1 ? GAP_NORMAL : GAP_SEL_SIDE); }
     const selX = x;
     const innerBlocksW = count * BLOCK_W + (count - 1) * GAP_NORMAL;
@@ -177,7 +220,7 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
     const addX = hasRightOut ? x + GAP_NORMAL : selRight + GAP_SEL_SIDE;
     const gripLX = selX + SEL_PAD_X;
     const gripRX = selRight - SEL_PAD_X - HANDLE_W;
-    return { blockX, selX, selW, selRight, addX, totalW: addX + BLOCK_W + PAD_EDGE, gripLX, gripRX };
+    return { blockX, selX, selW, selRight, addX, totalW: addX + ADD_W, gripLX, gripRX };
   };
 
   /** 计算当前 state 的布局。 */
@@ -191,8 +234,8 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
   const blockAxisCenters = (refStart: number): Map<number, number> => {
     const m = new Map<number, number>();
     const total = state.totalMeasures;
-    // 框左外(idx<refStart):PAD_EDGE 起,等间距 BLOCK_W+GAP_NORMAL
-    let x = PAD_EDGE;
+    // 框左外(idx<refStart):PAD_EDGE_L 起,等间距 BLOCK_W+GAP_NORMAL
+    let x = PAD_EDGE_L;
     for (let i = 0; i < refStart && i < total; i++) { m.set(i, x + BLOCK_W / 2); x += BLOCK_W + GAP_NORMAL; }
     // refStart 的 selX(框左外末尾 + GAP_SEL_SIDE)
     const selX = x + (refStart > 0 ? GAP_SEL_SIDE - GAP_NORMAL : 0);  // 修正:末尾间距已是 GAP_NORMAL,补差到 GAP_SEL_SIDE
@@ -200,6 +243,37 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
     const innerStartX = selX + SEL_PAD_X + HANDLE_W + GAP_GRIP;
     for (let i = refStart; i < total; i++) { m.set(i, innerStartX + (i - refStart) * (BLOCK_W + GAP_NORMAL) + BLOCK_W / 2); }
     return m;
+  };
+
+  /** 设置书签 hover 态(事件驱动,不依赖常驻 rAF)。
+   *  hover 叉号(独立 slot)或书签本身时,清除 inline mask 让书签全亮;离开时恢复渐变 mask。
+   *  问题9 把 updateMasks 改按需后,稳态无 rAF,:hover 的 CSS 规则被 inline mask !important 压过,
+   *  所以 hover 必须由 mouseenter/leave 事件主动清除/恢复 mask。
+   *  设 _hovered 标记:apply/updateMasks 跑时跳过 hovered 书签(避免覆盖清除)。
+   *  拖拽中(drag)不响应(避免掠过书签闪烁)。 */
+  const setBlkHover = (b: { el: HTMLElement; idx: number; _hovered?: boolean }, hovered: boolean) => {
+    if (drag) { log('hover_SKIP', { idx: b.idx, hovered }); return; }
+    // 框内书签不需要 hover 标记(它本就全亮,mask 由 updateMasks 正常管)。
+    // 只在框外书签上设 _hovered(框外书签 hover 时清除 mask 变亮)。
+    // 否则框内书签被设 _hovered=true 后,离开框体变框外,_hovered 还挂着 → updateMasks 跳过 → 残留。
+    if (b.el.classList.contains('inside')) { b._hovered = false; return; }
+    b._hovered = hovered;
+    if (hovered) {
+      b.el.style.removeProperty('-webkit-mask-image');
+      b.el.style.removeProperty('mask-image');
+      log('hover_CLEAR', { idx: b.idx });
+    } else {   // !hovered:恢复框外渐变 mask
+      const wr = wrap.getBoundingClientRect();
+      const sr = sel.getBoundingClientRect();
+      const br = b.el.getBoundingClientRect();
+      const m = blkMask(br.left - wr.left, br.width, sr.left - wr.left + 2, sr.right - wr.left - 2);
+      b.el.style.setProperty('-webkit-mask-image', m, 'important');
+      b.el.style.setProperty('-webkit-mask-size', '100% 100%', 'important');
+      b.el.style.setProperty('-webkit-mask-repeat', 'no-repeat', 'important');
+      b.el.style.setProperty('-webkit-mask-clip', 'border-box', 'important');
+      b.el.style.setProperty('-webkit-mask-origin', 'border-box', 'important');
+      log('hover_RESTORE', { idx: b.idx });
+    }
   };
 
   /** 应用布局。selAnimated: 选框/selBorder/grip 是否带 transition(拖拽中 false=缘跟手无 transition;抬手 true=吸附)。
@@ -217,11 +291,19 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
     const { blockX, selX, selW, addX, totalW, gripLX, gripRX } = computeX();
     if (setTarget) {
       track.style.width = totalW + 'px';
+      // host 宽 = min(track 总宽, HOST_WIDTH_CAP):N≤8 全见不滑,N>8 截到上限横滑。
+      // wrap.parentElement 是宿主(.sv-measures-host,组件挂载后才有)。
+      const host = wrap.parentElement as HTMLElement | null;
+      if (host) host.style.width = Math.min(totalW, HOST_WIDTH_CAP) + 'px';
       blocks.forEach(b => {
         const inside = b.idx >= state.start && b.idx < state.start + state.count;
         b.el.classList.toggle('inside', inside);
+        b.slot.classList.toggle('inside', inside);   // 叉号槽同步 inside(框内时隐藏叉号)
         const px = blockX.get(b.idx);
-        if (px !== undefined) b.el.style.transform = `translateX(${px}px)`;
+        if (px !== undefined) {
+          b.el.style.transform = `translateX(${px}px)`;
+          b.slot.style.transform = `translateX(${px}px)`;   // 槽跟随书签位置
+        }
       });
     }
     let finalSelX = selX, finalSelW = selW, finalGripLX = gripLX, finalGripRX = gripRX;
@@ -263,13 +345,9 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
     const BORDER_W = 2;
     const ms = finalSelX + BORDER_W, me = finalSelX + finalSelW - BORDER_W;
     blocks.forEach(b => {
-      // 只对框外书签:hover 时清除 inline mask 让 CSS :hover 全#000 接管。
-      // 框内书签(.inside)hover 不改变 mask(保持渐变效果)。
-      if (b.el.matches(':hover') && !b.el.classList.contains('inside')) {
-        b.el.style.removeProperty('-webkit-mask-image');
-        b.el.style.removeProperty('mask-image');
-        return;
-      }
+      // 跳过 hovered 书签(书签本身 hover 或叉号 hover 联动):setBlkHover 已清除其 mask,
+      // 此处不重设,避免覆盖。框内书签(.inside)始终设渐变 mask。
+      if (b._hovered && !b.el.classList.contains('inside')) return;
       const px = blockX.get(b.idx);
       if (px !== undefined) {
         const m = blkMask(px, BLOCK_W, ms, me);
@@ -280,10 +358,13 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
         b.el.style.setProperty('-webkit-mask-origin', 'border-box', 'important');
       }
     });
+    // 启动按需 mask 循环:覆盖 transition 期间(书签实际位置 ≠ 稳态值,需读 DOM 更新)。
+    // 拖拽中(dragging)由 onMove 每帧调 updateMasks,scheduleMaskRun 内部会持续跑直到 drag 结束 + 余量。
+    scheduleMaskRun();
   };
 
   /** 持续更新书签 mask:按书签实际渲染位置(getBoundingClientRect)和选框实际缘算 mask。
-   *  用 rAF 循环,覆盖 transition/animate 期间书签滑动的全过程(稳态值 blockX 不够,书签 transition 中实际位置 ≠ 稳态)。 */
+   *  只在 transition/拖拽/滚动 期间需要(位置在变);稳态时停止省 reflow。scheduleMaskRun 控制。 */
   const updateMasks = () => {
     const wr = wrap.getBoundingClientRect();
     const sr = sel.getBoundingClientRect();
@@ -292,13 +373,8 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
     const BORDER_W = 2;
     const ms = sr.left - wr.left + BORDER_W, me = sr.right - wr.left - BORDER_W;
     blocks.forEach(b => {
-      // 只对框外书签:hover 时清除 inline mask 让 CSS :hover 全#000 接管。
-      // 框内书签(.inside)hover 不改变 mask(保持渐变效果)。
-      if (b.el.matches(':hover') && !b.el.classList.contains('inside')) {
-        b.el.style.removeProperty('-webkit-mask-image');
-        b.el.style.removeProperty('mask-image');
-        return;
-      }
+      // 跳过 hovered 书签:setBlkHover 已处理(清除或恢复),此处不重设避免覆盖。
+      if (b._hovered && !b.el.classList.contains('inside')) { log('mask_SKIP', { idx: b.idx }); return; }
       const br = b.el.getBoundingClientRect();
       const bx = br.left - wr.left;
       const m = blkMask(bx, br.width, ms, me);
@@ -308,7 +384,38 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
       b.el.style.setProperty('-webkit-mask-clip', 'border-box', 'important');
       b.el.style.setProperty('-webkit-mask-origin', 'border-box', 'important');
     });
-    requestAnimationFrame(updateMasks);
+  };
+
+  /** mask 更新调度:按需运行,覆盖位置变化全过程。
+   *  - 拖拽中(dragging):持续每帧跑(由 onMove 手动调 updateMasks)。
+   *  - 其它场景(transition/WAAPI/滚动):跑 MAX_RUN_MS 后自动停(覆盖 250ms 动画 + 余量)。
+   *  稳态时无 rAF,省去每帧 getBoundingClientRect 的强制 reflow。 */
+  let maskRafId = 0;
+  let maskRunUntil = 0;
+  const MASK_RUN_MS = 450;   // 覆盖 250ms transition + WAAPI 250ms + 余量
+  const maskTick = () => {
+    updateMasks();
+    if (performance.now() < maskRunUntil || drag) {
+      maskRafId = requestAnimationFrame(maskTick);
+    } else {
+      updateMasks();   // 最后再跑一帧确保稳态值准确
+      maskRafId = 0;
+      const wr0 = wrap.getBoundingClientRect();
+      const sr0 = sel.getBoundingClientRect();
+      log('mask_STOP', { start: state.start, count: state.count,
+        selL: Math.round(sr0.left - wr0.left), selR: Math.round(sr0.right - wr0.left),
+        blocks: blocks.map(b => {
+          const br = b.el.getBoundingClientRect();
+          return { i: b.idx, ins: b.el.classList.contains('inside'), h: !!b._hovered,
+            bx: Math.round(br.left - wr0.left), bw: Math.round(br.width),
+            m: b.el.style.getPropertyValue('-webkit-mask-image') || '' };
+        }) });
+    }
+  };
+  /** 启动/延长 mask 运行(拖拽中不调,因 onMove 每帧直接调 updateMasks)。 */
+  const scheduleMaskRun = () => {
+    maskRunUntil = Math.max(maskRunUntil, performance.now() + MASK_RUN_MS);
+    if (maskRafId === 0) maskRafId = requestAnimationFrame(maskTick);
   };
 
   const init = () => {
@@ -325,8 +432,10 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
     rightGrip.addEventListener('pointerdown', (e) => startDrag(e, 'r'));
     // 框体拖拽:wrap 上 pointerdown,按坐标命中(选框不再是书签父节点,无法靠事件冒泡)。
     wrap.addEventListener('pointerdown', onWrapDown);
+    // 横滑时更新 mask(书签相对 wrap 位置变,渐变 mask 要跟随)。
+    wrap.addEventListener('scroll', () => scheduleMaskRun());
     apply(false);
-    updateMasks();   // 启动 mask rAF 循环(持续按实际渲染位置更新)
+    scheduleMaskRun();   // 初始:跑一段覆盖首帧 + 任何初始动画
   };
 
   const startDrag = (e: PointerEvent, mode: 'l' | 'r') => {
@@ -338,6 +447,7 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
     const edge = mode === 'l' ? x.selX : x.selRight;
     drag = { mode, initStart: state.start, initCount: state.count, startX: e.clientX, initSelX: x.selX, initSelRight: x.selRight, edgeOffset: edge - mxTrack };
     wrap.classList.add('ms-dragging');
+    log('drag_start', { mode: 'grip_' + mode, start: state.start, count: state.count });
   };
 
   /** wrap pointerdown:坐标命中测试。
@@ -359,7 +469,7 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
       });
       if (onBlock) return;
       e.preventDefault();
-      { const x = computeX(); drag = { mode: 'm', initStart: state.start, initCount: state.count, startX: e.clientX, initSelX: x.selX, initSelRight: x.selRight, edgeOffset: 0 }; }
+      { const x = computeX(); drag = { mode: 'm', initStart: state.start, initCount: state.count, startX: e.clientX, initSelX: x.selX, initSelRight: x.selRight, edgeOffset: 0 }; log('drag_start', { mode: 'wrap_blank', start: state.start, count: state.count }); }
       wrap.classList.add('ms-dragging');
     }
   };
@@ -370,10 +480,9 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
         const insideSel = downInfo.idx >= state.start && downInfo.idx < state.start + state.count;
         if (insideSel) {
           const x = computeX();
-          // startX 用当前 move 的 clientX(不是 downInfo.x),这样第一次 apply 的偏移=0,
-          // 选框从当前位置开始跟手,不跳。后续每帧 +1 平滑。
           drag = { mode: 'm', initStart: state.start, initCount: state.count, startX: e.clientX, initSelX: x.selX, initSelRight: x.selRight, edgeOffset: 0 };
           wrap.classList.add('ms-dragging');
+          log('drag_start', { mode: 'block', fromIdx: downInfo.idx, start: state.start, count: state.count });
         }
         downInfo = null;
       }
@@ -446,9 +555,14 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
 
   const finishDrag = () => {
     if (!drag) return;
+    const hoveredBefore = blocks.map(b => ({ i: b.idx, h: !!b._hovered }));
     drag = null;
     wrap.classList.remove('ms-dragging');
     downInfo = null;
+    // 拖拽中 mouseleave 被 setBlkHover 的 if(drag)return 拦截,_hovered 可能卡在 true,
+    // 导致 apply/updateMasks 跳过该书签不更新 mask → 残留。拖拽结束统一清除。
+    blocks.forEach(b => { b._hovered = false; });
+    log('drag_end', { start: state.start, count: state.count, hoveredBefore });
     cb.onChange(state.start, state.count);
     // 抬手吸附:用 Web Animations API(element.animate)从拖拽位平滑到稳态。
     // 绕过 CSS transition 的时序问题(从 inline transition:none 切到 CSS 值时 Chrome 不触发过渡)。
@@ -480,12 +594,23 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
         [{ transform: `translateX(${f.x}px)`, width: f.w + 'px' }, { transform: `translateX(${t.x}px)`, width: t.w + 'px' }],
         { duration: 250, easing: 'cubic-bezier(.25,.1,.25,1)', fill: 'both' }
       );
-      anim.onfinish = () => { el.style.transform = `translateX(${t.x}px)`; el.style.width = t.w + 'px'; anim.cancel(); };
+      anim.onfinish = () => {
+        el.style.transform = `translateX(${t.x}px)`; el.style.width = t.w + 'px'; anim.cancel();
+        // sel 的 WAAPI 结束,但书签用 CSS transition(也 250ms),两者时序独立。
+        // 重新延长 mask 运行:覆盖书签 transition 剩余 + 最终稳态帧,防残留
+        // (若此时停 rAF,书签过渡位和 sel 稳态位不同步 → 跨边缘错误 mask 定格)。
+        scheduleMaskRun();
+      };
     });
-    // 书签/add 也设稳态(它们有 CSS transition,自然过渡)
-    blocks.forEach(b => { b.el.style.transform = `translateX(${cx.blockX.get(b.idx) ?? 0}px)`; });
+    // 书签/叉号槽/add 也设稳态(它们有 CSS transition,自然过渡)
+    blocks.forEach(b => {
+      const px = cx.blockX.get(b.idx) ?? 0;
+      b.el.style.transform = `translateX(${px}px)`;
+      b.slot.style.transform = `translateX(${px}px)`;
+    });
     addBtn.style.transform = `translateX(${cx.addX}px)`;
-    // mask 由全局 rAF 循环(updateMasks)持续按实际渲染位置更新,无需此处手动更新。
+    // mask 按需更新:覆盖 WAAPI 250ms 吸附动画期间(选框缘在动,mask 要跟随)。
+    scheduleMaskRun();
   };
 
   const onUp = () => {

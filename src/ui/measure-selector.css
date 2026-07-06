@@ -41,7 +41,7 @@
   box-sizing: border-box;
   border: 2px solid rgba(99,102,241,0.55);
   border-radius: 13px;
-  box-shadow: 0 3px 10px rgba(79,70,229,0.15);
+  box-shadow: 0 0 10px rgba(79,70,229,0.15);
   z-index: 3;
   pointer-events: none;
   transition: transform 0.25s cubic-bezier(.34,1.3,.64,1), width 0.25s cubic-bezier(.34,1.3,.64,1);
@@ -86,10 +86,8 @@
   width: 5px; height: 5px; border-radius: 50%; background: var(--accent);
 }
 
-.ms-blk:not(.inside):hover {
-  -webkit-mask-image: linear-gradient(to right, #000, #000) !important;
-  mask-image: linear-gradient(to right, #000, #000) !important;
-}
+/* hover 清除 mask 由 JS 事件驱动(setBlkHover):稳态无 rAF,:hover 的 CSS 压不过 inline mask !important,
+   故 mouseenter/leave 主动清除/恢复。拖拽中 apply 每帧重设,hover 不响应。 */
 .ms-wrap.ms-dragging .ms-blk:hover {
   -webkit-mask-image: none !important;
   mask-image: none !important;
@@ -97,13 +95,30 @@
 .ms-blk.ms-enter { opacity: 0; transition: none; }
 .ms-blk.ms-leave { opacity: 0; pointer-events: none; z-index: 2; transition: opacity 0.2s ease; }
 
+/* 叉号槽:独立挂在 track 上(与书签平级),用 translateX 跟随书签位置。
+   不再嵌在书签内 —— 书签的 mask(mask-clip:border-box)会把越出书签 border-box
+   的子元素裁掉,叉号 top:-7/right:-7 越界被裁。独立后无 mask,叉号完整可见。
+   尺寸/位置与书签一致(同 top/width),translateX 由 JS 设(同过渡动画)。 */
+.ms-del-slot {
+  position: absolute; left: 0; top: 10px;
+  width: 44px; height: 42px;
+  z-index: 2;                        /* 高于书签(z:1),低于选框边框(z:3):叉号不盖选框边框 */
+  pointer-events: none;              /* 槽本身不挡书签拖拽 */
+  touch-action: none;
+  transition: transform 0.25s cubic-bezier(.34,1.3,.64,1), opacity 0.2s;
+}
+.ms-del-slot.inside { display: none; }   /* 框内书签不显示叉号 */
+.ms-del-slot.ms-enter { opacity: 0; transition: none; }
+.ms-del-slot.ms-leave { opacity: 0; transition: opacity 0.2s ease; }
+
 .ms-del {
   position: absolute; top: -7px; right: -7px;
   width: 19px; height: 19px;
   border: 2px solid var(--card); border-radius: 50%;
   background: #ef4444; color: #fff;
   font-size: 13px; font-weight: 700; line-height: 1;
-  padding: 0; cursor: pointer; z-index: 3;
+  padding: 0; cursor: pointer;
+  pointer-events: auto;              /* 叉号接收 hover/click(槽本身 none) */
   display: flex; align-items: center; justify-content: center;
   opacity: 0; transform: scale(0.5);
   transition: opacity 0.15s, transform 0.25s cubic-bezier(.34,1.56,.64,1), background 0.12s;
@@ -114,7 +129,6 @@
   width: 24px; height: 24px;
   border-radius: 50%;
 }
-.ms-blk.inside .ms-del { display: none; }
 .ms-del:hover { opacity: 1; transform: scale(1); }
 .ms-del:hover:hover { background: #dc2626; transform: scale(1.15); }
 

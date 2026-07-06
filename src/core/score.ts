@@ -67,11 +67,26 @@ export function rangeToPiece(score: Score, startMeasure: number, count: number, 
   const start = Math.max(0, Math.min(startMeasure, score.meta.totalMeasures - 1));
   const end = Math.min(start + count, score.meta.totalMeasures);
   const realCount = Math.max(1, end - start);
+  const bpb = beatsPerBar(score.meta.time);
   const treble: Note[] = [];
   const bass: Note[] = [];
+  const trebleBeats: number[] = [];
+  const bassBeats: number[] = [];
   for (let i = start; i < end; i++) {
-    const m = score.measures[i];
-    if (m) { treble.push(...m.treble); bass.push(...m.bass); }
+    const m = score.measures[i] || emptyMeasure();
+    // 固定容器基准:无论该小节填没填满,都占 bpb 拍(下个小节的基准由此推进)。
+    // 这是修复"空/半填小节导致后续音前移"的关键 —— 旧实现纯拼接,空小节贡献0拍。
+    const measureBase = (i - start) * bpb;
+    // 复用 noteStartBeats 算"小节内累加"(和弦尾音/tuplet 自动正确),
+    // 再加 measureBase 得到范围内的绝对起始拍。构造最小临时 piece(noteStartBeats 只读 notes)。
+    if (m.treble.length > 0) {
+      const inBar = noteStartBeats({ clef: 'treble', key: score.meta.key, time: score.meta.time, measureCount: 1, notes: m.treble, treble: m.treble, bass: m.bass });
+      m.treble.forEach((n, k) => { treble.push(n); trebleBeats.push(measureBase + inBar[k]); });
+    }
+    if (m.bass.length > 0) {
+      const inBar = noteStartBeats({ clef: 'bass', key: score.meta.key, time: score.meta.time, measureCount: 1, notes: m.bass, treble: m.treble, bass: m.bass });
+      m.bass.forEach((n, k) => { bass.push(n); bassBeats.push(measureBase + inBar[k]); });
+    }
   }
   // clef/notes 按活跃组指向(与现有 Piece.notes 视图别名一致)。
   const clef = activeStaff;
@@ -84,6 +99,8 @@ export function rangeToPiece(score: Score, startMeasure: number, count: number, 
     notes,
     treble,
     bass,
+    trebleBeats,
+    bassBeats,
   };
 }
 

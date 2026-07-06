@@ -8,7 +8,7 @@
 //   resume 从该 beat 重启；seek 直接 playFrom(beat)。
 
 import { durationBeats, Note, Piece, beatsPerBar } from '../core/types';
-import { isChordTail, snapBeat, BEAT_EPS, totalBeatsOf } from '../core/model';
+import { isChordTail, snapBeat, BEAT_EPS, totalBeats, noteStartBeats } from '../core/model';
 
 export type PlayState = 'stopped' | 'playing' | 'paused';
 
@@ -87,30 +87,26 @@ export class Player {
   /** 计算播放调度表:treble/bass 两组并行(共用 beat 0 起点),合并按 startBeat 排序。
    *  单卡模式下另一组为空,自然只播活跃组。tie 链在各组内独立(不跨组)。 */
   private computeSchedule(piece: Piece): SchedEntry[] {
-    const treble = this.computeScheduleStaff(piece.treble, 'treble');
-    const bass = this.computeScheduleStaff(piece.bass, 'bass');
+    const treble = this.computeScheduleStaff(piece, piece.treble, 'treble');
+    const bass = this.computeScheduleStaff(piece, piece.bass, 'bass');
     // 合并两组,按 startBeat 排序(同 beat 的两组同时调度)。稳定排序保持组内顺序。
     return [...treble, ...bass].sort((a, b) => a.startBeat - b.startBeat);
   }
 
-  /** 单组(单谱表)的 schedule 计算。复刻原单声部逻辑:和弦尾音不推进、tie 链合并。 */
-  private computeScheduleStaff(notes: Note[], staff: 'treble' | 'bass'): SchedEntry[] {
+  /** 单组(单谱表)的 schedule 计算。复刻原单声部逻辑:和弦尾音不推进、tie 链合并。
+   *  startBeat 复用 noteStartBeats(范围视图读 trebleBeats/bassBeats 预设,单行走累加),
+   *  消除原先内联的重复累加逻辑。 */
+  private computeScheduleStaff(piece: Piece, notes: Note[], staff: 'treble' | 'bass'): SchedEntry[] {
     // 先算每音 startBeat / endBeat。和弦(chord)尾音与首音同时:尾音 startBeat = 首音 startBeat,
     // 不推进时间轴 → 用 isChordTail 跳过推进。这样 playFrom 按 startBeat 调度时,和弦各声部同 t 触发。
-    const raw: { start: number; end: number }[] = [];
-    let acc = 0;
-    let chordStartBeat = 0;   // 当前和弦组首音 startBeat(供尾音复用)
-    for (let i = 0; i < notes.length; i++) {
-      const n = notes[i];
+    // startBeat 复用 noteStartBeats(它内部按小节固定容器算,与 layout 一致)。
+    const starts = noteStartBeats({ ...piece, notes });
+    const raw: { start: number; end: number }[] = notes.map((n, i) => {
       const d = durationBeats(n);
       const tail = isChordTail(n, i > 0 ? notes[i - 1] : null);
-      const startBeat = tail ? chordStartBeat : acc;
-      raw.push({ start: startBeat, end: tail ? chordStartBeat + d : acc + d });
-      if (!tail) {
-        chordStartBeat = acc;
-        acc += d;
-      }
-    }
+      // 尾音 endBeat 不参与调度(voiceBeats=0 由后续 tie 逻辑处理),这里给个安全值
+      return { start: starts[i], end: tail ? starts[i] : starts[i] + d };
+    });
 
     // tie 链:把「终点音」voiceBeats 清零、「起点音」吃掉整链时长。
     // 配对按「时间位 + 同 midi」(slots):前位 tieStart 声部 ↔ 后位 tieEnd 声部(同 midi 才连)。
@@ -300,8 +296,8 @@ export class Player {
     // 可能有 ~1e-16 误差,会让 tickLoop 的 beat>=totalBeats 判定提前/延后)。
     const bpb = beatsPerBar(piece.time);
     const rawTotal = Math.max(
-      totalBeatsOf(piece.treble),
-      totalBeatsOf(piece.bass),
+      totalBeats({ ...piece, notes: piece.treble }),
+      totalBeats({ ...piece, notes: piece.bass }),
     );
     this.totalBeats = snapBeat(rawTotal, bpb);
   }

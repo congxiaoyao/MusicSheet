@@ -627,6 +627,10 @@ export class App {
   /** 按 viewMode 创建/重建卡片 DOM。treble/bass=1 卡,grand=2 卡,preview=预览卡(阶段5)。
    *  卡片 svgHost 挂在 stageWrap 内(statusEl 之前)。切模式时调用重建。 */
   private rebuildCards(): void {
+    // 记录重建前的激活谱号:loadStaffConfig(含 rebuildToolbar→重建 MS 实例)仅在 staff 变化时才需要。
+    // MeasureSelector 改范围时 activeCard.staff 不变,跳过 loadStaffConfig 可避免 MS 实例被重建
+    // 打断吸附动画(rebuildToolbar 会销毁+重建整个工具盘)。见 onMeasureSelectorChange。
+    const prevActiveStaff = this.activeCard?.staff ?? null;
     // 清旧卡片 DOM(同时取消进行中的高度动画 rAF,避免回调操作游离 DOM)
     for (const c of this.cards) {
       if (c.heightAnimFrame !== null) cancelAnimationFrame(c.heightAnimFrame);
@@ -661,7 +665,11 @@ export class App {
     if (this.activeCard) {
       this.piece.notes = this.activeCard.staff === 'bass' ? this.piece.bass : this.piece.treble;
       this.piece.clef = this.activeCard.staff;
-      this.loadStaffConfig(this.activeCard.staff);
+      // 仅激活谱号变化时才同步工具栏(loadStaffConfig→rebuildToolbar 会重建 MS 实例,打断动画)。
+      // staff 未变(如 MeasureSelector 改范围)时跳过。
+      if (this.activeCard.staff !== prevActiveStaff) {
+        this.loadStaffConfig(this.activeCard.staff);
+      }
     }
     this.updateCardActiveVisual();
     // 模式切换动画结束后移除 mode-enter(允许下次切换重新触发)
@@ -1265,6 +1273,7 @@ export class App {
     (this.toolsPanel as any)._resetModifiers?.();
     this.hover = null;
     this.syncPlayerAfterEdit();
+    this.refreshMeasureSelector();   // 同步小节书签的内容指示点(输入/删除/连音后即时刷新)
     this.render();
   }
 
@@ -1611,6 +1620,7 @@ export class App {
     this.playingIndex = -1;
     if (this.playState !== 'stopped') { this.player.stop(); this.currentBeat = 0; this.playState = 'stopped'; }
     this.rebuildCards();
+    this.refreshMeasureSelector();   // 同步小节书签的内容指示点(清空后点点熄灭)
     this.render();
   }
 
@@ -1695,13 +1705,20 @@ export class App {
   }
 
   /** MeasureSelector onChange:更新编辑区范围视图 + 轻量重渲(保留 MS 实例,不重建工具盘)。
-   *  只 rebuildRangePiece + 重建卡片 + 局部 render(复刻 demo reRenderStaff 思路)。 */
+   *  仅当 start/count 实际变化时才 rebuildCards + render(避免拖拽回弹/范围未变时无谓重建触发动画)。 */
   private onMeasureSelectorChange(start: number, count: number): void {
     if (this.viewMode === 'preview') return;   // 预览只读:禁止拖拽改范围(会触发 flush)
     if (!this.score) return;
     void this.flusher?.flush();
+    const prevStart = this.currentStartMeasure;
+    const prevCount = this.tool.measureCount;
     this.currentStartMeasure = start;
     this.tool.measureCount = count;
+    // start/count 未变(如拖拽回弹到原位、选框范围没变):只更新范围提示,不重建卡片。
+    if (start === prevStart && count === prevCount) {
+      this.updateRangeHint();
+      return;
+    }
     this.player.stop();
     this.playingIndex = -1;
     this.currentBeat = 0;

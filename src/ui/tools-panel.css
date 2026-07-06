@@ -14,9 +14,6 @@
   border-radius: var(--radius);
   margin-bottom: 16px;
   box-shadow: var(--shadow-sm);
-  position: sticky;
-  top: 10px;
-  z-index: 5;
 }
 .sv-tools-row {
   display: flex;
@@ -78,7 +75,7 @@
   border-radius: 7px;
   line-height: 1;
 }
-.sv-acc:hover { color: var(--ink); background: rgba(255,255,255,0.6); }
+.sv-acc:hover { color: var(--ink); background: var(--line-2); }
 .sv-acc.active { background: var(--card); color: var(--accent); box-shadow: var(--shadow-sm); }
 .sv-range-hint {
   font-size: 13px;
@@ -86,13 +83,10 @@
   white-space: nowrap;
 }
 .sv-range-hint b { color: var(--accent); font-weight: 650; }
-/* 小节导航行:MeasureSelector 区填满剩余宽度(可独立横滑) */
-.sv-tools-measures { padding-top: 4px; }
-.sv-tools-measures .sv-measures-host { flex: 1 1 auto; min-width: 0; }
 .sv-tool-group {
   display: flex;
   gap: 2px;
-  background: rgba(255,255,255,0.5);
+  background: var(--card);
   padding: 3px;
   border-radius: var(--radius-sm);
 }
@@ -113,7 +107,7 @@
   align-items: center;
   justify-content: center;
 }
-.sv-dur:hover { color: var(--ink); background: rgba(255,255,255,0.6); }
+.sv-dur:hover { color: var(--ink); background: var(--line-2); }
 .sv-dur.active { background: var(--card); color: var(--accent); box-shadow: var(--shadow-sm); }
 .sv-dur:disabled { opacity: 0.35; cursor: not-allowed; }
 .sv-dur svg { display: block; }
@@ -172,7 +166,7 @@
   transition: all 0.12s;
   white-space: nowrap;
 }
-.view-btn:hover { color: var(--ink); background: rgba(255,255,255,0.6); }
+.view-btn:hover { color: var(--ink); background: var(--line-2); }
 .view-btn.active { background: var(--card); color: var(--accent); box-shadow: var(--shadow-sm); font-weight: 600; }
 /* 谱号字符:用 Bravura(编辑区同款字体),墨迹在 em 框内居中优于 serif。 */
 .view-gly { font-size: 17px; font-family: "Bravura", serif; line-height: 1; }
@@ -180,7 +174,7 @@
 .view-gly.clef-pair { letter-spacing: 1px; }
 
 /* 小节行:矮 pill(50px),包"小节"标签 + MeasureSelector,选框上下冒出 */
-.measure-row { display: flex; align-items: center; padding: 8px 0; }
+.measure-row { display: flex; align-items: center; padding: 8px 0; position: relative; }
 .measure-pill {
   display: inline-flex;
   align-items: center;
@@ -192,9 +186,9 @@
   overflow: visible;
   position: relative;
 }
-.measure-pill .sv-measures-host { position: relative; min-width: 0; max-width: 460px; }
-/* MeasureSelector 轨道有 PAD_EDGE=18px 起始留白,选框(.ms-sel)从 18px 处开始绘制,
-   导致"小节"标签到选框左缘 = 25px(远大于时值组标签→选项组 7px)。
-   负 margin 吃掉这 18px,让选框靠近标签(标签→选框 ≈ 7px,与时值组一致)。
-   组件内部用 track.getBoundingClientRect() 算坐标,ms-wrap 左移不影响(都相对 track)。 */
-.measure-pill .ms-wrap { margin-left: -18px; }
+/* host 宽度由 MeasureSelector 组件 JS 设(min(trackW, 600)):N≤8 全见不滑,N>8 横滑。
+   max-width:100% 兜底小屏(host 不超过 pill 可用宽,防止溢出容器)。 */
+.measure-pill .sv-measures-host { position: relative; min-width: 0; max-width: 100%; }
+/* wrap 不再用 margin-left:-18。组件左侧 PAD_EDGE_L=0(书签直接贴 track 左缘 = host 左缘),
+   选框左缘 = host 左缘 = "小节"标签右缘 + gap(7px),自然对齐标签。
+   去掉负 margin 后 wrap = host,右缘撑到灰底右缘(横滑区域不再内缩 18px)。 */

@@ -21,9 +21,18 @@ export function createPiece(): Piece {
 }
 
 /** 总拍数（四分音符为单位）。和弦尾音不占额外时长(与首音同时),不累加。
- *  注意:这是「当前活跃组」(piece.notes)的拍数。播放需要两组并行时,用 totalBeatsBoth。 */
+ *  注意:这是「当前活跃组」(piece.notes)的拍数。播放需要两组并行时,用 totalBeatsBoth。
+ *  范围视图:基于 noteStartBeats(读 trebleBeats/bassBeats 预设)算末音 endBeat,
+ *  使空小节/半填小节的固定容器拍数计入 → SMS 待输入框(nextSlotX)、容量、进度条位置正确。 */
 export function totalBeats(piece: Piece): number {
-  return totalBeatsOf(piece.notes);
+  const notes = piece.notes;
+  if (notes.length === 0) return 0;
+  // 末音 endBeat = 末音 startBeat + 其时长(和弦尾音不占时长,endBeat=startBeat)
+  const starts = noteStartBeats(piece);
+  const lastIdx = notes.length - 1;
+  const last = notes[lastIdx];
+  const tail = isChordTail(last, lastIdx > 0 ? notes[lastIdx - 1] : null);
+  return tail ? starts[lastIdx] : starts[lastIdx] + durationBeats(last);
 }
 
 /** 给定一组音符算总拍数(不含和弦尾音)。供 player 分别算 treble/bass 组用。 */
@@ -140,15 +149,47 @@ export function popNote(piece: Piece): boolean {
 
 /**
  * 计算每个音符累计的「起始拍」位置（从 0 开始）。和弦尾音与首音同时,startBeat = 首音 startBeat。
+ *
+ * 范围视图(整曲多小节)优化:若 piece 带 trebleBeats/bassBeats(rangeToPiece 预算),
+ * 直接返回预设值 —— 这些值按"小节固定容器"算,空小节/半填小节也占 bpb 拍,
+ * 避免旧裸累加把空小节当 0 拍导致后续音前移。无预设(单行 piece/示例)走下方累加。
  */
 export function noteStartBeats(piece: Piece): number[] {
+  // 范围视图:读 rangeToPiece 预算的绝对拍(按小节固定容器,空/半填小节不前移)。
+  // 但编辑(appendNote/popNote)会改 notes 长度,使 preset 陈旧 → 长度不匹配时按下面策略处理。
+  const preset = piece.notes === piece.bass ? piece.bassBeats : piece.trebleBeats;
+  const notes = piece.notes;
+  if (preset && preset.length === notes.length) return preset;   // 长度匹配:全用预算
+  if (preset && preset.length > notes.length) {
+    // 删除末尾后:preset 比 notes 长。删除的是末尾,前面的音位置不变 → 截取前 notes.length 个。
+    return preset.slice(0, notes.length);
+  }
+  // 长度不匹配(appendNote 后 preset < notes)或无 preset:累加。
   const starts: number[] = [];
   let acc = 0;
-  /** 当前正在累加的和弦组首音 startBeat(供尾音复用)。单音场景不用。 */
   let curChordStart = 0;
-  for (let i = 0; i < piece.notes.length; i++) {
-    const n = piece.notes[i];
-    const tail = isChordTail(n, i > 0 ? piece.notes[i - 1] : null);
+  // 若有 preset 且 preset 非空,从 preset 末音的 endBeat 接续累加
+  if (preset && preset.length > 0 && preset.length < notes.length) {
+    // 复制 preset 覆盖的部分(这些音的 startBeat 用预算值,保证已落盘音位置正确)
+    for (let i = 0; i < preset.length; i++) starts.push(preset[i]);
+    // 接续累加:acc 从 preset 末音之后继续。末音的 endBeat = preset 末值 + 其 duration
+    const lastPresetIdx = preset.length - 1;
+    const lastNote = notes[lastPresetIdx];
+    acc = preset[lastPresetIdx] + (isChordTail(lastNote, lastPresetIdx > 0 ? notes[lastPresetIdx - 1] : null) ? 0 : durationBeats(lastNote));
+    if (lastNote.chordId) curChordStart = preset[lastPresetIdx];
+    // 从 preset.length 开始继续累加
+    for (let i = preset.length; i < notes.length; i++) {
+      const n = notes[i];
+      const tail = isChordTail(n, i > 0 ? notes[i - 1] : null);
+      if (tail) { starts.push(curChordStart); }
+      else { starts.push(acc); if (n.chordId) curChordStart = acc; acc += durationBeats(n); }
+    }
+    return starts;
+  }
+  // 无 preset(单行 piece/示例):从0裸累加(原逻辑)
+  for (let i = 0; i < notes.length; i++) {
+    const n = notes[i];
+    const tail = isChordTail(n, i > 0 ? notes[i - 1] : null);
     if (tail) {
       // 尾音:与首音同时,startBeat = 首音的 startBeat,不推进 acc
       starts.push(curChordStart);

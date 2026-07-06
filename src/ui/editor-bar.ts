@@ -135,8 +135,8 @@ export function buildEditorBar(initial: EditorBarState, cb: EditorBarCallbacks):
   const previewBtn = document.createElement('button');
   previewBtn.type = 'button';
   previewBtn.className = 'appbar-preview';
-  previewBtn.innerHTML = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg> 预览`;
-  previewBtn.title = '整曲预览';
+  previewBtn.innerHTML = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg> 整曲预览`;
+  previewBtn.title = '整曲预览(纸质谱视图)';
   previewBtn.addEventListener('click', () => cb.onOpenPreview());
   right.appendChild(previewBtn);
   appbar.appendChild(right);

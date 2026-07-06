@@ -81,6 +81,14 @@ export interface Piece {
   treble: Note[];
   /** 低音谱表(左手)音符组。单卡低音模式时 notes 指向它。 */
   bass: Note[];
+  /** treble 组每音在范围内的绝对起始拍(rangeToPiece 预算)。
+   *  空小节/半填小节按固定容器(bpb)算基准(小节序号×bpb + 小节内累加),
+   *  供 noteStartBeats 直接读取,无需裸累加(避免空小节贡献0拍导致后续音前移)。
+   *  可选:仅范围视图(rangeToPiece 产出)有此字段;单行 piece/示例不带 → noteStartBeats 走旧累加。
+   *  与 treble 数组一一对应(同长度、同顺序)。 */
+  trebleBeats?: number[];
+  /** bass 组每音绝对起始拍,语义同 trebleBeats。与 bass 数组一一对应。 */
+  bassBeats?: number[];
 }
 
 const DURATION_BASE: Record<DurationValue, number> = {
