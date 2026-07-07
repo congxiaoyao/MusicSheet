@@ -40,7 +40,7 @@ export interface MeasureSelectorHandle {
 // 尺寸常量(px)。
 const BLOCK_W = 44;
 const GAP_NORMAL = 15;      // 正常书签间距(框外/框内)
-const GAP_SEL_SIDE = 10;      // 选框与左右外侧书签的间距(比正常间距紧,突出选框)
+const GAP_SEL_SIDE = GAP_NORMAL;  // 选框与左右书签的间距:与正常间距一致(消除翻转跳变;选框"紧贴"感靠选框内部 padding/handle 区)
 const GAP_GRIP = 6;         // 把手到框内书签的间距
 const HANDLE_W = 5;
 const SEL_PAD_X = 6;        // 选框左右 padding(安全区:把手到框边)
@@ -631,7 +631,7 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
       apply(true);
       if (totalChanged) {
         requestAnimationFrame(() => requestAnimationFrame(() => {
-          blocks.forEach(b => b.el.classList.remove('ms-enter'));
+          blocks.forEach(b => { b.el.classList.remove('ms-enter'); b.slot.classList.remove('ms-enter'); });
         }));
       }
     },
