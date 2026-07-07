@@ -258,7 +258,11 @@ export class App {
    *  现有渲染/编辑/播放层继续吃这个 N 小节单行 Piece,零改动。 */
   private rebuildRangePiece(): void {
     if (!this.score) return;
-    const activeStaff = this.viewMode === 'bass' ? 'bass' : 'treble';
+    // 活跃组由 activeCard.staff 决定(grand 模式可能激活 bass 卡),而非 viewMode。
+    // 之前用 viewMode==='bass' 判断 → grand 模式下 activeStaff 永远是 treble,
+    // 导致 bass 卡编辑一个音后(afterEdit→rebuildRangePiece),piece.notes 被重指回 treble,
+    // 后续输入/删除操作到高音区。fallback treble 用于 preview 模式(无 activeCard)。
+    const activeStaff = this.activeCard?.staff === 'bass' ? 'bass' : 'treble';
     this.piece = rangeToPiece(this.score, this.currentStartMeasure, this.tool.measureCount, activeStaff);
   }
 
