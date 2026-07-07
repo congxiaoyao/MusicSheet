@@ -59,13 +59,14 @@ export function buildGrandSVG(
   const bJianpu = showJianpu ? renderJianpuSVG(bInput) : '';
   // 垂直堆叠:treble 组在上,bass 组在下。按 previewMode 重新排版(去掉隐藏部分的间距)。
   // 每组可见区的顶/底 y(在各自 layout 坐标系内):
-  //   staff-only/both: top=0(坐标系原点,容纳高音加线扩展区 viewBoxYOffset~staffTop),
-  //                    用 0 而非 viewBoxYOffset —— 让 staffTop 在堆叠里位置固定(translate=0),
-  //                    高音加线在 staffTop 上方自然延伸,而非把五线谱整体上推(原来用 vby 做
-  //                    tTop 导致 treble translate(-vby),五线谱偏高 vby)。
+  //   staff-only/both: top=-viewBoxYOffset(高音加线扩展区从负 y 起,单谱表用 viewBox 负起点
+  //                    容纳;双谱表用 translate=-top=vby 平移进正 y 区,复刻单谱表视觉:
+  //                    staffTop 距堆叠顶 = staffTop+vby,符头从负 y 平移到正值不被裁)。
+  //                    注意:此前用 viewBoxYOffset 做 top → translate=-vby(反向),符头更负被裁、
+  //                    staffTop 上移 vby 偏高;用 0 做 top → translate=0,符头负 y 直接被裁。
   //   jianpu-only:     top=jianpuTop, bottom=jianpuBottom(简谱区)
   const width = Math.max(trebleLayout.width, bassLayout.width);
-  const visTop = (lay: Layout) => showStaff ? 0 : lay.jianpuTop;
+  const visTop = (lay: Layout) => showStaff ? -lay.viewBoxYOffset : lay.jianpuTop;
   const visBottom = (lay: Layout) => showStaff ? (showJianpu ? lay.height : lay.jianpuTop) : lay.jianpuBottom;
   // 简谱模式上下加留白(简谱内容太贴近边缘)
   const jpPad = showStaff && showJianpu ? 0 : (!showStaff ? 28 : 0);
