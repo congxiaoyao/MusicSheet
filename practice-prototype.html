@@ -312,6 +312,7 @@ html, body { height: 100%; overflow: hidden;
   border-radius: 10px;
   box-shadow: 0 4px 16px rgba(16,24,40,0.14);
   padding: 10px 12px;
+  width: 240px;
   display: flex;
   flex-direction: row;
   align-items: center;
@@ -339,31 +340,60 @@ html, body { height: 100%; overflow: hidden;
 }
 .pr-resizer-label b { color: var(--ink-2); font-weight: 600; font-variant-numeric: tabular-nums; }
 
-/* 高度拖动图标：卡片右侧，上下拖改键盘高度 */
+/* 高度拖动图标：卡片右侧，上下拖改键盘高度。
+   纯 CSS 几何：上下三角 + 中间竖条，不用 emoji。 */
 .pr-resizer-height {
   flex: none;
-  width: 28px;
+  width: 32px; height: 48px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 2px;
+  justify-content: center;
+  gap: 3px;
   cursor: ns-resize;
-  padding: 4px 0;
+  padding: 0;
   border-left: 1px solid var(--line-2);
   border-radius: 4px;
   transition: background 0.12s;
 }
 .pr-resizer-height:hover { background: var(--bg); }
 .pr-resizer-height:active { background: var(--accent-soft); }
-.pr-resizer-height .arr {
-  font-size: 10px; color: var(--muted); line-height: 1;
+/* 上三角 */
+.pr-resizer-height .tri-up {
+  width: 0; height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-bottom: 5px solid var(--muted);
 }
-.pr-resizer-height .h-icon {
-  font-size: 14px; color: var(--accent); line-height: 1;
+/* 中间竖条（拖动手柄意象）*/
+.pr-resizer-height .grip {
+  width: 10px; height: 14px;
+  border: 1.5px solid var(--accent);
+  border-radius: 2px;
+  position: relative;
 }
-.pr-resizer-height .h-label {
-  font-size: 8px; color: var(--muted); line-height: 1; font-weight: 600;
+.pr-resizer-height .grip::before,
+.pr-resizer-height .grip::after {
+  content: '';
+  position: absolute;
+  left: 50%; transform: translateX(-50%);
+  width: 6px; height: 1.5px;
+  background: var(--accent);
+  border-radius: 1px;
 }
+.pr-resizer-height .grip::before { top: 3px; }
+.pr-resizer-height .grip::after { bottom: 3px; }
+/* 下三角 */
+.pr-resizer-height .tri-down {
+  width: 0; height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid var(--muted);
+}
+.pr-resizer-height:hover .tri-up,
+.pr-resizer-height:hover .tri-down { border-color: var(--accent); }
+.pr-resizer-height:hover .tri-up { border-bottom-color: var(--accent); }
+.pr-resizer-height:hover .tri-down { border-top-color: var(--accent); }
 .pr-resizer-track {
   position: relative;
   height: 5px;
@@ -515,9 +545,9 @@ html, body { height: 100%; overflow: hidden;
               </div>
             </div>
             <div class="pr-resizer-height" id="heightDrag" title="上下拖改键盘高度">
-              <span class="arr">▲</span>
-              <span class="h-icon">⇕</span>
-              <span class="arr">▼</span>
+              <div class="tri-up"></div>
+              <div class="grip"></div>
+              <div class="tri-down"></div>
             </div>
           </div>
         </div>
