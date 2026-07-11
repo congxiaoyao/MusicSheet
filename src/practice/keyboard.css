@@ -142,12 +142,12 @@
   border: 1px solid var(--line, #e6e8ec);
   border-radius: 10px;
   box-shadow: 0 4px 16px rgba(16, 24, 40, 0.14);
-  padding: 10px 10px;
+  padding: 12px 14px;
   width: 340px;
   display: flex;
   flex-direction: row;
   align-items: center;
-  gap: 10px;
+  gap: 14px;
   backdrop-filter: blur(8px);
   opacity: 0;
   pointer-events: none;
@@ -196,17 +196,17 @@
 /* 高度调整:V 形 chevron + 文字 */
 .kb-resizer-height {
   flex: none;
-  width: 30px;
+  width: 38px;
   height: 44px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 2px;
+  gap: 3px;
   cursor: ns-resize;
   border-left: 1px solid var(--line-2, #eef0f3);
-  margin-left: 10px;       /* 分割线到图标的间距(在 box 外,不进 hover 高亮) */
-  padding: 0 4px;          /* 图标内容左右对称内边距,hover 高亮左右等距 */
+  margin-left: 4px;        /* 分割线到图标的间距(在 box 外,不进 hover 高亮) */
+  padding: 0 6px;          /* 图标内容左右对称内边距,hover 高亮左右等距 */
   border-radius: 4px;
   transition: background 0.12s;
 }

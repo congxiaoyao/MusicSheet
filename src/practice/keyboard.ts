@@ -37,7 +37,9 @@ const WHITE_PCS = [0, 2, 4, 5, 7, 9, 11];
 const CENTER_C = 60;
 
 /** 键宽上下限(px,文档 §3.3):28~80。 */
-const KEY_W_MIN = 28;
+/** 键宽上下限(px,文档 §3.3)。MIN 降到 16:使窄屏/宽屏下都能触发 88 键封顶
+ *  (ceil(容器宽/16) > 52 白键 → 封顶 52,自动减小键宽铺满)。 */
+const KEY_W_MIN = 16;
 const KEY_W_MAX = 80;
 /** 键盘高度上下限(px,文档 §3.3):80 ~ 视口 40%。 */
 const KB_H_MIN = 80;
@@ -369,32 +371,40 @@ export function buildKeyboard(initial: KeyboardInitial, cb: KeyboardCallbacks): 
   track.addEventListener('mousedown', onKeyWDown);
   thumb.addEventListener('mousedown', onKeyWDown);
 
-  /** 应用键宽:白键宽 = newWhiteW(精确 px,不被铺满覆盖),键数 = ceil(容器宽/白键宽) 补满。
-   *  以中央 C 为中心向两侧扩展算音域;若撞 88 键边界(A0=21/C8=108),向另一侧补键保证键数够填满容器。
-   *  触发 onKeyLayoutChange。 */
+  /** 应用键宽。
+   *  逻辑:
+   *  1. 期望键数 = ceil(容器宽/白键宽)。
+   *  2. 若 ≤ 52(88键白键上限):键数 = 期望值,白键宽 = 设定值,超出容器裁掉。
+   *  3. 若 > 52:封顶 52 键(全88键)。白键宽仍 = 设定值(尊重用户)。
+   *     - 若 52×设定宽 > 容器宽(88键超出):正常裁掉。
+   *     - 若 52×设定宽 < 容器宽(88键比容器窄):键盘居中,两侧留白。
+   *  以中央 C 为中心向两侧对称扩展算音域。触发 onKeyLayoutChange。 */
   function applyKeyWidth(newWhiteW: number): void {
     const containerW = keysEl.clientWidth;
     if (containerW <= 0) return;
-    // ceil 补满:键数向上取整,键盘总宽 ≥ 容器宽,超出部分裁掉(键盘始终满屏)。
-    const whiteCount = Math.max(1, Math.ceil(containerW / newWhiteW));
-    // 以中央 C 为中心,向两侧对称扩展。
+    const MAX_WHITE = 52;   // 88 键的白键数(A0..C8)
+    let whiteCount = Math.max(1, Math.ceil(containerW / newWhiteW));
+    // 超过 88 键白键上限:封顶 52,白键宽保持设定值(不加大,尊重用户;窄了居中)。
+    if (whiteCount > MAX_WHITE) whiteCount = MAX_WHITE;
+    // 算音域:以中央 C 为中心,向两侧对称扩展 whiteCount 个白键。
     const half = Math.floor((whiteCount - 1) / 2);
     let newLow = whiteKeyOffset(CENTER_C, -half);
     let newHigh = whiteKeyOffset(CENTER_C, whiteCount - 1 - half);
-    // clamp 88 键边界,且撞边界后向另一侧补键(保证键数 = whiteCount,不留空白)。
+    // clamp 88 键边界,撞边界向另一侧补。
     if (newLow < 21) {
-      // 低音端撞 A0:把 low 钉到 21,high 向高音补足键数。
       newLow = 21;
       newHigh = whiteKeyOffset(newLow, whiteCount - 1);
-      if (newHigh > 108) newHigh = 108;   // 两端都到极限(88键全开)
+      if (newHigh > 108) newHigh = 108;
     } else if (newHigh > 108) {
-      // 高音端撞 C8:把 high 钉到 108,low 向低音补足键数。
       newHigh = 108;
       newLow = whiteKeyOffset(newHigh, -(whiteCount - 1));
       if (newLow < 21) newLow = 21;
     }
     range = { low: newLow, high: newHigh };
-    whiteW = newWhiteW;   // 精确设定值,不再被铺满覆盖
+    whiteW = newWhiteW;
+    // 键盘居中:88键封顶后若键盘比容器窄(52×宽 < 容器宽),水平居中;否则左对齐(超出裁)。
+    const kbTotalW = whiteKeys(range).length * whiteW;
+    keysEl.style.justifyContent = kbTotalW < containerW ? 'center' : 'flex-start';
     maybeRebuild();
     updateSliderUI();
     callbacks.onKeyLayoutChange?.({ range, whiteW });
