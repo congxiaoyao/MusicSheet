@@ -741,10 +741,16 @@ export function buildScoreSheet(
     });
   };
 
-  /** 播放头定位:竖条盖在当前音符上,纵向覆盖当前行【五线谱顶线到低音谱表底线】
-   *  (实际音乐范围,不含加线留白/jianpu 区,避免上下被裁或过高)。
-   *  参考 app.ts updatePreviewPlayhead:横向跟随时值更短的组音(短音是节奏主驱动),
-   *  两组都无音时线性铺到内容区。全部用纯几何 + svgRect 缩放换算。 */
+  /** 播放头定位:竖条按【拍位】线性落在当前小节的对应 x 上,纵向覆盖当前行
+   *  五线谱顶线到低音谱表底线(实际音乐范围,不含加线留白)。
+   *
+   *  播放头是标准乐谱的【播放光标】——按拍位在 barLines 间线性插值,匀速单调前进:
+   *    - 不会跟随某组音符 noteX 跳动(那是符头高亮 updateHighlight 的职责);
+   *    - 不会因 treble 间隙/bass 长音位置偏移而回退或跳过某音;
+   *    - 经过的每个音(无论 treble 还是 bass)都被符头高亮覆盖,视觉上"播放头扫过该音"。
+   *  barLines 由 applyDensityBars 按音符密度分配小节宽度,故拍位→x 映射贴近音符实际排布。
+   *
+   *  全部用纯几何 + svgRect 缩放换算。 */
   const updatePlayhead = (sysIdx: number, beatInLine: number) => {
     if (!renderCache) return;
     const sys = renderCache.systems[sysIdx];
@@ -755,61 +761,15 @@ export function buildScoreSheet(
     const sheetRect = sheetEl.getBoundingClientRect();
     // SVG 内坐标 → 像素:height:auto 下 scaleX=scaleY,用任一边换算一致。
     const scale = renderCache.width > 0 ? svgRect.width / renderCache.width : 1;
-    // SVG 在 sheetEl 内的左/上偏移(像素),作水平/垂直换算基点。
     const svgLeftInSheet = svgRect.left - sheetRect.left;
     const svgTopInSheet = svgRect.top - sheetRect.top;
-    // 当前音符 idx(行内):复用 onTick 的 noteIndexAtBeat 逻辑
-    const tStarts = noteStartBeats(sys.treblePiece);
-    const bStarts = noteStartBeats(sys.bassPiece);
-    const tIdx = noteIndexAtBeat(beatInLine, tStarts, sys.treblePiece.notes);
-    const bIdx = noteIndexAtBeat(beatInLine, bStarts, sys.bassPiece.notes);
-    const lay = sys.trebleLayout;   // 两组 barLines 同 x,noteX 各自;宽度基准用 treble layout
-    // 横向中心 x0(SVG 内坐标)。播放头是【节奏进度指示器】,始终沿节奏轨道单调前进:
-    //   - 节奏音在响 → 该音位置(短音是节奏主驱动,两组都在响取时值短者)
-    //   - 节奏轨道有间隙(treble 空拍) → 在前一音位置与下一音位置间线性插值,
-    //     保证向前推进,既不回退(跟随 bass 长音位置在左)也不跳过(直接到下一音)。
-    //   bass 长音是和声铺垫,不参与播放头定位(其符头高亮另由 updateHighlight 处理)。
-    let x0: number;
-    if (tIdx >= 0 && bIdx >= 0) {
-      // 两组都在响:跟随时值更短的(短音节奏主驱动,参考 app.ts)
-      const tDur = durationBeats(sys.treblePiece.notes[tIdx]);
-      const bDur = durationBeats(sys.bassPiece.notes[bIdx]);
-      x0 = bDur < tDur ? sys.bassLayout.noteX[bIdx] : lay.noteX[tIdx];
-    } else if (tIdx >= 0) {
-      x0 = lay.noteX[tIdx];
-    } else {
-      // treble 间隙或行末:在 treble 前一音(若有)位置 与 下一音(或内容右端)位置间插值,
-      // 使播放头在间隙内匀速前进。prevX/nextX 取 treble noteX(bass 长音位置不参与)。
-      let prevX: number, nextX: number, prevBeat: number, nextBeat: number;
-      // 前一音:最后一个 start ≤ beatInLine 的音
-      let prevIdx = -1;
-      for (let i = 0; i < tStarts.length; i++) {
-        if (tStarts[i] > beatInLine + BEAT_EPS) break;
-        prevIdx = i;
-      }
-      // 下一音:第一个 start > beatInLine 的音
-      let nextIdx = -1;
-      for (let i = 0; i < tStarts.length; i++) {
-        if (tStarts[i] > beatInLine + BEAT_EPS) { nextIdx = i; break; }
-      }
-      if (prevIdx >= 0) {
-        prevX = lay.noteX[prevIdx];
-        prevBeat = tStarts[prevIdx] + durationBeats(sys.treblePiece.notes[prevIdx]);  // 前一音结束拍
-      } else {
-        prevX = lay.contentLeft;
-        prevBeat = 0;
-      }
-      if (nextIdx >= 0) {
-        nextX = lay.noteX[nextIdx];
-        nextBeat = tStarts[nextIdx];
-      } else {
-        nextX = lay.contentRight;   // 行末无后续音:推进到内容右端
-        nextBeat = sys.beatEnd - sys.beatStart;
-      }
-      const span = nextBeat - prevBeat;
-      const ratio = span > 0 ? Math.max(0, Math.min(1, (beatInLine - prevBeat) / span)) : 0;
-      x0 = prevX + ratio * (nextX - prevX);
-    }
+    const lay = sys.trebleLayout;
+    // 拍位 → 小节 → barLines 间线性插值。barLines[k] = 第 k 小节左线 x。
+    const bpb = beatsPerBar(sys.treblePiece.time);
+    const measureF = beatInLine / bpb;          // 行内小数小节号
+    const mIdx = Math.min(Math.floor(measureF), lay.barLines.length - 2);
+    const ratioInMeas = measureF - mIdx;        // 小节内比例 [0,1)
+    const x0 = lay.barLines[mIdx] + ratioInMeas * (lay.barLines[mIdx + 1] - lay.barLines[mIdx]);
     // 横向:符头宽(盖住符头 2×noteHeadHalf)→ 像素,加 SVG 在 sheet 内的左偏移。
     const wPx = lay.noteHeadHalf * 2 * scale;
     const leftPx = svgLeftInSheet + x0 * scale - wPx / 2;

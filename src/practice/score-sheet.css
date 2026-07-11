@@ -84,8 +84,8 @@
   pointer-events: none;
   z-index: 3;
   box-sizing: border-box;
-  /* left 不加 transition:JS 每 16 分音符(125ms@120bpm)更新一次,本身已够平滑;
-   * 给 left 加过渡会在换行(跳到新行首位)时产生"往左滑"的视觉回退假象。
+  /* left 不加 transition:播放头 x0 由 JS 按拍位线性算出,本身单调匀速;加过渡会在
+   * 换行/步进时产生中间帧回退假象。125ms(16分@120bpm)步进 + 匀速 x0 已足够平滑。
    * top/height 加过渡:换行时纵向移动更顺滑。 */
   transition: top 0.3s ease-out, height 0.3s ease-out;
 }
