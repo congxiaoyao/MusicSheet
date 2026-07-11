@@ -313,6 +313,10 @@ interface RenderedSystem {
   trebleTopY: number;
   /** bass 谱表可见区底 y(system 内坐标) */
   bassBotY: number;
+  /** treble 五线第一线 y(system 内坐标,实际音乐顶 —— 播放头/滚动锚定用,不含加线留白) */
+  staffTopY: number;
+  /** bass 五线第五线 y(system 内坐标,实际音乐底) */
+  staffBotY: number;
   /** treble/bass 五线的几何(供 brace 定位 + onTick 高亮换算) */
   trebleLayout: Layout;
   bassLayout: Layout;
@@ -479,6 +483,8 @@ function renderSystem(
     width: lineW,
     trebleTopY: tTop,
     bassBotY: bBot,
+    staffTopY: trebleStaffTopY,
+    staffBotY: bassStaffBotY,
     trebleLayout,
     bassLayout,
     treblePiece,
@@ -502,6 +508,11 @@ interface SystemGeom {
   yTop: number;
   /** 该行高度 */
   height: number;
+  /** 该行 treble 五线第一线 y(整曲 SVG 绝对坐标,= yTop + staffTopY) —— 滚动/播放头锚定用,
+   *  对齐此线可消除 viewBoxYOffset(高音加线留白)导致的视觉不一致 */
+  staffTopY: number;
+  /** 该行 bass 五线第五线 y(整曲 SVG 绝对坐标,= yTop + staffBotY) */
+  staffBotY: number;
   /** 该行 treble layout */
   trebleLayout: Layout;
   /** 该行 bass layout */
@@ -538,6 +549,8 @@ export function renderScore(score: Score, width: number, mode: ScoreMode, preset
     geom.push({
       yTop: cumY,
       height: r.height,
+      staffTopY: cumY + r.staffTopY,
+      staffBotY: cumY + r.staffBotY,
       trebleLayout: r.trebleLayout,
       bassLayout: r.bassLayout,
       plan,
@@ -689,22 +702,26 @@ export function buildScoreSheet(
     apply('.ss-bass', hiBass);
   };
 
-  /** 行滚动锁定(提词器式):当前行顶部对齐清晰带顶部(距 scrollEl 视口顶 CURRENT_TOP_PAD)。
-   *  清晰带顶部位置 + 渐变范围按当前 mode 实际行高动态(文档 §6.4:不能写死)。
-   *  换行一致性:每行 sys 都按"system 元素的屏幕 top"换算 scrollTop,首行/末行公式一致,
-   *  不累加(避免逐行偏差)。 */
-  const CURRENT_TOP_PAD = 24;   // 当前行顶部距 scrollEl 视口顶的留白(谱号完整显示空间)
+  /** 行滚动锁定(提词器式):当前行【五线谱顶线】对齐到清晰带顶部(距 scrollEl 视口顶 CURRENT_TOP_PAD)。
+   *  锚定 staffTopY(treble 五线第一线)而非 <g> 的 bbox-top:<g> bbox 因 <text> 符头字体度量框
+   *  虚高 ~84px 且加线留白区随音符变化,用它对齐会导致各行视觉位置漂移。staffTopY 是纯几何,
+   *  每行唯一的"音乐顶"参照,首行/末行/中间行锚定完全一致。
+   *
+   *  换算:用 SVG 在 scrollEl 内容坐标内的真实位置 + scale 把 staffTopY(SVG 内 y) 转成 scrollTop。
+   *  scale 用 svgRect 高度 / viewBox 高(height:auto 下 scaleX=scaleY)。 */
+  const CURRENT_TOP_PAD = 24;   // 当前行五线谱顶线距 scrollEl 视口顶的留白(谱号完整显示空间)
   const scrollToSystem = (sysIdx: number) => {
     if (!renderCache) return;
-    const sysEl = sheetEl.querySelector<SVGGElement>(`g.ss-system[data-sys="${sysIdx}"]`);
-    if (!sysEl) return;
-    // 直接用 system 元素在 scrollEl 内的真实屏幕位置换算 scrollTop(最可靠):
-    //   目标 scrollTop = 当前 sys 屏幕 top 相对 scrollEl 的偏移 - 留白。
-    // 这样每行换算公式完全相同(不依赖 SVG 缩放比),换行不累积偏差。
-    const sysRect = sysEl.getBoundingClientRect();
-    const scrollRect = scrollEl.getBoundingClientRect();
-    const offsetInScroll = sysRect.top - scrollRect.top + scrollEl.scrollTop;
-    const targetTop = offsetInScroll - CURRENT_TOP_PAD;
+    const sys = renderCache.systems[sysIdx];
+    if (!sys) return;
+    const svgEl = sheetEl.querySelector('svg');
+    if (!svgEl) return;
+    const svgRect = svgEl.getBoundingClientRect();
+    const scale = renderCache.height > 0 ? svgRect.height / renderCache.height : 1;
+    // SVG 在 scrollEl 内容坐标内的 y 起点 = 当前屏幕 top - scrollEl 视口顶 + 已滚 scrollTop。
+    const svgTopInContent = svgRect.top - scrollEl.getBoundingClientRect().top + scrollEl.scrollTop;
+    // staffTopY(整曲 SVG 绝对 y)→ 内容坐标 scrollTop 目标。
+    const targetTop = svgTopInContent + sys.staffTopY * scale - CURRENT_TOP_PAD;
     scrollEl.scrollTo({ top: Math.max(0, targetTop), behavior: 'smooth' });
   };
 
@@ -721,11 +738,10 @@ export function buildScoreSheet(
     });
   };
 
-  /** 播放头定位:竖条盖在当前音符上,纵向覆盖当前 system 高度。
+  /** 播放头定位:竖条盖在当前音符上,纵向覆盖当前行【五线谱顶线到低音谱表底线】
+   *  (实际音乐范围,不含加线留白/jianpu 区,避免上下被裁或过高)。
    *  参考 app.ts updatePreviewPlayhead:横向跟随时值更短的组音(短音是节奏主驱动),
-   *  两组都无音时线性铺到内容区。
-   *  全部用纯几何 + svgRect 缩放换算 —— 不用 system <g> 的 getBoundingClientRect
-   *  (g 的 bbox 含 <text> 符头的字体度量框,高度严重虚高 2-3 倍,不可靠)。 */
+   *  两组都无音时线性铺到内容区。全部用纯几何 + svgRect 缩放换算。 */
   const updatePlayhead = (sysIdx: number, beatInLine: number) => {
     if (!renderCache) return;
     const sys = renderCache.systems[sysIdx];
@@ -733,8 +749,12 @@ export function buildScoreSheet(
     const svgEl = sheetEl.querySelector('svg');
     if (!svgEl) return;
     const svgRect = svgEl.getBoundingClientRect();
+    const sheetRect = sheetEl.getBoundingClientRect();
     // SVG 内坐标 → 像素:height:auto 下 scaleX=scaleY,用任一边换算一致。
     const scale = renderCache.width > 0 ? svgRect.width / renderCache.width : 1;
+    // SVG 在 sheetEl 内的左/上偏移(像素),作水平/垂直换算基点。
+    const svgLeftInSheet = svgRect.left - sheetRect.left;
+    const svgTopInSheet = svgRect.top - sheetRect.top;
     // 当前音符 idx(行内):复用 onTick 的 noteIndexAtBeat 逻辑
     const tStarts = noteStartBeats(sys.treblePiece);
     const bStarts = noteStartBeats(sys.bassPiece);
@@ -758,14 +778,12 @@ export function buildScoreSheet(
       const ratio = total > 0 ? Math.max(0, Math.min(1, beatInLine / total)) : 0;
       x0 = lay.contentLeft + ratio * lay.contentWidth;
     }
-    // 横向:符头宽(盖住符头 2×noteHeadHalf)→ 像素
+    // 横向:符头宽(盖住符头 2×noteHeadHalf)→ 像素,加 SVG 在 sheet 内的左偏移。
     const wPx = lay.noteHeadHalf * 2 * scale;
-    const leftPx = x0 * scale - wPx / 2;
-    // 纵向:纯几何(sys.yTop/sys.height)→ 像素,偏移以 svgRect 在 sheetEl 内的位置为基。
-    const sheetRect = sheetEl.getBoundingClientRect();
-    const svgTopInSheet = svgRect.top - sheetRect.top;
-    const topPx = svgTopInSheet + sys.yTop * scale;
-    const heightPx = sys.height * scale;
+    const leftPx = svgLeftInSheet + x0 * scale - wPx / 2;
+    // 纵向:覆盖五线谱顶线到低音谱表底线(实际音乐范围),不含加线留白。
+    const topPx = svgTopInSheet + sys.staffTopY * scale;
+    const heightPx = (sys.staffBotY - sys.staffTopY) * scale;
     playheadEl.style.display = '';
     playheadEl.style.left = leftPx.toFixed(1) + 'px';
     playheadEl.style.width = wPx.toFixed(1) + 'px';
