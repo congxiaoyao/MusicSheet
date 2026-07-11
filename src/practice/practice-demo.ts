@@ -149,7 +149,10 @@ function main() {
   let handFilter: 'both' | 'R' | 'L' = 'both';
   let playing = false;
   let beat = 0;
-  let timer: ReturnType<typeof setInterval> | null = null;
+  let rafId: number | null = null;
+  let lastTs: number | null = null;
+  // 播放 BPM(每分钟拍数)。beat = 拍。一拍 = 60/bpm 秒。
+  const BPM = 100;
 
   // 算当前曲子的整曲 treble/bass 调度(供 computeActiveMidis)。
   function buildStaffs(score: Score): StaffSched[] {
@@ -207,14 +210,22 @@ function main() {
   requestAnimationFrame(() => updateBounds());
   window.addEventListener('resize', updateBounds);
 
-  // ── onTick 循环(setInterval 模拟,同 demo.ts) ──
-  const tick = () => {
-    beat += 0.25;
-    const totalBeats = score.meta.totalMeasures * (score.meta.time.num * 4 / score.meta.time.den);
-    if (beat > totalBeats) beat = 0;
+  // ── onTick 循环(requestAnimationFrame,beat 用时间差连续推进) ──
+  // 旧实现 setInterval(tick, 200) 每秒只更新 5 次 → 方块位置跳跃,一卡一卡。
+  // rAF 每帧(约 60fps)用 dt 连续推进 beat,方块位置平滑。
+  const totalBeatsOf = (s: Score) => s.meta.totalMeasures * (s.meta.time.num * 4 / s.meta.time.den);
+  const frame = (ts: number) => {
+    if (!playing) return;
+    if (lastTs == null) lastTs = ts;
+    const dt = (ts - lastTs) / 1000;   // 秒
+    lastTs = ts;
+    beat += dt * (BPM / 60);           // 拍 = 秒 × 拍/秒
+    const total = totalBeatsOf(score);
+    if (beat > total) beat = 0;
     const active = computeActiveMidis(beat, staffs, handFilter);
     waterfall.onTick(beat);
     keyboard.setActiveMidis(active);
+    rafId = requestAnimationFrame(frame);
   };
   const playBtn = mkBtn('▶ 播放', false, () => {});
   playBtn.classList.add('active');
@@ -222,10 +233,10 @@ function main() {
     playing = !playing;
     playBtn.textContent = playing ? '⏸ 暂停' : '▶ 播放';
     if (playing) {
-      timer = setInterval(tick, 200);
-    } else if (timer) {
-      clearInterval(timer);
-      timer = null;
+      lastTs = null;
+      rafId = requestAnimationFrame(frame);
+    } else {
+      if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
       keyboard.clearHighlight();
     }
   };
@@ -281,6 +292,56 @@ function main() {
   const playGroup = mkGroup('播放');
   playGroup.appendChild(playBtn);
   bar.appendChild(playGroup);
+
+  // ── 方块区高度滑块(调试用:手动调方块掉落区域高度看效果) ──
+  // fallWrap 默认 flex:1 占满;设了 fallH 后改为固定高度(底部留白),键盘仍在底。
+  let fallH: number | null = lsGet('fallH', null);   // null = 自动占满
+  const applyFallH = () => {
+    if (fallH == null) {
+      // 自动:fallWrap flex:1 占满剩余空间,贴键盘顶。
+      fallWrap.style.height = '';
+      fallWrap.style.flex = '1';
+      stage.style.justifyContent = '';
+    } else {
+      // 固定高度:fallWrap 不再占满,stage 内容贴底(fallWrap+键盘一起贴底),
+      // 这样 fallWrap 底部仍是键盘顶,方块落点对齐键盘。
+      fallWrap.style.flex = 'none';
+      fallWrap.style.height = fallH + 'px';
+      stage.style.justifyContent = 'flex-end';
+    }
+    updateBounds();
+  };
+  const fallGroup = mkGroup('方块区');
+  const fallLabel = document.createElement('span');
+  fallLabel.className = 'demo-btn-label';
+  fallLabel.textContent = '高度 ' + (fallH == null ? '自动' : fallH);
+  const fallRange = document.createElement('input');
+  fallRange.type = 'range';
+  fallRange.min = '120'; fallRange.max = '600'; fallRange.step = '10';
+  fallRange.value = fallH == null ? '400' : String(fallH);
+  fallRange.style.width = '120px';
+  fallRange.style.accentColor = '#2563eb';
+  // 自动/手动 切换按钮
+  const fallAutoBtn = document.createElement('button');
+  fallAutoBtn.textContent = '自动';
+  fallAutoBtn.className = 'demo-btn' + (fallH == null ? ' active' : '');
+  fallAutoBtn.onclick = () => {
+    fallH = null;
+    fallLabel.textContent = '高度 自动';
+    fallAutoBtn.classList.add('active');
+    lsSet('fallH', null);
+    applyFallH();
+  };
+  fallRange.oninput = () => {
+    fallH = parseInt(fallRange.value, 10);
+    fallLabel.textContent = '高度 ' + fallH;
+    fallAutoBtn.classList.remove('active');
+    lsSet('fallH', fallH);
+    applyFallH();
+  };
+  fallGroup.append(fallLabel, fallRange, fallAutoBtn);
+  bar.appendChild(fallGroup);
+  applyFallH();
 }
 
 main();

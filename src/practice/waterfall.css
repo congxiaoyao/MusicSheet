@@ -35,7 +35,9 @@
   color: #fff;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
   pointer-events: none;
-  transition: none;   /* onTick 每帧设位置,不要 transition 干扰 */
+  /* 位置(top/left/width/height)每帧由 JS 设,不要 transition(否则位置滞后跟手);
+   * 只给 opacity 加过渡 —— 方块出现/消失时平滑淡入淡出,不生硬。 */
+  transition: opacity 0.18s ease-out;
   will-change: transform, opacity;
   transform: translateX(-50%);   /* left 是中心,居中对齐 */
 }
