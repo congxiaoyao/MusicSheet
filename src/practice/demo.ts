@@ -7,6 +7,7 @@ import '../style.css';
 import { KEYS } from '../core/theory';
 import { Score } from '../core/score';
 import { Note } from '../core/types';
+import { beatsPerBar } from '../core/types';
 import { buildScoreSheet, ScoreMode } from './score-sheet';
 import { ensureFontLoaded } from '../render/glyphs';
 
@@ -22,9 +23,16 @@ const s: Note['duration'] = 'sixteenth';
 const C4=60,D4=62,E4=64,F4=65,G4=67,A4=69,B4=71,C5=72,D5=74,E5=76;
 const C3=48,E3=52,G3=55,A2=45;
 
-// ── 曲库 ──
+/** 把主题小节循环扩展到 total 小节(够看多行滚动效果)。 */
+function loopMeasures(theme: { treble: Note[]; bass: Note[] }[], total: number): { treble: Note[]; bass: Note[] }[] {
+  const out: { treble: Note[]; bass: Note[] }[] = [];
+  for (let i = 0; i < total; i++) out.push(theme[i % theme.length]);
+  return out;
+}
+
+// ── 曲库(每首 24 小节,主题循环 3 次,够看多行滚动) ──
 const songs: Record<string, Score> = {
-  twinkle: { meta:{id:'twinkle',title:'小星星',key:KEYS.C,time:{num:4,den:4},totalMeasures:8,viewMode:'grand',updatedAt:0}, measures:[
+  twinkle: { meta:{id:'twinkle',title:'小星星',key:KEYS.C,time:{num:4,den:4},totalMeasures:24,viewMode:'grand',updatedAt:0}, measures: loopMeasures([
     {treble:[n(C4,q),n(C4,q),n(G4,q),n(G4,q)],bass:[]},
     {treble:[n(A4,q),n(A4,q),n(G4,h)],bass:[]},
     {treble:[n(F4,q),n(F4,q),n(E4,q),n(E4,q)],bass:[]},
@@ -33,8 +41,8 @@ const songs: Record<string, Score> = {
     {treble:[n(E4,q),n(E4,q),n(D4,h)],bass:[]},
     {treble:[n(G4,q),n(G4,q),n(F4,q),n(F4,q)],bass:[]},
     {treble:[n(E4,q),n(E4,q),n(D4,h)],bass:[]},
-  ]},
-  ode: { meta:{id:'ode',title:'欢乐颂',key:KEYS.C,time:{num:4,den:4},totalMeasures:8,viewMode:'grand',updatedAt:0}, measures:[
+  ], 24)},
+  ode: { meta:{id:'ode',title:'欢乐颂',key:KEYS.C,time:{num:4,den:4},totalMeasures:24,viewMode:'grand',updatedAt:0}, measures: loopMeasures([
     {treble:[n(E4,e),n(E4,e),n(F4,e),n(G4,e),n(G4,e),n(F4,e),n(E4,e),n(D4,e)],bass:[n(C3,h),n(G3,h)]},
     {treble:[n(C4,e),n(D4,e),n(E4,e),n(E4,q),n(D4,e),n(D4,e)],bass:[n(C3,h),n(G3,h)]},
     {treble:[n(E4,e),n(E4,e),n(F4,e),n(G4,e),n(G4,e),n(F4,e),n(E4,e),n(D4,e)],bass:[n(C3,h),n(G3,h)]},
@@ -43,8 +51,8 @@ const songs: Record<string, Score> = {
     {treble:[n(G4,e),n(F4,e),n(E4,e),n(D4,e),n(E4,q),n(G4,q)],bass:[n(C3,h),n(G3,h)]},
     {treble:[n(C5,q),n(B4,q),n(A4,q),n(G4,q)],bass:[n(C3,h),n(G3,h)]},
     {treble:[n(A4,e),n(G4,e),n(F4,e),n(E4,e),n(D4,e),n(C4,e),n(D4,q)],bass:[n(G3,h),n(C3,h)]},
-  ]},
-  turkish: { meta:{id:'turkish',title:'土耳其进行曲',key:KEYS.C,time:{num:2,den:4},totalMeasures:8,viewMode:'grand',updatedAt:0}, measures:[
+  ], 24)},
+  turkish: { meta:{id:'turkish',title:'土耳其进行曲',key:KEYS.C,time:{num:2,den:4},totalMeasures:24,viewMode:'grand',updatedAt:0}, measures: loopMeasures([
     {treble:[n(B4,s),n(A4,s),n(G4,s),n(A4,s),n(B4,s),n(A4,s),n(G4,s),n(A4,s)],bass:[n(E3,e),n(E3,e)]},
     {treble:[n(C5,s),n(B4,s),n(A4,s),n(G4,s),n(C5,s),n(B4,s),n(A4,s),n(G4,s)],bass:[n(E3,e),n(E3,e)]},
     {treble:[n(D5,s),n(C5,s),n(B4,s),n(A4,s),n(D5,s),n(C5,s),n(B4,s),n(A4,s)],bass:[n(A2,e),n(A2,e)]},
@@ -53,7 +61,7 @@ const songs: Record<string, Score> = {
     {treble:[n(C5,s),n(B4,s),n(A4,s),n(G4,s),n(C5,s),n(B4,s),n(A4,s),n(G4,s)],bass:[n(E3,e),n(E3,e)]},
     {treble:[n(D5,s),n(C5,s),n(B4,s),n(A4,s),n(B4,s),n(A4,s),n(G4,s),n(A4,s)],bass:[n(A2,e),n(A2,e)]},
     {treble:[n(B4,q),n(A4,q)],bass:[n(E3,q),n(E3,q)]},
-  ]},
+  ], 24)},
 };
 
 void ensureFontLoaded().then(() => {
@@ -147,7 +155,7 @@ void ensureFontLoaded().then(() => {
     if (playing) {
       timer = setInterval(() => {
         beat += 0.5;
-        const total = songs[currentSong].meta.totalMeasures * 4;
+        const total = songs[currentSong].meta.totalMeasures * beatsPerBar(songs[currentSong].meta.time);
         if (beat > total) beat = 0;
         sheet.onTick(beat);
       }, 500);
@@ -164,7 +172,7 @@ void ensureFontLoaded().then(() => {
     if (playing) {
       timer = setInterval(() => {
         beat += 0.5;
-        const total = songs[currentSong].meta.totalMeasures * 4;
+        const total = songs[currentSong].meta.totalMeasures * beatsPerBar(songs[currentSong].meta.time);
         if (beat > total) beat = 0;
         sheet.onTick(beat);
       }, 500);

@@ -34,9 +34,10 @@
 }
 
 /* 谱面宿主:承载多行 SVG。上下留出首行清晰带 + 末行滚动到底的空间。
- * padding-top 让首行不贴顶;padding-bottom 让最后几行也能滚到位(文档需求 §4.1)。 */
+ * padding-top 让首行不贴顶;padding-bottom 用 100vh 保证末行后留足整屏空间,
+ * 末行能滚到顶部清晰带位置(文档需求 §4.1:"最后几行也能滚到位")。 */
 .score-sheet-sheet {
-  padding: 24px 24px 40vh 24px;
+  padding: 24px 24px 100vh 24px;
   box-sizing: border-box;
 }
 .score-sheet-sheet svg {
@@ -71,4 +72,16 @@
 .score-sheet-sheet .jp-elem.playing {
   fill: #2563eb;            /* 蓝色高亮(与瀑布流右手色系呼应,可后续统一) */
   color: #2563eb;
+}
+
+/* ── 播放头(竖条盖当前音符,参考编辑器 pb-playhead)───────── */
+.ss-playhead {
+  position: absolute;
+  background: rgba(37, 99, 235, 0.18);
+  border-left: 2px solid #2563eb;
+  border-right: 2px solid #2563eb;
+  pointer-events: none;
+  z-index: 3;
+  box-sizing: border-box;
+  transition: left 0.15s ease-out, top 0.3s ease-out, height 0.3s ease-out;
 }

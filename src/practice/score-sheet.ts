@@ -22,7 +22,7 @@ import { Note, Piece } from '../core/types';
 import { resolvePitch } from '../core/theory';
 import { durationBeats } from '../core/types';
 import { beatsPerBar } from '../core/types';
-import { computeLayout, Layout } from '../render/layout';
+import { computeLayout, Layout, NOTE_INK_HALF } from '../render/layout';
 import { G } from '../render/glyphs';
 import { renderStaffSVG, RenderInput } from '../render/staff';
 import { renderJianpuSVG } from '../render/jianpu';
@@ -100,6 +100,9 @@ const SHORT_DUR_MAX_BEATS = durationBeats({ midi: 0, duration: 'sixteenth', dott
 export interface SystemPlan {
   startMeasure: number;
   count: number;
+  /** 该行各小节的理想宽度(px),按密度比例分配实际宽度时用。
+   *  planSystems 切行时一并算好,避免 renderScore 再调 systemIdealWidths 重算一遍。 */
+  idealWidths?: number[];
 }
 
 /** 估算单小节的"理想宽度"(px)。音密的小节理想宽度更大。
@@ -112,27 +115,30 @@ function idealBarWidth(treble: Note[], bass: Note[], preset: DensityPreset): num
 }
 
 /** 把整曲按密度切行:逐小节累加理想宽度,超过行宽上限就换行。
- *  返回每行的 SystemPlan(startMeasure + count)。 */
+ *  返回每行的 SystemPlan(含 idealWidths,供 applyDensityBars 按比例分配,避免重算)。 */
 export function planSystems(score: Score, lineWidth: number, preset: DensityPreset = DENSITY_PRESETS.compact): SystemPlan[] {
   const total = score.meta.totalMeasures;
-  if (total <= 0) return [{ startMeasure: 0, count: 1 }];
+  if (total <= 0) return [{ startMeasure: 0, count: 1, idealWidths: [preset.minBarW] }];
   const measures = score.measures;
   const systems: SystemPlan[] = [];
   let lineStart = 0;
   let accW = 0;
+  let lineWs: number[] = [];   // 当前行各小节理想宽度(切行时缓存,避免重算)
   for (let i = 0; i < total; i++) {
     const m = measures[i] || { treble: [], bass: [] };
     const w = idealBarWidth(m.treble, m.bass, preset);
     if (accW + w > lineWidth && i > lineStart) {
       // 当前行 [lineStart, i) 已满,i 成为下一行首小节
-      systems.push({ startMeasure: lineStart, count: i - lineStart });
+      systems.push({ startMeasure: lineStart, count: i - lineStart, idealWidths: lineWs });
       lineStart = i;
       accW = 0;
+      lineWs = [];
     }
     accW += w;
+    lineWs.push(w);
   }
   // 收尾:最后一行
-  systems.push({ startMeasure: lineStart, count: total - lineStart });
+  systems.push({ startMeasure: lineStart, count: total - lineStart, idealWidths: lineWs });
   return systems;
 }
 
@@ -224,10 +230,8 @@ function applyDensityBars(piece: Piece, layout: Layout, trebleIdeal: number[], s
   // barLines[k] = contentLeft + 前k个小节宽度之和
   const barLines: number[] = [contentLeft];
   for (let k = 0; k < measures; k++) barLines.push(barLines[k] + barWidths[k]);
-  // 重算 noteX:用原 positionInBar 同款"拍位起点+符头半宽"公式。
-  // noteHeadHalf 来自 layout(= NOTE_HEAD_HALF)。clamp beatInBar 防越界(复刻 positionInBar 兜底)。
-  const noteHeadHalf = layout.noteHeadHalf;
-  const noteInkHalf = noteHeadHalf + 1.5;  // 与 layout.NOTE_INK_HALF 近似(符头墨迹半宽+冗余)
+  // 重算 noteX:用原 positionInBar 同款"拍位起点+符头半宽"公式(复用 layout 的常量,不重算魔数)。
+  const noteHeadHalf = layout.noteHeadHalf;   // = NOTE_HEAD_HALF(符头中心偏移)
   const starts = noteStartBeats(piece);
   const noteX: number[] = [];
   for (let i = 0; i < piece.notes.length; i++) {
@@ -236,7 +240,7 @@ function applyDensityBars(piece: Piece, layout: Layout, trebleIdeal: number[], s
     const dur = durationBeats(piece.notes[i]);
     const rawBeatInBar = startBeat - barIdx * bpb;
     const beatInBar = Math.min(Math.max(0, rawBeatInBar), Math.max(0, bpb - dur));
-    const roomToBarEnd = barWidths[barIdx] * (1 - beatInBar / bpb) - noteInkHalf;
+    const roomToBarEnd = barWidths[barIdx] * (1 - beatInBar / bpb) - NOTE_INK_HALF;
     const offset = Math.min(noteHeadHalf, roomToBarEnd);
     noteX.push(barLines[barIdx] + beatInBar / bpb * barWidths[barIdx] + offset);
   }
@@ -512,22 +516,12 @@ interface SystemGeom {
   beatEnd: number;
 }
 
-/** 计算每行各小节的理想宽度(供 applyDensityBars 按比例分配)。 */
-function systemIdealWidths(score: Score, sys: SystemPlan, preset: DensityPreset): number[] {
-  const out: number[] = [];
-  for (let i = sys.startMeasure; i < sys.startMeasure + sys.count; i++) {
-    const m = score.measures[i] || { treble: [], bass: [] };
-    out.push(idealBarWidth(m.treble, m.bass, preset));
-  }
-  return out;
-}
-
 /** 渲染整个乐谱为多行 SVG(三档 mode + 密度 preset)。各 system 用 translate 垂直堆叠。 */
 export function renderScore(score: Score, width: number, mode: ScoreMode, preset: DensityPreset = DENSITY_PRESETS.compact): ScoreRender {
   const systems = planSystems(score, width, preset);
   const SYSTEM_GAP = 40;
   const rendered = systems.map((sys, i) => {
-    const ideal = systemIdealWidths(score, sys, preset);
+    const ideal = sys.idealWidths ?? [preset.minBarW];   // planSystems 已算好,直接用
     return renderSystem(score, sys, i, systems.length, width, ideal, mode);
   });
   const totalWidth = Math.max(width, ...rendered.map(r => r.width));
@@ -582,6 +576,12 @@ export function buildScoreSheet(
   sheetEl.className = 'score-sheet-sheet';
   scrollEl.appendChild(sheetEl);
   el.appendChild(scrollEl);
+
+  // 播放头层:覆盖 sheetEl,定位一个竖条盖在当前音符上(参考编辑器预览模式 pb-playhead)。
+  const playheadEl = document.createElement('div');
+  playheadEl.className = 'ss-playhead';
+  playheadEl.style.display = 'none';
+  sheetEl.appendChild(playheadEl);
 
   // 最近一次渲染几何(供 onTick 用)。
   let renderCache: ScoreRender | null = null;
@@ -715,6 +715,52 @@ export function buildScoreSheet(
     });
   };
 
+  /** 播放头定位:竖条盖在当前音符上,纵向覆盖当前 system 高度。
+   *  参考 app.ts updatePreviewPlayhead:横向跟随时值更短的组音(短音是节奏主驱动),
+   *  两组都无音时线性铺到内容区。用百分比定位(SVG width:100% + meet 缩放)。 */
+  const updatePlayhead = (sysIdx: number, beatInLine: number) => {
+    if (!renderCache) return;
+    const sys = renderCache.systems[sysIdx];
+    if (!sys) { playheadEl.style.display = 'none'; return; }
+    const svgEl = sheetEl.querySelector('svg');
+    if (!svgEl) return;
+    // 当前音符 idx(行内):复用 onTick 的 noteIndexAtBeat 逻辑
+    const tStarts = noteStartBeats(sys.treblePiece);
+    const bStarts = noteStartBeats(sys.bassPiece);
+    const tIdx = noteIndexAtBeat(beatInLine, tStarts, sys.treblePiece.notes);
+    const bIdx = noteIndexAtBeat(beatInLine, bStarts, sys.bassPiece.notes);
+    const lay = sys.trebleLayout;   // 两组 barLines 同 x,noteX 各自;宽度基准用 treble layout
+    // 宽度:盖住符头(2×noteHeadHalf),用 SVG 内坐标占 width 的百分比
+    const wSvg = lay.noteHeadHalf * 2;
+    let x0: number;
+    if (tIdx >= 0 && bIdx >= 0) {
+      // 两组都在响:跟随时值更短的(短音节奏主驱动,参考 app.ts)
+      const tDur = durationBeats(sys.treblePiece.notes[tIdx]);
+      const bDur = durationBeats(sys.bassPiece.notes[bIdx]);
+      x0 = bDur < tDur ? sys.bassLayout.noteX[bIdx] : lay.noteX[tIdx];
+    } else if (tIdx >= 0) {
+      x0 = lay.noteX[tIdx];
+    } else if (bIdx >= 0) {
+      x0 = sys.bassLayout.noteX[bIdx];
+    } else {
+      // 无音:线性铺到内容区
+      const total = sys.beatEnd - sys.beatStart;
+      const ratio = total > 0 ? Math.max(0, Math.min(1, beatInLine / total)) : 0;
+      x0 = lay.contentLeft + ratio * lay.contentWidth;
+    }
+    // 百分比定位(SVG width:100% 占 sheetEl,scale 一致)
+    const leftPct = (x0 - wSvg / 2) / lay.width * 100;
+    const widthPct = wSvg / lay.width * 100;
+    // 纵向:当前 system 的 yTop..yTop+height,占 SVG 高度的百分比
+    const topPct = sys.yTop / renderCache.height * 100;
+    const heightPct = sys.height / renderCache.height * 100;
+    playheadEl.style.display = '';
+    playheadEl.style.left = leftPct.toFixed(2) + '%';
+    playheadEl.style.width = widthPct.toFixed(2) + '%';
+    playheadEl.style.top = topPct.toFixed(2) + '%';
+    playheadEl.style.height = heightPct.toFixed(2) + '%';
+  };
+
   /** 通知 onLineLayout:当前行底部 y(相对 el,屏幕坐标)。
    *  瀑布流组件据此算方块区上边界(文档 §7 onLineLayout)。 */
   const notifyLineLayout = (sysIdx: number) => {
@@ -745,8 +791,9 @@ export function buildScoreSheet(
         notifyLineLayout(sysIdx);
         lastSysIdx = sysIdx;
       }
-      // 符头高亮:行内 beat = 整曲 beat - 该行 beatStart。
       const beatInLine = beat - sys.beatStart;
+      // 播放头:每帧更新(跟当前音符跳动)
+      updatePlayhead(sysIdx, beatInLine);
       const tStarts = noteStartBeats(sys.treblePiece);
       const bStarts = noteStartBeats(sys.bassPiece);
       const tIdx = noteIndexAtBeat(beatInLine, tStarts, sys.treblePiece.notes);

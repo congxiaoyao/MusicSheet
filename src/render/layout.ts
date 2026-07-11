@@ -72,7 +72,8 @@ const NOTE_PAD = 0.5 * SS;
 const NOTE_HEAD_HALF = advanceSS('noteheadBlack') / 2 * SS + NOTE_PAD;
 // 符头墨迹半宽(最外缘到中心的距离)。与 staff.ts 的 INK_HALF_W_RATIO(0.497) 一致,加少量冗余
 // 防字体渲染差异。用于 positionInBar 自适应偏移:保证符头右缘(noteX + NOTE_INK_HALF)不超小节线。
-const NOTE_INK_HALF = advanceSS('noteheadBlack') * 0.497 * SS + 1.5;
+// 导出供 score-sheet.ts 的 applyDensityBars 复用(避免魔数重算)。
+export const NOTE_INK_HALF = advanceSS('noteheadBlack') * 0.497 * SS + 1.5;
 // 终止线(最后小节右线)墨迹左缘相对其数学坐标 barLines[N] 的左偏移。
 // 终止线 = 粗线(在 barLines[N]) + 左侧 0.75ss 处细线;墨迹最左缘 = 左侧细线左缘
 // = barLines[N] - 0.75ss - 细线半宽(0.16ss/2)。用于 positionInBar 避免符头压终止线。
