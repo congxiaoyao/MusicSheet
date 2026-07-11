@@ -142,12 +142,12 @@
   border: 1px solid var(--line, #e6e8ec);
   border-radius: 10px;
   box-shadow: 0 4px 16px rgba(16, 24, 40, 0.14);
-  padding: 12px 14px;
+  padding: 10px 10px;
   width: 340px;
   display: flex;
   flex-direction: row;
   align-items: center;
-  gap: 14px;
+  gap: 10px;
   backdrop-filter: blur(8px);
   opacity: 0;
   pointer-events: none;

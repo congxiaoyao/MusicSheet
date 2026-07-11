@@ -199,6 +199,9 @@ export function buildKeyboard(initial: KeyboardInitial, cb: KeyboardCallbacks): 
   let keyElByMidi = new Map<number, HTMLElement>();
   // 当前重建签名(音域+标注),变化才重建。
   let keyboardSig = '';
+  // 键盘居中偏移(px):88键封顶后键盘比容器窄时,白键用 justify-content:center 居中,
+  // 黑键是绝对定位(left 相对容器左边缘),必须手动加这个偏移,否则黑白键错位。
+  let kbOffset = 0;
 
   // 当前高亮的活跃音(带左右手,原始 midi),供标注/指法切换后重算高亮。
   let activeRawMidisItems: ActiveNote[] = [];
@@ -224,11 +227,11 @@ export function buildKeyboard(initial: KeyboardInitial, cb: KeyboardCallbacks): 
       keysEl.appendChild(k);
       keyElByMidi.set(wmidi, k);
     }
-    // 黑键:绝对定位 px(在白键之上,z-index 3)。
+    // 黑键:绝对定位 px(在白键之上,z-index 3)。left 加 kbOffset 跟随白键居中。
     for (const bmidi of blks) {
       const b = h('div', 'kb-key-b');
       b.dataset.midi = String(bmidi);
-      b.style.left = midiToX(bmidi, range, whiteW) + 'px';
+      b.style.left = (midiToX(bmidi, range, whiteW) + kbOffset) + 'px';
       b.style.width = bw + 'px';
       appendLabel(b, bmidi);
       keysEl.appendChild(b);
@@ -273,14 +276,15 @@ export function buildKeyboard(initial: KeyboardInitial, cb: KeyboardCallbacks): 
     }
   }
 
-  /** 轻量更新所有键的 width/left(键宽变化但键数不变时用,不重建 DOM)。 */
+  /** 轻量更新所有键的 width/left(键宽变化但键数不变时用,不重建 DOM)。
+   *  黑键 left 加 kbOffset 跟随白键居中。 */
   function updateKeyWidths(): void {
     const bw = whiteW * 0.6;
     keyElByMidi.forEach((el, midi) => {
       if (el.classList.contains('kb-key-w')) {
         el.style.width = whiteW + 'px';
       } else {
-        el.style.left = midiToX(midi, range, whiteW) + 'px';
+        el.style.left = (midiToX(midi, range, whiteW) + kbOffset) + 'px';
         el.style.width = bw + 'px';
       }
     });
@@ -404,7 +408,10 @@ export function buildKeyboard(initial: KeyboardInitial, cb: KeyboardCallbacks): 
     whiteW = newWhiteW;
     // 键盘居中:88键封顶后若键盘比容器窄(52×宽 < 容器宽),水平居中;否则左对齐(超出裁)。
     const kbTotalW = whiteKeys(range).length * whiteW;
-    keysEl.style.justifyContent = kbTotalW < containerW ? 'center' : 'flex-start';
+    const centered = kbTotalW < containerW;
+    keysEl.style.justifyContent = centered ? 'center' : 'flex-start';
+    // 黑键是绝对定位,justify-content 不影响它,必须手动加居中偏移。
+    kbOffset = centered ? Math.round((containerW - kbTotalW) / 2) : 0;
     maybeRebuild();
     updateSliderUI();
     callbacks.onKeyLayoutChange?.({ range, whiteW });
