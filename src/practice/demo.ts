@@ -145,6 +145,9 @@ void ensureFontLoaded().then(() => {
   bar.appendChild(densGroup);
 
   // 播放控制:单一定时器,不使用 mkBtn(避免其 active 切换副作用)。
+  // 节奏用真实 BPM:小星星/欢乐颂 ♩=100,土耳其 ♩=120(16分音符能看清逐个移动)。
+  // 步进用 16 分粒度(beat += 0.25),让土耳其的 16 分音符播放头逐个跳到每个符头。
+  const BPM_BY_SONG: Record<string, number> = { twinkle: 100, ode: 100, turkish: 120 };
   const playGroup = mkGroup('播放');
   let playing = false;
   let beat = 0;
@@ -155,16 +158,17 @@ void ensureFontLoaded().then(() => {
   const togglePlay = () => {
     playing = !playing;
     playBtn.textContent = playing ? '⏸ 暂停' : '▶ 播放';
+    if (timer) { clearInterval(timer); timer = null; }
     if (playing) {
+      const bpm = BPM_BY_SONG[currentSong] ?? 100;
+      // 16 分音符时长(ms)= 60000 / bpm / 4
+      const stepMs = 60000 / bpm / 4;
       timer = setInterval(() => {
-        beat += 0.5;
+        beat += 0.25;
         const total = songs[currentSong].meta.totalMeasures * beatsPerBar(songs[currentSong].meta.time);
         if (beat > total) beat = 0;
         sheet.onTick(beat);
-      }, 500);
-    } else if (timer) {
-      clearInterval(timer);
-      timer = null;
+      }, stepMs);
     }
   };
   playBtn.onclick = togglePlay;

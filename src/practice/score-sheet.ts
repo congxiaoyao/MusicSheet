@@ -707,9 +707,12 @@ export function buildScoreSheet(
    *  虚高 ~84px 且加线留白区随音符变化,用它对齐会导致各行视觉位置漂移。staffTopY 是纯几何,
    *  每行唯一的"音乐顶"参照,首行/末行/中间行锚定完全一致。
    *
+   *  CURRENT_TOP_PAD 取 ~90px:谱号 + 连梁/符干在五线顶线之上约 78-85px(实测),留此余量
+   *  确保连梁不被滚动视口顶裁切(用户反馈"连梁跑到视口外面")。
+   *
    *  换算:用 SVG 在 scrollEl 内容坐标内的真实位置 + scale 把 staffTopY(SVG 内 y) 转成 scrollTop。
    *  scale 用 svgRect 高度 / viewBox 高(height:auto 下 scaleX=scaleY)。 */
-  const CURRENT_TOP_PAD = 24;   // 当前行五线谱顶线距 scrollEl 视口顶的留白(谱号完整显示空间)
+  const CURRENT_TOP_PAD = 90;   // 当前行五线谱顶线距 scrollEl 视口顶的留白(谱号+连梁完整显示空间)
   const scrollToSystem = (sysIdx: number) => {
     if (!renderCache) return;
     const sys = renderCache.systems[sysIdx];
