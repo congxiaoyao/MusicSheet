@@ -171,6 +171,7 @@ function main() {
   const tmpPiece = rangeToPiece(score, 0, score.meta.totalMeasures, 'treble');
   let range: KeyRange = lsGet('range', null) ?? rangeFromWhites(whiteKeyRange(tmpPiece));
   let kbHeight: number = lsGet('kbHeight', 140);
+  let whiteW: number = lsGet('whiteW', 44);
 
   // 方块音符
   let fallNotes: FallNote[] = parseFallNotes(score);
@@ -178,12 +179,14 @@ function main() {
 
   // ── 键盘组件 ──
   const keyboard = buildKeyboard(
-    { range, height: kbHeight, labels: 'name', fingering: 'follow', key: score.meta.key },
+    { range, height: kbHeight, keyWidth: whiteW, labels: 'name', fingering: 'follow', key: score.meta.key },
     {
-      onRangeChange: (r) => {
-        range = r;
-        lsSet('range', r);
-        waterfall.setRange(r);
+      onKeyLayoutChange: (info) => {
+        range = info.range;
+        whiteW = info.whiteW;
+        lsSet('range', info.range);
+        lsSet('whiteW', info.whiteW);
+        waterfall.setKeyLayout(info);
       },
       onHeightChange: (newH) => {
         kbHeight = newH;
@@ -197,7 +200,7 @@ function main() {
   keysWrap.appendChild(keyboard.el);
 
   // ── 方块组件 ──
-  const waterfall = buildWaterfall({ notes: fallNotes, range }, {});
+  const waterfall = buildWaterfall({ notes: fallNotes, range, whiteW: keyboard.getKeyWidth() }, {});
   fallWrap.appendChild(waterfall.el);
 
   // ── bounds:方块区容器相对练琴页的坐标(测试页自给,不接 ScoreSheet) ──

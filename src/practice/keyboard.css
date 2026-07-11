@@ -24,15 +24,19 @@
   box-sizing: border-box;
 }
 
-/* 白键:flex 等分,flexBasis 由 JS 设 = whiteKeyWidth()% */
+/* 键区:承载白键(flex 排列,各键 width 由 JS 设 px)+ 黑键(绝对定位)。
+ * overflow hidden 裁掉超出容器的键(键数 ceil 补满,右侧超出裁掉)。 */
 .kb-keys {
   position: relative;
   height: 100%;
   display: flex;
+  overflow: hidden;
   background: var(--line-2, #eef0f3);
 }
+/* 白键:固定宽 px(width 由 JS 设),不再 flex 等分。
+ * flex:none 防止 flex 压缩键宽,保持精确 px。 */
 .kb-key-w {
-  flex: 1 1 0;
+  flex: none;
   position: relative;
   background: #fff;
   border: 1px solid var(--line, #e6e8ec);

@@ -38,6 +38,8 @@ export interface WaterfallInitial {
   notes: FallNote[];
   /** 音域(传给 midiToX 用)。 */
   range: KeyRange;
+  /** 白键宽 px(传给 midiToX/noteWidth 用,与键盘同套坐标系)。 */
+  whiteW: number;
 }
 
 export interface WaterfallCallbacks {
@@ -50,8 +52,8 @@ export interface WaterfallHandle {
   onTick(beat: number): void;
   /** 乐谱变更时重新解析音符。 */
   setNotes(notes: FallNote[]): void;
-  /** 音域变化时重新算横轴。 */
-  setRange(range: KeyRange): void;
+  /** 键宽/音域变化时重新算横轴(键盘拖滑块时 controller 调)。 */
+  setKeyLayout(info: { range: KeyRange; whiteW: number }): void;
   /** 单手隔离:'both' | 'R' | 'L'。 */
   setHandFilter(hand: 'both' | 'R' | 'L'): void;
   /** 设置掉落区域上边界(ScoreSheet 当前行底部)+ 下边界(键盘顶部)。
@@ -103,6 +105,7 @@ export function buildWaterfall(initial: WaterfallInitial, cb: WaterfallCallbacks
   void cb;   // 方块组件一般无回调
   let notes: FallNote[] = initial.notes;
   let range: KeyRange = initial.range;
+  let whiteW: number = initial.whiteW;
   let handFilter: 'both' | 'R' | 'L' = 'both';
   // 掉落区域(像素,相对 wf-fall 容器)。默认 0~容器高度。
   let topY = 0;
@@ -182,9 +185,9 @@ export function buildWaterfall(initial: WaterfallInitial, cb: WaterfallCallbacks
           opacity = Math.max(0, 1 - pastRatio);
         }
         bEl.style.opacity = String(opacity);
-        // 宽度 = 对应键宽(百分比),left = 键中心(百分比,居中)。
-        bEl.style.width = noteWidth(n.midi, range) + '%';
-        bEl.style.left = midiToX(n.midi, range) + '%';
+        // 宽度 = 对应键宽(px),left = 键中心(px,居中)。与键盘同套纯函数坐标系。
+        bEl.style.width = noteWidth(n.midi, range, whiteW) + 'px';
+        bEl.style.left = midiToX(n.midi, range, whiteW) + 'px';
         bEl.style.height = bh + 'px';
         bEl.style.top = yTop + 'px';
         // 命中:接近判定线加 active(方块自己判断,不依赖键盘,文档 §4.4)。
@@ -196,8 +199,9 @@ export function buildWaterfall(initial: WaterfallInitial, cb: WaterfallCallbacks
       notes = newNotes;
       buildBlocks();
     },
-    setRange(r: KeyRange) {
-      range = r;
+    setKeyLayout(info: { range: KeyRange; whiteW: number }) {
+      range = info.range;
+      whiteW = info.whiteW;
       // 横轴在下次 onTick 重算,无需重建 DOM。
     },
     setHandFilter(hand: 'both' | 'R' | 'L') {
