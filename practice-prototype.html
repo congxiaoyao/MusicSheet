@@ -268,56 +268,49 @@ html, body { height: 100%; overflow: hidden;
   pointer-events: auto;
 }
 
-/* ── 拖拽区域：隐形 hover 区覆盖 卡片+提示条+窄带 ──
-   不依赖键盘 hover，自身 hover 即显隐。
-   鼠标从窄带移到卡片全程在区域内，不断区。
-   键盘本身不在 hover 区，不会误触发。 */
+/* ── 键宽工具条：键盘的延伸，不是浮空异物 ──
+   视觉上：键盘顶部往上连一条同色窄条，内嵌滑块。
+   与键盘是一体的，圆角向下衔接键盘。 */
 .pr-resizer-wrap {
   position: absolute;
   left: 0; right: 0;
-  bottom: 100%;            /* 往上延伸到键盘上方 */
-  height: 68px;            /* 覆盖卡片 + 往下覆盖窄带（窄带在键盘顶 0-8px）*/
-  padding-bottom: 8px;     /* 底部 8px 对应窄带位置 */
+  bottom: 100%;            /* 紧贴键盘上方，无间隙 */
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: flex-end;
-  opacity: 0;
-  transition: opacity 0.15s;
+  align-items: stretch;
+  max-height: 0;           /* 默认收起 */
+  overflow: hidden;
+  transition: max-height 0.2s ease;
   z-index: 12;
   pointer-events: auto;
 }
-/* 只 hover 隐形区域（含卡片+提示条+窄带），不 hover 键盘 */
-.pr-resizer-wrap:hover { opacity: 1; }
+/* JS 控制：mouseenter 窄带时 .pr-resizer-wrap.open 展开 */
+.pr-resizer-wrap.open { max-height: 50px; }
 
-/* 键宽卡片 */
-.pr-resizer-card {
-  background: rgba(255,255,255,0.95);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  box-shadow: 0 2px 10px rgba(16,24,40,0.12);
-  padding: 8px 14px;
-  width: 220px;
+/* 工具条本体：和键盘同色系，底部圆角衔接键盘 */
+.pr-resizer-bar {
+  background: var(--line-2);   /* 和键盘背景同色 */
+  border-top: 1px solid var(--line);
+  padding: 8px 20px;
   display: flex;
-  flex-direction: column;
-  gap: 5px;
-  backdrop-filter: blur(6px);
+  align-items: center;
+  gap: 12px;
+  /* 底部直接接键盘，不画下边框 */
 }
-.pr-resizer-label-row {
-  display: flex; align-items: center; justify-content: space-between;
-  font-size: 11px; color: var(--muted);
+.pr-resizer-label {
+  font-size: 11px; color: var(--muted); white-space: nowrap; flex: none;
 }
-.pr-resizer-label-row b { color: var(--ink-2); font-weight: 600; font-variant-numeric: tabular-nums; }
+.pr-resizer-label b { color: var(--ink-2); font-weight: 600; font-variant-numeric: tabular-nums; }
 
-/* 轨道 + 滑块 */
+/* 键宽滑块轨道 */
 .pr-resizer-track {
   position: relative;
-  height: 6px;
+  height: 5px;
   background: var(--line);
   border-radius: 3px;
   cursor: ew-resize;
+  flex: 0 1 200px;
 }
-.pr-resizer-track:hover { background: #d1d5db; }
 .pr-resizer-fill {
   position: absolute; left: 0; top: 0; bottom: 0;
   background: var(--accent);
@@ -328,35 +321,48 @@ html, body { height: 100%; overflow: hidden;
   position: absolute;
   top: 50%; left: 50%;
   transform: translate(-50%, -50%);
-  width: 16px; height: 16px;
+  width: 14px; height: 14px;
   border-radius: 50%;
   background: var(--accent);
   border: 2px solid #fff;
   cursor: ew-resize;
-  box-shadow: 0 1px 4px rgba(79,70,229,0.4);
+  box-shadow: 0 1px 3px rgba(79,70,229,0.4);
   z-index: 2;
   transition: transform 0.1s;
 }
 .pr-resizer-thumb:hover { transform: translate(-50%, -50%) scale(1.2); }
 
-/* 淡紫提示条：卡片下方、键盘外（紧贴键盘顶部）*/
-.pr-resizer-hint {
-  width: 40%;
-  height: 3px;
-  border-radius: 2px;
-  background: var(--accent);
-  opacity: 0.5;
-  margin-top: 4px;
-}
-
-/* 窄带：wrap 最底部，上下拖改高度（独立 cursor，不影响卡片里的滑块）*/
-.pr-resizer-zone {
-  position: relative;       /* 在 wrap 流内，不再 absolute */
-  width: 100%;
-  height: 8px;
+/* 高度调整把手：工具条右侧，上下拖 */
+.pr-resizer-height {
+  margin-left: auto;
+  font-size: 11px; color: var(--muted);
   cursor: ns-resize;
-  margin-top: 2px;
+  display: flex; align-items: center; gap: 4px; flex: none;
+  padding: 2px 6px; border-radius: 4px;
 }
+.pr-resizer-height:hover { background: rgba(0,0,0,0.05); color: var(--ink-2); }
+.pr-resizer-height .arr { font-size: 10px; }
+
+/* 窄带：键盘顶部，mouseenter 触发工具条展开。自身视觉极淡 */
+.pr-resizer-zone {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 6px;
+  cursor: ns-resize;
+  z-index: 11;
+}
+.pr-resizer-zone::after {
+  content: '';
+  position: absolute;
+  left: 45%; right: 45%;
+  top: 2px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--muted);
+  opacity: 0.25;
+  transition: opacity 0.15s;
+}
+.pr-resizer-zone:hover::after { opacity: 0.6; }
 .key-w {
   flex: 1 1 0; position: relative;
   background: #fff;
@@ -466,21 +472,18 @@ html, body { height: 100%; overflow: hidden;
         <div class="pr-hit" id="hit"></div>
       </div>
       <div class="pr-keys" id="keys">
-        <!-- 拖拽区：hover 键盘顶部时浮现，含卡片+提示条+窄带 -->
+        <!-- 窄带：hover 触发工具条展开（JS 控制） -->
+        <div class="pr-resizer-zone" id="resizeZone"></div>
+        <!-- 键宽工具条：键盘的延伸，展开时显示 -->
         <div class="pr-resizer-wrap" id="resizerWrap">
-          <div class="pr-resizer-card">
-            <div class="pr-resizer-label-row">
-              <span>键宽</span>
-              <b>56px</b>
-            </div>
+          <div class="pr-resizer-bar">
+            <span class="pr-resizer-label">键宽 <b>56px</b></span>
             <div class="pr-resizer-track">
               <div class="pr-resizer-fill"></div>
               <div class="pr-resizer-thumb"></div>
             </div>
+            <span class="pr-resizer-height"><span class="arr">↕</span>高度</span>
           </div>
-          <div class="pr-resizer-hint"></div>
-          <!-- 窄带：上下拖改高度（在 wrap 最底部，贴键盘顶部） -->
-          <div class="pr-resizer-zone" id="resizeZone"></div>
         </div>
       </div>
     </div>
@@ -707,6 +710,26 @@ setTimeout(() => {
   layoutFallArea();
   layoutMask();
 }, 200);
+
+/* 键宽工具条 hover 逻辑（JS 控制，解决 CSS :hover 断区问题）：
+   - mouseenter 窄带 → 展开工具条
+   - 鼠标在 窄带+工具条 联合区域内 → 保持展开
+   - mouseleave 联合区域 → 收起
+   只有窄带是触发区，但展开后移到工具条上不断区。 */
+(function setupResizer(){
+  const zone = document.getElementById('resizeZone');
+  const wrap = document.getElementById('resizerWrap');
+  if (!zone || !wrap) return;
+  let hideTimer = null;
+  const show = () => { clearTimeout(hideTimer); wrap.classList.add('open'); };
+  const hideLater = () => { hideTimer = setTimeout(() => wrap.classList.remove('open'), 120); };
+  // 窄带：mouseenter 触发展开
+  zone.addEventListener('mouseenter', show);
+  zone.addEventListener('mouseleave', hideLater);
+  // 工具条：hover 时取消隐藏（鼠标从窄带移到工具条）
+  wrap.addEventListener('mouseenter', show);
+  wrap.addEventListener('mouseleave', hideLater);
+})();
 // 窗口变化时重算
 window.addEventListener('resize', () => {
   layoutFallArea();
