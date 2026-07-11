@@ -1,0 +1,553 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>练琴页 · 原型 v3</title>
+<style>
+/* ═══ 沿用项目设计令牌（src/style.css）═══ */
+@font-face {
+  font-family: "Bravura";
+  font-style: normal; font-weight: 400;
+  src: url("public/bravura.woff2") format("woff2");
+}
+:root {
+  --bg: #f6f7f9;
+  --card: #ffffff;
+  --ink: #16181d;
+  --ink-2: #3a3f4a;
+  --muted: #8b919c;
+  --line: #e6e8ec;
+  --line-2: #eef0f3;
+  --accent: #4f46e5;
+  --accent-2: #6366f1;
+  --accent-soft: #eef2ff;
+  --accent-ring: rgba(79, 70, 229, 0.16);
+  --staff: #1f2430;
+  --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.04);
+  --shadow-md: 0 1px 3px rgba(16, 24, 40, 0.05), 0 6px 20px rgba(16, 24, 40, 0.06);
+  --radius: 12px;
+  --radius-sm: 8px;
+  --ease-out-cubic: cubic-bezier(0.33, 1, 0.68, 1);
+  --hand-R: #2563eb;
+  --hand-L: #ea580c;
+  --hand-R-soft: rgba(37,99,235,0.14);
+  --hand-L-soft: rgba(234,88,12,0.14);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; overflow: hidden;
+  background: var(--bg); color: var(--ink);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ═══ 全屏练琴页 ═══ */
+.practice {
+  position: relative;
+  width: 100vw; height: 100vh;
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+
+/* ── 顶部 appbar（含所有控制，两行）── */
+.pr-bar {
+  flex: none;
+  background: var(--card);
+  border-bottom: 1px solid var(--line);
+  box-shadow: var(--shadow-sm);
+  z-index: 40;
+  padding: 7px 18px;
+}
+.pr-bar-row1 {
+  display: flex; align-items: center; gap: 12px;
+}
+.pr-bar-row2 {
+  display: flex; align-items: center; gap: 10px;
+  margin-top: 6px;
+}
+.pr-back { font-size: 13px; color: var(--muted); cursor: pointer; user-select: none; white-space: nowrap; }
+.pr-back:hover { color: var(--ink); }
+.pr-title { font-size: 15px; font-weight: 650; letter-spacing: -0.01em; }
+.pr-badge {
+  font-size: 12px; color: var(--muted);
+  background: var(--bg); border: 1px solid var(--line);
+  border-radius: var(--radius-sm); padding: 3px 9px; white-space: nowrap;
+}
+.pr-badge b { color: var(--ink-2); font-weight: 600; }
+.pr-spacer { flex: 1; }
+.pr-range { font-size: 11px; color: var(--muted); white-space: nowrap; }
+.pr-range b { color: var(--ink-2); }
+.pr-gear { color: var(--muted); cursor: pointer; font-size: 15px; width: 28px; height: 28px;
+  display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; }
+.pr-gear:hover { background: var(--bg); color: var(--ink); }
+
+/* 第二行控制 */
+.pr-tbtn {
+  width: 32px; height: 32px; border-radius: 50%;
+  border: none; background: transparent; cursor: pointer;
+  color: var(--ink-2); font-size: 13px;
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: background 0.14s, transform 0.08s;
+}
+.pr-tbtn:hover { background: rgba(0,0,0,0.06); }
+.pr-tbtn:active { transform: scale(0.92); }
+.pr-tbtn.main {
+  width: 38px; height: 38px; background: var(--ink); color: #fff; font-size: 15px;
+  box-shadow: 0 1px 3px rgba(42,47,58,0.3), 0 3px 10px rgba(42,47,58,0.18);
+}
+.pr-tbtn.main:hover { background: #1f242e; }
+.pr-prog { flex: 1; height: 6px; background: var(--line); border-radius: 3px; position: relative; cursor: pointer; min-width: 100px; }
+.pr-prog .fill { position: absolute; left:0; top:0; bottom:0; background: var(--accent); border-radius: 3px; }
+.pr-prog .ab { position: absolute; top:-5px; bottom:-5px; width:3px; background: var(--accent); border-radius: 2px; cursor: ew-resize; }
+.pr-prog .ab::after { content: attr(data-l); position: absolute; top:-15px; left:50%; transform:translateX(-50%); font-size:9px; color: var(--accent); font-weight: 700; }
+.pr-bpm { font-size: 11px; color: var(--muted); white-space: nowrap; display: inline-flex; align-items: center; gap: 5px; }
+.pr-bpm b { color: var(--ink); font-variant-numeric: tabular-nums; }
+.pr-bpm input[type=range] { accent-color: var(--accent); cursor: pointer; width: 70px; }
+.pr-seg {
+  display: inline-flex; background: var(--bg);
+  border-radius: var(--radius-sm); padding: 2px; gap: 1px;
+}
+.pr-seg span {
+  font-size: 11px; padding: 4px 9px; cursor: pointer;
+  color: var(--muted); border-radius: 5px; font-weight: 500; white-space: nowrap;
+}
+.pr-seg span.on { background: var(--card); color: var(--accent); font-weight: 600; box-shadow: var(--shadow-sm); }
+.pr-toggle { font-size: 11px; padding: 4px 9px; border: 1px solid var(--line); background: #fff; color: var(--muted); border-radius: 6px; cursor: pointer; white-space: nowrap; }
+.pr-toggle.on { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+
+/* ═══ 主舞台 ═══
+   谱子直接铺满，无卡片容器。
+   底部 1/3 渐变透明 + 瀑布流 + 键盘。 */
+.pr-stage {
+  position: relative;
+  flex: 1;
+  background: #fcfcfd;
+  overflow: hidden;
+}
+/* 谱面：铺满舞台，纵向可滚动（提词器式行滚动） */
+.pr-score {
+  position: absolute; inset: 0;
+  overflow-y: auto; overflow-x: hidden;
+  scroll-behavior: smooth;
+  scrollbar-width: none;
+}
+.pr-score::-webkit-scrollbar { display: none; }
+.pr-score-inner {
+  /* SVG 自然撑开高度；padding 控制首行不从最顶开始 */
+  padding: 0 28px;
+}
+.pr-score-inner svg { display: block; width: 100%; user-select: none; }
+
+/* 当前 system 高亮（整行淡紫底，提示"正在弹这行"） */
+.sys-hi { fill: rgba(79,70,229,0.07); }
+/* 小节播放高亮框 */
+.m-hi { fill: rgba(79,70,229,0.18); }
+
+/* ── 底部叠加层：渐变 + 瀑布流 + 键盘 ──
+   谱子铺到底部 1/3 处开始渐变透明，瀑布流块从这里开始往下掉，衔接谱子。 */
+.pr-overlay {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 33vh;
+  min-height: 210px;
+  display: flex; flex-direction: column;
+  pointer-events: none;
+  z-index: 20;
+  /* 渐变：上半透明（谱子透出）→ 下半白（键盘实体）。
+     顶部一段完全透明，让谱子清晰可见，到中段开始淡入白色。 */
+  background: linear-gradient(
+    to bottom,
+    rgba(252,252,253,0) 0%,
+    rgba(252,252,253,0) 30%,
+    rgba(252,252,253,0.4) 50%,
+    rgba(252,252,253,0.85) 68%,
+    var(--card) 82%
+  );
+}
+
+/* 瀑布流区 */
+.pr-fall {
+  position: relative;
+  flex: 1;
+  pointer-events: none;
+}
+.pr-hit {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  height: 2px; background: var(--accent);
+  box-shadow: 0 0 8px 1px var(--accent-ring);
+  z-index: 4;
+  transition: box-shadow 0.08s, height 0.08s;
+}
+.pr-hit.pulse {
+  box-shadow: 0 0 16px 3px rgba(79,70,229,0.5);
+  height: 3px;
+}
+/* 音符块 */
+.note {
+  position: absolute;
+  border-radius: 5px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 10px; font-weight: 700; color: #fff;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+  pointer-events: none;
+  transition: opacity 0.18s, transform 0.06s;
+}
+.note.R { background: linear-gradient(180deg, #3b82f6, var(--hand-R)); }
+.note.L { background: linear-gradient(180deg, #f97316, var(--hand-L)); }
+.note.active { box-shadow: 0 0 0 2px rgba(255,255,255,0.7), 0 0 12px 3px rgba(0,0,0,0.2); transform: scale(1.04); }
+
+/* 键盘区 */
+.pr-keys {
+  flex: none;
+  position: relative;
+  height: 116px;
+  display: flex;
+  background: var(--line-2);
+  border-top: 1px solid var(--line);
+  pointer-events: auto;
+}
+.key-w {
+  flex: 1 1 0; position: relative;
+  background: #fff;
+  border: 1px solid var(--line); border-top: none;
+  box-sizing: border-box;
+  border-radius: 0 0 4px 4px;
+  display: flex; align-items: flex-end; justify-content: center;
+  padding-bottom: 6px;
+  box-shadow: inset 0 -3px 0 rgba(16,24,40,0.05);
+  z-index: 1;
+}
+.key-w .kname { font-size: 9px; color: var(--muted); font-weight: 600; }
+.key-b {
+  position: absolute; top: 0;
+  height: 62%;
+  background: #1f2430;
+  border-radius: 0 0 3px 3px;
+  box-shadow: inset 0 -3px 0 rgba(0,0,0,0.4), 0 1px 2px rgba(0,0,0,0.2);
+  z-index: 3;
+  transform: translateX(-50%);
+}
+.key-w.glow-R { background: linear-gradient(180deg, #93c5fd, var(--hand-R-soft)); }
+.key-w.glow-L { background: linear-gradient(180deg, #fdba74, var(--hand-L-soft)); }
+.key-w.glow-R, .key-w.glow-L { box-shadow: inset 0 -3px 0 rgba(0,0,0,0.08), 0 0 0 2px var(--accent-ring); }
+.key-b.glow-R { background: linear-gradient(180deg, #1d4ed8, var(--hand-R)); }
+.key-b.glow-L { background: linear-gradient(180deg, #c2410c, var(--hand-L)); }
+.key-b.glow-R, .key-b.glow-L { box-shadow: 0 0 0 2px var(--accent-ring); }
+
+/* 图例 */
+.pr-legend {
+  position: absolute; left: 10px; top: 8px;
+  display: flex; gap: 10px; font-size: 10px; color: var(--muted);
+  background: rgba(255,255,255,0.7); padding: 3px 8px; border-radius: 5px;
+  z-index: 5; pointer-events: none;
+  backdrop-filter: blur(4px);
+}
+.pr-legend i { width:8px; height:8px; border-radius:2px; display:inline-block; margin-right:3px; vertical-align:middle; }
+
+/* 当前行指示标记（可选：左缘竖条强调当前行） */
+.cur-line-marker { fill: var(--accent); }
+</style>
+</head>
+<body>
+<div class="practice">
+
+  <!-- 顶部 appbar（所有控制整合于此） -->
+  <div class="pr-bar">
+    <div class="pr-bar-row1">
+      <span class="pr-back">← 返回</span>
+      <span class="pr-title">小星星</span>
+      <span class="pr-badge">♯ <b>0</b>　4/4</span>
+      <span class="pr-badge">♩ = <b id="bpmVal">100</b></span>
+      <span class="pr-spacer"></span>
+      <span class="pr-range">键盘 <b>C3–C5</b>（按谱面音域，可调）</span>
+      <span class="pr-gear">⚙</span>
+    </div>
+    <div class="pr-bar-row2">
+      <button class="pr-tbtn">⏮</button>
+      <button class="pr-tbtn main" id="playBtn">⏸</button>
+      <button class="pr-tbtn">⏹</button>
+      <div class="pr-prog" id="prog">
+        <div class="fill" id="progFill"></div>
+        <div class="ab" id="abA" data-l="A" style="left:5%"></div>
+        <div class="ab" id="abB" data-l="B" style="left:25%"></div>
+      </div>
+      <span class="pr-bpm">变速 <input type="range" id="speed" min="0.4" max="1.6" step="0.1" value="1"></span>
+      <button class="pr-toggle on" id="metroBtn">♪ 节拍器</button>
+      <div class="pr-seg" id="handSeg">
+        <span class="on">双手</span><span>右手</span><span>左手</span>
+      </div>
+      <button class="pr-toggle" id="abBtn">↻ AB</button>
+    </div>
+  </div>
+
+  <!-- 主舞台 -->
+  <div class="pr-stage">
+    <!-- 谱子（直接铺满，提词器式行滚动） -->
+    <div class="pr-score" id="score">
+      <div class="pr-score-inner" id="scoreInner"></div>
+    </div>
+
+    <!-- 底部叠加层 -->
+    <div class="pr-overlay" id="overlay">
+      <div class="pr-legend">
+        <span><i style="background:var(--hand-R)"></i>右手</span>
+        <span><i style="background:var(--hand-L)"></i>左手</span>
+      </div>
+      <div class="pr-fall" id="fall">
+        <div class="pr-hit" id="hit"></div>
+      </div>
+      <div class="pr-keys" id="keys"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ════════════════════════════════════════════════
+   数据：小星星基础乐句（4小节）重复 3 次 = 3 行谱面
+   这样能看到"行滚动"效果。
+   ════════════════════════════════════════════════ */
+const BARS_PER_SYS = 4;     // 每个 system（行）4 小节
+const BEATS_PER_BAR = 4;
+const BEATS_PER_SYS = BARS_PER_SYS * BEATS_PER_BAR;  // 16 拍/行
+const SYS_COUNT = 10;       // 10 行谱面（模拟真实曲子长度，行滚动效果充分）
+const TOTAL_BEATS = SYS_COUNT * BEATS_PER_SYS;       // 48 拍
+
+// 小星星右手 4 小节（相对拍位）
+const rightHand = [
+  [0,60,1],[1,60,1],[2,67,1],[3,67,1],
+  [4,69,1],[5,69,1],[6,67,2],
+  [8,65,1],[9,65,1],[10,64,1],[11,64,1],
+  [12,62,1],[13,62,1],[14,60,2],
+];
+// 左手每小节一个低音
+const leftHand = [
+  [0,48,4],[4,55,4],[8,53,4],[12,48,4],
+];
+
+const notes = [];
+for (let s = 0; s < SYS_COUNT; s++) {
+  const base = s * BEATS_PER_SYS;
+  rightHand.forEach(([b,m,d]) => notes.push({b: base+b, m, d, h:'R'}));
+  leftHand.forEach(([b,m,d]) => notes.push({b: base+b, m, d, h:'L'}));
+}
+
+/* ════════════════════════════════════════════════
+   1. 渲染多行谱面（无卡片，纯 SVG 铺开）
+   ════════════════════════════════════════════════ */
+const SYS_H = 110;      // 单行高度
+const SYS_GAP = 40;     // 行间距
+const PITCH_Y = m => -((m - 60) * 3.5);  // midi→五线谱y（C4=下加一线）
+
+function renderScore(){
+  const inner = document.getElementById('scoreInner');
+  const W = 1080;
+  const totalH = SYS_COUNT * SYS_H + (SYS_COUNT-1) * SYS_GAP + 40;
+  let svg = `<svg viewBox="0 0 ${W} ${totalH}" preserveAspectRatio="xMidYMid meet">`;
+
+  for (let s = 0; s < SYS_COUNT; s++){
+    const y0 = 20 + s * (SYS_H + SYS_GAP);
+    const staffTop = y0 + 20, lineGap = 7;
+    // 当前行高亮底
+    svg += `<rect class="sys-hi" data-sys="${s}" x="0" y="${y0-6}" width="${W}" height="${SYS_H+12}" opacity="0"/>`;
+    // 谱号
+    svg += `<text x="16" y="${staffTop+28}" font-family="Bravura" font-size="42" fill="#1f2430">𝄞</text>`;
+    // 五线
+    for (let i=0;i<5;i++){
+      const y = staffTop + i*lineGap;
+      svg += `<line x1="56" x2="${W-16}" y1="${y}" y2="${y}" stroke="#c9cdd4" stroke-width="1"/>`;
+    }
+    // 小节线
+    const left=56, right=W-16, barW=(right-left)/BARS_PER_SYS;
+    for (let i=0;i<=BARS_PER_SYS;i++){
+      const x = left + i*barW;
+      const isFinal = (s===SYS_COUNT-1 && i===BARS_PER_SYS);
+      svg += `<line x1="${x}" x2="${x}" y1="${staffTop}" y2="${staffTop+4*lineGap}" stroke="${isFinal?'#1f2430':'#c9cdd4'}" stroke-width="${isFinal?2:1}"/>`;
+    }
+    // 小节高亮框
+    for (let i=0;i<BARS_PER_SYS;i++){
+      const mIdx = s*BARS_PER_SYS+i;
+      svg += `<rect class="m-hi" data-m="${mIdx}" x="${left+i*barW}" y="${staffTop-4}" width="${barW}" height="${4*lineGap+8}" opacity="0"/>`;
+    }
+    // 音符
+    notes.forEach(n=>{
+      if (Math.floor(n.b/BEATS_PER_BAR) < s*BARS_PER_SYS || Math.floor(n.b/BEATS_PER_BAR) >= (s+1)*BARS_PER_SYS) return;
+      const mIdx = Math.floor(n.b/BEATS_PER_BAR);
+      const inBar = n.b % BEATS_PER_BAR;
+      const x = left + (mIdx%BARS_PER_SYS) * barW + (inBar+0.5)*(barW/BEATS_PER_BAR);
+      if (n.h==='R'){
+        const y = staffTop + 2*lineGap + PITCH_Y(n.m);
+        svg += `<g class="sn" data-midi="${n.m}" data-hand="R"><ellipse cx="${x}" cy="${y}" rx="4.5" ry="3.4" fill="#1f2430"/></g>`;
+      } else {
+        const by = staffTop + 6*lineGap + (60-n.m)*1.2;
+        svg += `<g class="sn" data-midi="${n.m}" data-hand="L"><ellipse cx="${x}" cy="${by}" rx="4" ry="3" fill="#ea580c" opacity="0.7"/></g>`;
+      }
+    });
+  }
+  svg += `</svg>`;
+  inner.innerHTML = svg;
+}
+renderScore();
+
+/* ════════════════════════════════════════════════
+   2. 键盘渲染 + 统一坐标函数
+   ════════════════════════════════════════════════ */
+const LOW = 48, HIGH = 72;
+const WOFF = [0,2,4,5,7,9,11];
+const isWhite = m => WOFF.includes(((m-LOW)%12+12)%12);
+const hasBlackAfter = m => { const r=((m-LOW)%12+12)%12; return r===0||r===2||r===5||r===7||r===9; };
+const whiteKeys = [];
+for (let m=LOW; m<=HIGH; m++){ if (isWhite(m)) whiteKeys.push(m); }
+const WC = whiteKeys.length;
+const WK_PCT = 100 / WC;
+const BLACK_RATIO = 0.6;
+const whiteIdx = m => whiteKeys.indexOf(m);
+function keyCenterX(m){
+  if (isWhite(m)) return (whiteIdx(m) + 0.5) * WK_PCT;
+  return (whiteIdx(m-1) + 1) * WK_PCT;
+}
+
+const keysEl = document.getElementById('keys');
+whiteKeys.forEach(m=>{
+  const k = document.createElement('div');
+  k.className = 'key-w'; k.dataset.midi = m;
+  const r = ((m-LOW)%12+12)%12;
+  if (r===0) k.innerHTML = `<span class="kname">C${Math.floor((m-LOW)/12)+3}</span>`;
+  k.style.flex = '1 1 0'; k.style.flexBasis = WK_PCT + '%';
+  keysEl.appendChild(k);
+});
+whiteKeys.forEach(m=>{
+  if (hasBlackAfter(m) && m<HIGH){
+    const b = document.createElement('div');
+    b.className = 'key-b'; b.dataset.midi = m+1;
+    b.style.left = keyCenterX(m+1) + '%';
+    b.style.width = `calc(${WK_PCT}% * ${BLACK_RATIO})`;
+    keysEl.appendChild(b);
+  }
+});
+const keyMap = {};
+document.querySelectorAll('.key-w,.key-b').forEach(el=>keyMap[el.dataset.midi]=el);
+const midiToX = keyCenterX;
+
+/* ════════════════════════════════════════════════
+   3. 瀑布流 + 播放循环
+   ════════════════════════════════════════════════ */
+const fall = document.getElementById('fall');
+const hit = document.getElementById('hit');
+const scoreEl = document.getElementById('score');
+
+function midiName(m){ const N=['C','C♯','D','D♯','E','F','F♯','G','G♯','A','A♯','B']; return N[m%12]+(Math.floor(m/12)-1); }
+
+const blocks = notes.map(n=>{
+  const el = document.createElement('div');
+  el.className = 'note ' + n.h;
+  el.textContent = midiName(n.m);
+  fall.appendChild(el);
+  return el;
+});
+
+let beat = 0, playing = true, lastTs = null;
+let speed = 1, handFilter = 'both', metroOn = true, lastBeatFloor = -1;
+const PX_PER_BEAT = 92;
+
+/* 行滚动：当前 system 滚到目标位置（叠加层正上方，舞台 0.62 处）。
+   策略：每帧根据当前 beat 算出"当前行该停在哪"，但只在行号变化时才实际 scrollTo，
+   避免每帧 smooth 抖动。用 SVG 元素实测坐标，不靠 scale 推算。 */
+let scrolledSys = -1;
+function computeTargetScroll(sys){
+  // 用 SVG 内坐标 + 渲染缩放比，算当前行中心在文档中的绝对 y
+  const sysCenterVB = 20 + sys * (SYS_H + SYS_GAP) + SYS_H/2;  // viewBox 内 y
+  const svg = document.querySelector('#scoreInner svg');
+  const vbH = parseFloat(svg.getAttribute('viewBox').split(' ')[3]);
+  const renderH = svg.getBoundingClientRect().height;
+  const scale = renderH / vbH;
+  const sysCenterDocY = sysCenterVB * scale;  // 文档绝对 y（ scrollTop=0 时即视口 y）
+  // 想让当前行停在舞台 0.28 处
+  const stageH = scoreEl.clientHeight;
+  return sysCenterDocY - stageH * 0.28;
+}
+function scrollSystemIntoView(sys, instant = false){
+  const target = Math.max(0, computeTargetScroll(sys));
+  scoreEl.scrollTo({ top: target, behavior: instant ? 'auto' : 'smooth' });
+  scrolledSys = sys;
+}
+// 初始定位
+setTimeout(() => scrollSystemIntoView(0, true), 200);
+
+function frame(ts){
+  if (lastTs==null) lastTs = ts;
+  const dt = (ts-lastTs)/1000; lastTs = ts;
+  if (playing){
+    beat += dt * speed * (100/60);
+    if (beat >= TOTAL_BEATS) { beat = 0; lastSys = -1; }
+  }
+  const fallH = fall.clientHeight;
+  const hitY = fallH;
+
+  blocks.forEach((el,i)=>{
+    const n = notes[i];
+    if (handFilter!=='both' && n.h!==handFilter){ el.style.opacity=0; return; }
+    const dist = n.b - beat;
+    const bh = Math.max(12, n.d*PX_PER_BEAT*0.65);
+    const yTop = hitY - bh - dist*PX_PER_BEAT;
+    const vis = dist > -0.5 && dist < 5;
+    el.style.opacity = vis ? (dist<0 ? 0.25 : Math.min(1, 1 - dist*0.13)) : 0;
+    el.style.width = '28px'; el.style.height = bh+'px';
+    el.style.left = `calc(${midiToX(n.m)}% - 14px)`;
+    el.style.top = yTop+'px';
+    const active = Math.abs(dist) < 0.15;
+    el.classList.toggle('active', active);
+    if (active) glowKey(n.m, n.h);
+  });
+
+  const bf = Math.floor(beat);
+  if (metroOn && bf!==lastBeatFloor){
+    lastBeatFloor = bf;
+    hit.classList.add('pulse');
+    setTimeout(()=>hit.classList.remove('pulse'), 100);
+  }
+
+  document.getElementById('progFill').style.width = (beat/TOTAL_BEATS*100)+'%';
+
+  const curM = Math.floor(beat/BEATS_PER_BAR);
+  const curSys = Math.floor(curM / BARS_PER_SYS);
+  document.querySelectorAll('.m-hi').forEach(r=> r.style.opacity = (parseInt(r.dataset.m)===curM ? '1':'0'));
+  document.querySelectorAll('.sys-hi').forEach(r=> r.style.opacity = (parseInt(r.dataset.sys)===curSys ? '1':'0'));
+
+  if (curSys !== scrolledSys) scrollSystemIntoView(curSys);
+
+  requestAnimationFrame(frame);
+}
+
+let lastGlow = [];
+function glowKey(midi, hand){
+  lastGlow.forEach(m=>{ if(keyMap[m]){ keyMap[m].classList.remove('glow-R','glow-L'); }});
+  lastGlow = [midi];
+  if (keyMap[midi]) keyMap[midi].classList.add('glow-'+hand);
+}
+
+/* 控件 */
+document.getElementById('playBtn').onclick = function(){
+  playing = !playing; lastTs=null;
+  this.textContent = playing ? '⏸' : '▶';
+  if(!playing) lastGlow.forEach(m=>{ if(keyMap[m]) keyMap[m].classList.remove('glow-R','glow-L');});
+};
+document.getElementById('speed').oninput = function(){
+  speed = parseFloat(this.value);
+  document.getElementById('bpmVal').textContent = Math.round(100*speed);
+};
+document.getElementById('metroBtn').onclick = function(){
+  metroOn = !metroOn; this.classList.toggle('on', metroOn);
+};
+document.querySelectorAll('#handSeg span').forEach(s=>{
+  s.onclick = ()=>{
+    document.querySelectorAll('#handSeg span').forEach(x=>x.classList.remove('on'));
+    s.classList.add('on');
+    handFilter = s.textContent==='右手'?'R':s.textContent==='左手'?'L':'both';
+  };
+});
+
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

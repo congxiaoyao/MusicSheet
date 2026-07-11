@@ -1,0 +1,13 @@
+import { launch } from 'puppeteer-core';
+const browser = await launch({ executablePath: '/usr/bin/google-chrome-stable', headless: 'new', args: ['--no-sandbox','--disable-gpu','--window-size=1440,900'] });
+const page = await browser.newPage();
+await page.setViewport({ width:1440, height:900 });
+const logs = [];
+page.on('console', m => logs.push(m.text()));
+await page.goto('file:///home/cong/AgentProjects/MusicSheet/practice-prototype.html', { waitUntil:'networkidle0' });
+await new Promise(r=>setTimeout(r, 12000));
+console.log('控制台日志（scroll 相关）：');
+logs.filter(l => l.includes('[scroll]')).forEach(l => console.log('  ' + l));
+const st = await page.evaluate(() => document.getElementById('score').scrollTop);
+console.log('最终 scrollTop =', st);
+await browser.close();
