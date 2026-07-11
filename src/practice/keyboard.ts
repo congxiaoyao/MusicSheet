@@ -232,8 +232,8 @@ export function buildKeyboard(initial: KeyboardInitial, cb: KeyboardCallbacks): 
       keysEl.appendChild(b);
       keyElByMidi.set(bmidi, b);
     }
-    // 签名:音域 + 键宽 + 标注(指法映射只影响高亮,不影响键结构)。
-    keyboardSig = sigFor(range, whiteW, labels);
+    // 签名:音域 + 标注(键宽变化走轻量 updateKeyWidths,不进签名)。
+    keyboardSig = sigFor(range, labels);
   }
 
   /** 给一个键追加标注子元素。 */
@@ -253,19 +253,35 @@ export function buildKeyboard(initial: KeyboardInitial, cb: KeyboardCallbacks): 
     if (sf) kEl.appendChild(h('div', 'kb-ksolfege', sf));
   }
 
-  /** 重建签名(音域 + 键宽 + 标注)。 */
-  function sigFor(r: KeyRange, w: number, lbl: KeyLabels): string {
-    return `${r.low}-${r.high}|${Math.round(w)}|${lbl}`;
+  /** 重建签名(音域 + 标注)。不含键宽 —— 键宽变化走轻量 updateKeyWidths,不重建 DOM。 */
+  function sigFor(r: KeyRange, lbl: KeyLabels): string {
+    return `${r.low}-${r.high}|${lbl}`;
   }
 
-  /** 音域/键宽/标注变化时重建(签名比对),否则跳过。 */
+  /** 音域/标注变化时重建(签名比对);键宽变化只轻量更新 width/left,不重建。 */
   function maybeRebuild(): void {
-    const sig = sigFor(range, whiteW, labels);
+    const sig = sigFor(range, labels);
     if (sig !== keyboardSig) {
       buildKeyboardDOM();
       // 重建后重应用高亮(keyElByMidi 换了新元素)。
       applyHighlight();
+    } else {
+      // 键数没变,只更新现有键的 width/left(轻量,拖动不卡)。
+      updateKeyWidths();
     }
+  }
+
+  /** 轻量更新所有键的 width/left(键宽变化但键数不变时用,不重建 DOM)。 */
+  function updateKeyWidths(): void {
+    const bw = whiteW * 0.6;
+    keyElByMidi.forEach((el, midi) => {
+      if (el.classList.contains('kb-key-w')) {
+        el.style.width = whiteW + 'px';
+      } else {
+        el.style.left = midiToX(midi, range, whiteW) + 'px';
+        el.style.width = bw + 'px';
+      }
+    });
   }
 
   /** 指法映射后切 .glow-R/.glow-L class(不重建,零闪烁)。
@@ -338,11 +354,11 @@ export function buildKeyboard(initial: KeyboardInitial, cb: KeyboardCallbacks): 
   };
   const onKeyWMove = (e: MouseEvent) => {
     if (!dragKeyW) return;
-    // 鼠标 x 相对轨道 → 白键宽 px。
+    // 鼠标 x 相对轨道 → 白键宽 px(保留一位小数,连续精细调节)。
     const tr = track.getBoundingClientRect();
     const ratio = Math.max(0, Math.min(1, (e.clientX - tr.left) / tr.width));
     // 轨道两端对应 KEY_W_MIN ~ KEY_W_MAX。
-    const newW = Math.round(KEY_W_MIN + ratio * (KEY_W_MAX - KEY_W_MIN));
+    const newW = Math.round((KEY_W_MIN + ratio * (KEY_W_MAX - KEY_W_MIN)) * 10) / 10;
     applyKeyWidth(newW);
   };
   const onKeyWUp = () => {
@@ -354,21 +370,30 @@ export function buildKeyboard(initial: KeyboardInitial, cb: KeyboardCallbacks): 
   thumb.addEventListener('mousedown', onKeyWDown);
 
   /** 应用键宽:白键宽 = newWhiteW(精确 px,不被铺满覆盖),键数 = ceil(容器宽/白键宽) 补满。
-   *  以中央 C 为中心向两侧扩展算音域。触发 onKeyLayoutChange。 */
+   *  以中央 C 为中心向两侧扩展算音域;若撞 88 键边界(A0=21/C8=108),向另一侧补键保证键数够填满容器。
+   *  触发 onKeyLayoutChange。 */
   function applyKeyWidth(newWhiteW: number): void {
     const containerW = keysEl.clientWidth;
     if (containerW <= 0) return;
     // ceil 补满:键数向上取整,键盘总宽 ≥ 容器宽,超出部分裁掉(键盘始终满屏)。
     const whiteCount = Math.max(1, Math.ceil(containerW / newWhiteW));
-    // 以中央 C 为中心,向两侧对称扩展(与 whiteKeyRange 同思路)。
+    // 以中央 C 为中心,向两侧对称扩展。
     const half = Math.floor((whiteCount - 1) / 2);
-    const newLow = whiteKeyOffset(CENTER_C, -half);
-    const newHigh = whiteKeyOffset(CENTER_C, whiteCount - 1 - half);
-    const newRange = { low: newLow, high: newHigh };
-    // clamp 88 键上限(A0=21 ~ C8=108)。
-    if (newRange.low < 21) newRange.low = 21;
-    if (newRange.high > 108) newRange.high = 108;
-    range = newRange;
+    let newLow = whiteKeyOffset(CENTER_C, -half);
+    let newHigh = whiteKeyOffset(CENTER_C, whiteCount - 1 - half);
+    // clamp 88 键边界,且撞边界后向另一侧补键(保证键数 = whiteCount,不留空白)。
+    if (newLow < 21) {
+      // 低音端撞 A0:把 low 钉到 21,high 向高音补足键数。
+      newLow = 21;
+      newHigh = whiteKeyOffset(newLow, whiteCount - 1);
+      if (newHigh > 108) newHigh = 108;   // 两端都到极限(88键全开)
+    } else if (newHigh > 108) {
+      // 高音端撞 C8:把 high 钉到 108,low 向低音补足键数。
+      newHigh = 108;
+      newLow = whiteKeyOffset(newHigh, -(whiteCount - 1));
+      if (newLow < 21) newLow = 21;
+    }
+    range = { low: newLow, high: newHigh };
     whiteW = newWhiteW;   // 精确设定值,不再被铺满覆盖
     maybeRebuild();
     updateSliderUI();
@@ -376,13 +401,13 @@ export function buildKeyboard(initial: KeyboardInitial, cb: KeyboardCallbacks): 
   }
 
   /** 更新滑块 UI(fill 宽 + thumb 位置 + 数值显示)。
-   *  显示值 = whiteW(直接读设定值,不再算 容器宽/键数)。 */
+   *  显示值 = whiteW(直接读设定值,一位小数)。 */
   function updateSliderUI(): void {
     const ratio = Math.max(0, Math.min(1, (whiteW - KEY_W_MIN) / (KEY_W_MAX - KEY_W_MIN)));
     fill.style.width = (ratio * 100) + '%';
     thumb.style.left = (ratio * 100) + '%';
     const b = kwLabel.querySelector('b');
-    if (b) b.textContent = String(Math.round(whiteW));
+    if (b) b.textContent = whiteW.toFixed(1);
   }
 
   // ── 高度图标拖动(上下拖改键盘高度,底边固定顶边移) ──
