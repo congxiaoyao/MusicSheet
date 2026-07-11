@@ -268,21 +268,44 @@ html, body { height: 100%; overflow: hidden;
   pointer-events: auto;
 }
 
-/* ── 浮空卡片：hover 窄带时在键盘上方浮出，含键宽+高度两个滑块 ── */
-.pr-resizer-wrap {
+/* ── 浮空卡片：hover 窄带时在键盘上方浮出 ──
+   桥接容器（pr-resizer-bridge）覆盖 窄带+间隙+卡片 的完整范围，
+   间隙用 padding（内部）而非 margin（外部），鼠标路径全程不断区。 */
+.pr-resizer-bridge {
   position: absolute;
   left: 50%;
   transform: translateX(-50%);
-  bottom: 100%;            /* 键盘上方 */
-  margin-bottom: 12px;     /* 离键盘顶部一点距离，浮空感 */
-  opacity: 0;
-  transition: opacity 0.15s;
+  bottom: 100%;           /* 底部贴键盘顶 */
+  padding-bottom: 6px;    /* 内部间隙：窄带到键盘的距离，鼠标在此区域内 */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   z-index: 12;
-  pointer-events: auto;
+  pointer-events: none;   /* 默认不拦截（让键盘正常交互）*/
 }
-.pr-resizer-wrap.open { opacity: 1; }
+/* 窄带：桥接容器最底部 */
+.pr-resizer-zone {
+  position: absolute;
+  bottom: 0;              /* 贴桥接容器底（=键盘顶）*/
+  left: 0; right: 0;
+  height: 6px;
+  pointer-events: auto;
+  z-index: 1;
+}
+.pr-resizer-zone::after {
+  content: '';
+  position: absolute;
+  left: 45%; right: 45%;
+  top: 2px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--muted);
+  opacity: 0.2;
+  transition: opacity 0.15s;
+}
+.pr-resizer-zone:hover::after { opacity: 0.5; }
 
-/* 卡片本体 */
+/* 卡片：初始隐藏，.open 时显示 */
 .pr-resizer-card {
   background: rgba(255,255,255,0.97);
   border: 1px solid var(--line);
@@ -294,19 +317,26 @@ html, body { height: 100%; overflow: hidden;
   flex-direction: column;
   gap: 10px;
   backdrop-filter: blur(8px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s;
+  margin-bottom: 10px;    /* 卡片下沿到窄带的间距（在桥接容器内部，不导致断区）*/
+}
+.pr-resizer-card.open {
+  opacity: 1;
+  pointer-events: auto;
 }
 
-/* 单行滑块（键宽/高度通用） */
+/* 单行滑块 */
 .pr-resizer-row {
   display: flex;
   align-items: center;
   gap: 10px;
 }
 .pr-resizer-label {
-  font-size: 11px; color: var(--muted); white-space: nowrap; flex: none; width: 28px;
+  font-size: 11px; color: var(--muted); white-space: nowrap; flex: none; width: 30px;
 }
 .pr-resizer-label b { color: var(--ink-2); font-weight: 600; font-variant-numeric: tabular-nums; }
-
 .pr-resizer-track {
   position: relative;
   height: 5px;
@@ -335,27 +365,6 @@ html, body { height: 100%; overflow: hidden;
   transition: transform 0.1s;
 }
 .pr-resizer-thumb:hover { transform: translate(-50%, -50%) scale(1.2); }
-
-/* 窄带：键盘顶部，mouseenter 触发卡片显示。高度移到卡片里，窄带不再 ns-resize */
-.pr-resizer-zone {
-  position: absolute;
-  top: 0; left: 0; right: 0;
-  height: 6px;
-  cursor: default;
-  z-index: 11;
-}
-.pr-resizer-zone::after {
-  content: '';
-  position: absolute;
-  left: 45%; right: 45%;
-  top: 2px;
-  height: 2px;
-  border-radius: 1px;
-  background: var(--muted);
-  opacity: 0.2;
-  transition: opacity 0.15s;
-}
-.pr-resizer-zone:hover::after { opacity: 0.5; }
 .key-w {
   flex: 1 1 0; position: relative;
   background: #fff;
@@ -465,11 +474,12 @@ html, body { height: 100%; overflow: hidden;
         <div class="pr-hit" id="hit"></div>
       </div>
       <div class="pr-keys" id="keys">
-        <!-- 窄带：hover 触发浮空卡片显示（JS 控制） -->
-        <div class="pr-resizer-zone" id="resizeZone"></div>
-        <!-- 浮空卡片：键宽 + 高度两个滑块 -->
-        <div class="pr-resizer-wrap" id="resizerWrap">
-          <div class="pr-resizer-card">
+        <!-- 桥接容器：覆盖窄带+间隙+卡片，防止断区 -->
+        <div class="pr-resizer-bridge" id="resizerBridge">
+          <!-- 窄带：hover 触发卡片显示 -->
+          <div class="pr-resizer-zone" id="resizeZone"></div>
+          <!-- 浮空卡片：键宽 + 高度两行滑块 -->
+          <div class="pr-resizer-card" id="resizerCard">
             <div class="pr-resizer-row">
               <span class="pr-resizer-label">键宽 <b>56</b></span>
               <div class="pr-resizer-track">
@@ -712,24 +722,22 @@ setTimeout(() => {
   layoutMask();
 }, 200);
 
-/* 键宽工具条 hover 逻辑（JS 控制，解决 CSS :hover 断区问题）：
-   - mouseenter 窄带 → 展开工具条
-   - 鼠标在 窄带+工具条 联合区域内 → 保持展开
-   - mouseleave 联合区域 → 收起
-   只有窄带是触发区，但展开后移到工具条上不断区。 */
+/* 浮空卡片 hover 逻辑：
+   桥接容器（bridge）覆盖 窄带+间隙+卡片 的完整范围。
+   mouseenter 窄带 → 显示卡片；
+   mouseleave 桥接容器（鼠标离开整个区域）→ 隐藏。
+   鼠标从窄带经过间隙到卡片，全程在 bridge 内，不断区。 */
 (function setupResizer(){
   const zone = document.getElementById('resizeZone');
-  const wrap = document.getElementById('resizerWrap');
-  if (!zone || !wrap) return;
+  const card = document.getElementById('resizerCard');
+  const bridge = document.getElementById('resizerBridge');
+  if (!zone || !card || !bridge) return;
   let hideTimer = null;
-  const show = () => { clearTimeout(hideTimer); wrap.classList.add('open'); };
-  const hideLater = () => { hideTimer = setTimeout(() => wrap.classList.remove('open'), 120); };
-  // 窄带：mouseenter 触发展开
+  const show = () => { clearTimeout(hideTimer); card.classList.add('open'); bridge.style.pointerEvents = 'auto'; };
+  const hideLater = () => { hideTimer = setTimeout(() => { card.classList.remove('open'); bridge.style.pointerEvents = 'none'; }, 150); };
   zone.addEventListener('mouseenter', show);
-  zone.addEventListener('mouseleave', hideLater);
-  // 工具条：hover 时取消隐藏（鼠标从窄带移到工具条）
-  wrap.addEventListener('mouseenter', show);
-  wrap.addEventListener('mouseleave', hideLater);
+  bridge.addEventListener('mouseenter', show);   // 鼠标在 bridge 内（含卡片）时保持
+  bridge.addEventListener('mouseleave', hideLater);
 })();
 // 窗口变化时重算
 window.addEventListener('resize', () => {
