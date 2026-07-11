@@ -66,8 +66,7 @@ const PX_PER_BEAT = 92;
 const BLOCK_H_FACTOR = 0.65;
 /** 方块最小高度(px)。 */
 const BLOCK_H_MIN = 12;
-/** 可见窗:beat 差在 (-0.5, 5) 内可见(原型 L804)。 */
-const VIS_DIST_MIN = -0.5;
+/** 可见窗上界:未来多少拍内可见(原型 5 拍预告)。 */
 const VIS_DIST_MAX = 5;
 /** 命中窗:|beat 差| < 0.15 → active(原型 L809)。 */
 const HIT_WINDOW = 0.15;
@@ -163,14 +162,25 @@ export function buildWaterfall(initial: WaterfallInitial, cb: WaterfallCallbacks
         const dist = n.beat - beat;   // 未来为正,过去为负
         const bh = Math.max(BLOCK_H_MIN, n.duration * PX_PER_BEAT * BLOCK_H_FACTOR);
         const yTop = hitY - bh - dist * PX_PER_BEAT;
-        const vis = dist > VIS_DIST_MIN && dist < VIS_DIST_MAX;
+        // 可见窗:未来 VIS_DIST_MAX 拍内可见;过去音保持可见直到它真正结束(dist > -duration)。
+        // 旧实现写死 dist > -0.5,导致长音(2/4 拍)还没走完时值就消失 —— 音还在响方块却没了。
+        const visBelow = dist > -Math.max(n.duration, 0.5);   // 至少露 0.5 拍(短音也要看见)
+        const vis = dist < VIS_DIST_MAX && visBelow;
         if (!vis) {
           bEl.style.opacity = '0';
           bEl.classList.remove('active');
           continue;
         }
-        // 透明度:接近判定线渐显,过去淡出(原型 L805)。
-        const opacity = dist < 0 ? 0.25 : Math.min(1, 1 - dist * 0.13);
+        // 透明度:未来接近判定线渐显(dist 5→0,opacity 0.35→1);
+        // 过去音从命中(dist=0,opacity 1)淡出到音结束(dist=-duration,opacity 0)。
+        let opacity: number;
+        if (dist >= 0) {
+          opacity = Math.min(1, 1 - dist * 0.13);
+        } else {
+          // 过去段:按"音已走过的比例"淡出。
+          const pastRatio = n.duration > 0 ? -dist / n.duration : 1;
+          opacity = Math.max(0, 1 - pastRatio);
+        }
         bEl.style.opacity = String(opacity);
         // 宽度 = 对应键宽(百分比),left = 键中心(百分比,居中)。
         bEl.style.width = noteWidth(n.midi, range) + '%';

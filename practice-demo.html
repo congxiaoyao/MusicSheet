@@ -59,6 +59,10 @@
         flex: 1;
         position: relative;
         min-height: 0;
+        /* 调试用:方块区边框,看出区域高度。border-box 让边框含在高度内,不影响 bounds。 */
+        box-sizing: border-box;
+        border: 1px dashed #94a3b8;
+        background: rgba(148, 163, 184, 0.04);
       }
       .demo-keys-wrap {
         flex: none;
