@@ -268,48 +268,52 @@ html, body { height: 100%; overflow: hidden;
   pointer-events: auto;
 }
 
-/* ── 键宽工具条：键盘的延伸，不是浮空异物 ──
-   视觉上：键盘顶部往上连一条同色窄条，内嵌滑块。
-   与键盘是一体的，圆角向下衔接键盘。 */
+/* ── 浮空卡片：hover 窄带时在键盘上方浮出，含键宽+高度两个滑块 ── */
 .pr-resizer-wrap {
   position: absolute;
-  left: 0; right: 0;
-  bottom: 100%;            /* 紧贴键盘上方，无间隙 */
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  max-height: 0;           /* 默认收起 */
-  overflow: hidden;
-  transition: max-height 0.2s ease;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 100%;            /* 键盘上方 */
+  margin-bottom: 12px;     /* 离键盘顶部一点距离，浮空感 */
+  opacity: 0;
+  transition: opacity 0.15s;
   z-index: 12;
   pointer-events: auto;
 }
-/* JS 控制：mouseenter 窄带时 .pr-resizer-wrap.open 展开 */
-.pr-resizer-wrap.open { max-height: 50px; }
+.pr-resizer-wrap.open { opacity: 1; }
 
-/* 工具条本体：和键盘同色系，底部圆角衔接键盘 */
-.pr-resizer-bar {
-  background: var(--line-2);   /* 和键盘背景同色 */
-  border-top: 1px solid var(--line);
-  padding: 8px 20px;
+/* 卡片本体 */
+.pr-resizer-card {
+  background: rgba(255,255,255,0.97);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 4px 16px rgba(16,24,40,0.14);
+  padding: 12px 16px;
+  width: 200px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  backdrop-filter: blur(8px);
+}
+
+/* 单行滑块（键宽/高度通用） */
+.pr-resizer-row {
   display: flex;
   align-items: center;
-  gap: 12px;
-  /* 底部直接接键盘，不画下边框 */
+  gap: 10px;
 }
 .pr-resizer-label {
-  font-size: 11px; color: var(--muted); white-space: nowrap; flex: none;
+  font-size: 11px; color: var(--muted); white-space: nowrap; flex: none; width: 28px;
 }
 .pr-resizer-label b { color: var(--ink-2); font-weight: 600; font-variant-numeric: tabular-nums; }
 
-/* 键宽滑块轨道 */
 .pr-resizer-track {
   position: relative;
   height: 5px;
   background: var(--line);
   border-radius: 3px;
   cursor: ew-resize;
-  flex: 0 1 200px;
+  flex: 1;
 }
 .pr-resizer-fill {
   position: absolute; left: 0; top: 0; bottom: 0;
@@ -332,23 +336,12 @@ html, body { height: 100%; overflow: hidden;
 }
 .pr-resizer-thumb:hover { transform: translate(-50%, -50%) scale(1.2); }
 
-/* 高度调整把手：工具条右侧，上下拖 */
-.pr-resizer-height {
-  margin-left: auto;
-  font-size: 11px; color: var(--muted);
-  cursor: ns-resize;
-  display: flex; align-items: center; gap: 4px; flex: none;
-  padding: 2px 6px; border-radius: 4px;
-}
-.pr-resizer-height:hover { background: rgba(0,0,0,0.05); color: var(--ink-2); }
-.pr-resizer-height .arr { font-size: 10px; }
-
-/* 窄带：键盘顶部，mouseenter 触发工具条展开。自身视觉极淡 */
+/* 窄带：键盘顶部，mouseenter 触发卡片显示。高度移到卡片里，窄带不再 ns-resize */
 .pr-resizer-zone {
   position: absolute;
   top: 0; left: 0; right: 0;
   height: 6px;
-  cursor: ns-resize;
+  cursor: default;
   z-index: 11;
 }
 .pr-resizer-zone::after {
@@ -357,6 +350,12 @@ html, body { height: 100%; overflow: hidden;
   left: 45%; right: 45%;
   top: 2px;
   height: 2px;
+  border-radius: 1px;
+  background: var(--muted);
+  opacity: 0.2;
+  transition: opacity 0.15s;
+}
+.pr-resizer-zone:hover::after { opacity: 0.5; }
   border-radius: 1px;
   background: var(--muted);
   opacity: 0.25;
@@ -472,17 +471,25 @@ html, body { height: 100%; overflow: hidden;
         <div class="pr-hit" id="hit"></div>
       </div>
       <div class="pr-keys" id="keys">
-        <!-- 窄带：hover 触发工具条展开（JS 控制） -->
+        <!-- 窄带：hover 触发浮空卡片显示（JS 控制） -->
         <div class="pr-resizer-zone" id="resizeZone"></div>
-        <!-- 键宽工具条：键盘的延伸，展开时显示 -->
+        <!-- 浮空卡片：键宽 + 高度两个滑块 -->
         <div class="pr-resizer-wrap" id="resizerWrap">
-          <div class="pr-resizer-bar">
-            <span class="pr-resizer-label">键宽 <b>56px</b></span>
-            <div class="pr-resizer-track">
-              <div class="pr-resizer-fill"></div>
-              <div class="pr-resizer-thumb"></div>
+          <div class="pr-resizer-card">
+            <div class="pr-resizer-row">
+              <span class="pr-resizer-label">键宽 <b>56</b></span>
+              <div class="pr-resizer-track">
+                <div class="pr-resizer-fill"></div>
+                <div class="pr-resizer-thumb"></div>
+              </div>
             </div>
-            <span class="pr-resizer-height"><span class="arr">↕</span>高度</span>
+            <div class="pr-resizer-row">
+              <span class="pr-resizer-label">高度 <b>116</b></span>
+              <div class="pr-resizer-track">
+                <div class="pr-resizer-fill" style="width:40%"></div>
+                <div class="pr-resizer-thumb" style="left:40%"></div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
