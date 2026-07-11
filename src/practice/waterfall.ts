@@ -61,15 +61,16 @@ export interface WaterfallHandle {
   setBounds(info: { topY: number; bottomY: number }): void;
 }
 
-// ── 常量(从原型迁移) ─────────────────────────────────────
-/** 垂直像素/拍(下落速度)。原型 PX_PER_BEAT=92。 */
-const PX_PER_BEAT = 92;
-/** 方块高度系数:height = max(12, duration × PX_PER_BEAT × 0.65)。 */
-const BLOCK_H_FACTOR = 0.65;
+// ── 常量(从原型迁移,按用户反馈调校) ─────────────────────
+/** 垂直像素/拍(下落速度)。原型 92,提到 115(变快约25%)。 */
+const PX_PER_BEAT = 115;
+/** 方块高度系数:height = max(BLOCK_H_MIN, duration × PX_PER_BEAT × 系数)。
+ *  原型 0.65,提到 1.0(方块变长约一倍:4分音符旧60px→新115px)。 */
+const BLOCK_H_FACTOR = 1.0;
 /** 方块最小高度(px)。 */
-const BLOCK_H_MIN = 12;
-/** 可见窗上界:未来多少拍内可见(原型 5 拍预告)。 */
-const VIS_DIST_MAX = 5;
+const BLOCK_H_MIN = 16;
+/** 可见窗上界:未来多少拍内可见。原型 5 拍,缩到 4(方块长,预告窗缩短避免顶出)。 */
+const VIS_DIST_MAX = 4;
 /** 命中窗:|beat 差| < 0.15 → active(原型 L809)。 */
 const HIT_WINDOW = 0.15;
 
