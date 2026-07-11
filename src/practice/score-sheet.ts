@@ -602,6 +602,10 @@ export function buildScoreSheet(
   let lastHiTreble = new Set<number>();
   let lastHiBass = new Set<number>();
   let lastSysIdx = -1;
+  // 播放头防回退:记录上次播放头 x0(SVG 内坐标)+ 所在 system。同一行内播放头不得往左跳
+  // (高音有间隙时 bass 长音位置可能在左侧,跟随它会视觉回退)。换行重置。
+  let lastPlayheadX0 = -1;
+  let lastPlayheadSys = -1;
 
   // 渲染:算行宽(容器宽) → renderScore → 挂 SVG。
   // SVG 用 width:100% + height:auto(按 viewBox 自适应高度),保持 scaleX=scaleY=1。
@@ -622,6 +626,8 @@ export function buildScoreSheet(
     lastHiTreble = new Set();
     lastHiBass = new Set();
     lastSysIdx = -1;
+    lastPlayheadX0 = -1;   // 重渲染后 noteX 体系变了,清防回退基线
+    lastPlayheadSys = -1;
   };
   render();
 
@@ -781,6 +787,14 @@ export function buildScoreSheet(
       const ratio = total > 0 ? Math.max(0, Math.min(1, beatInLine / total)) : 0;
       x0 = lay.contentLeft + ratio * lay.contentWidth;
     }
+    // 防回退:同一行内播放头不得往左跳。高音(节奏主驱动)有间隙时,bass 长音的位置可能在
+    // 当前播放头左侧(如欢乐颂第2小节末),跟随它会造成视觉回退。行内取 max(x0, 上次位置),
+    // 让播放头在间隙处停留等下一个音,而非倒退。换行(sysIdx 变化)时重置,允许跳到新行首位。
+    if (sysIdx === lastPlayheadSys && lastPlayheadX0 >= 0) {
+      x0 = Math.max(x0, lastPlayheadX0);
+    }
+    lastPlayheadX0 = x0;
+    lastPlayheadSys = sysIdx;
     // 横向:符头宽(盖住符头 2×noteHeadHalf)→ 像素,加 SVG 在 sheet 内的左偏移。
     const wPx = lay.noteHeadHalf * 2 * scale;
     const leftPx = svgLeftInSheet + x0 * scale - wPx / 2;
