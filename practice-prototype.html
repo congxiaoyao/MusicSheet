@@ -365,11 +365,10 @@ html, body { height: 100%; overflow: hidden;
 }
 .pr-resizer-thumb:hover { transform: translate(-50%, -50%) scale(1.15); }
 
-/* 高度调整：V形 chevron + 文字。
-   分割线到内容、内容到卡片右边视觉等距。*/
+/* 高度调整：V形 chevron + 文字 */
 .pr-resizer-height {
   flex: none;
-  width: 44px;               /* 含内容 + 左右等距 padding */
+  width: 30px;
   height: 44px;
   display: flex;
   flex-direction: column;
@@ -378,9 +377,8 @@ html, body { height: 100%; overflow: hidden;
   gap: 3px;
   cursor: ns-resize;
   border-left: 1px solid var(--line-2);
-  margin-left: 6px;
-  margin-right: -10px;        /* 抵消卡片右侧 padding，让视觉右间距 = 左间距 */
-  padding: 0 8px;             /* 内容左右对称 */
+  margin-left: 10px;       /* 分割线到图标的间距（在 box 外，不进 hover 高亮）*/
+  padding: 0 4px;          /* 图标内容左右对称内边距，hover 高亮左右等距 */
   border-radius: 4px;
   transition: background 0.12s;
 }
