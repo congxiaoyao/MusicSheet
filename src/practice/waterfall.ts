@@ -62,16 +62,17 @@ export interface WaterfallHandle {
 }
 
 // ── 常量(从原型迁移,按用户反馈调校) ─────────────────────
-/** 垂直像素/拍(下落速度)。原型 92,提到 130(长方块快速掠过,视觉紧凑)。 */
-const PX_PER_BEAT = 130;
+/** 垂直像素/拍(下落速度)。原型 92。
+ *  方块要更长就加大这个值(方块和间隔等比放大,不重叠);FACTOR 不能 >1(会侵入下一音重叠)。 */
+const PX_PER_BEAT = 170;
 /** 方块高度系数:height = max(BLOCK_H_MIN, duration × PX_PER_BEAT × 系数)。
- *  原型 0.65,提到 1.5(用户指定)。4分音符 = 1×130×1.5 = 195px。 */
-const BLOCK_H_FACTOR = 1.5;
+ *  必须 ≤ 1.0:方块高度 = duration×PX_PER_BEAT×系数,而相邻音垂直间隔 = duration×PX_PER_BEAT,
+ *  系数>1 时方块高度超过时间槽,几何上必然侵入下一个音导致重叠。1.0 = 刚好填满时间槽不重叠。 */
+const BLOCK_H_FACTOR = 1.0;
 /** 方块最小高度(px)。 */
 const BLOCK_H_MIN = 20;
-/** 可见窗上界:未来多少拍内可见。原型 5,缩到 3(方块高,预告窗短避免顶出:
- *  4分音 yTop = 600-195-3×130 = 15 > 0)。 */
-const VIS_DIST_MAX = 3;
+/** 可见窗上界:未来多少拍内可见。原型 5,缩到 3.5(方块长,预告窗缩短避免顶出)。 */
+const VIS_DIST_MAX = 3.5;
 /** 命中窗:|beat 差| < 0.15 → active(原型 L809)。 */
 const HIT_WINDOW = 0.15;
 
