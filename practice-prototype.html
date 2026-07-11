@@ -305,38 +305,65 @@ html, body { height: 100%; overflow: hidden;
 }
 .pr-resizer-zone:hover::after { opacity: 0.5; }
 
-/* 卡片：初始隐藏，.open 时显示 */
+/* 卡片：初始隐藏，.open 时显示。横向布局：左键宽滑块 + 右高度拖动图标 */
 .pr-resizer-card {
   background: rgba(255,255,255,0.97);
   border: 1px solid var(--line);
   border-radius: 10px;
   box-shadow: 0 4px 16px rgba(16,24,40,0.14);
-  padding: 12px 16px;
-  width: 200px;
+  padding: 10px 12px;
   display: flex;
-  flex-direction: column;
-  gap: 10px;
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
   backdrop-filter: blur(8px);
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.15s;
-  margin-bottom: 10px;    /* 卡片下沿到窄带的间距（在桥接容器内部，不导致断区）*/
+  margin-bottom: 10px;
 }
 .pr-resizer-card.open {
   opacity: 1;
   pointer-events: auto;
 }
 
-/* 单行滑块 */
-.pr-resizer-row {
+/* 键宽区：标签 + 滑块 */
+.pr-resizer-keywidth {
   display: flex;
-  align-items: center;
-  gap: 10px;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
 }
 .pr-resizer-label {
-  font-size: 11px; color: var(--muted); white-space: nowrap; flex: none; width: 30px;
+  font-size: 10px; color: var(--muted); white-space: nowrap;
 }
 .pr-resizer-label b { color: var(--ink-2); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* 高度拖动图标：卡片右侧，上下拖改键盘高度 */
+.pr-resizer-height {
+  flex: none;
+  width: 28px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  cursor: ns-resize;
+  padding: 4px 0;
+  border-left: 1px solid var(--line-2);
+  border-radius: 4px;
+  transition: background 0.12s;
+}
+.pr-resizer-height:hover { background: var(--bg); }
+.pr-resizer-height:active { background: var(--accent-soft); }
+.pr-resizer-height .arr {
+  font-size: 10px; color: var(--muted); line-height: 1;
+}
+.pr-resizer-height .h-icon {
+  font-size: 14px; color: var(--accent); line-height: 1;
+}
+.pr-resizer-height .h-label {
+  font-size: 8px; color: var(--muted); line-height: 1; font-weight: 600;
+}
 .pr-resizer-track {
   position: relative;
   height: 5px;
@@ -478,21 +505,19 @@ html, body { height: 100%; overflow: hidden;
         <div class="pr-resizer-bridge" id="resizerBridge">
           <!-- 窄带：hover 触发卡片显示 -->
           <div class="pr-resizer-zone" id="resizeZone"></div>
-          <!-- 浮空卡片：键宽 + 高度两行滑块 -->
+          <!-- 浮空卡片：左键宽滑块 + 右高度拖动图标 -->
           <div class="pr-resizer-card" id="resizerCard">
-            <div class="pr-resizer-row">
+            <div class="pr-resizer-keywidth">
               <span class="pr-resizer-label">键宽 <b>56</b></span>
               <div class="pr-resizer-track">
                 <div class="pr-resizer-fill"></div>
                 <div class="pr-resizer-thumb"></div>
               </div>
             </div>
-            <div class="pr-resizer-row">
-              <span class="pr-resizer-label">高度 <b>116</b></span>
-              <div class="pr-resizer-track">
-                <div class="pr-resizer-fill" style="width:40%"></div>
-                <div class="pr-resizer-thumb" style="left:40%"></div>
-              </div>
+            <div class="pr-resizer-height" id="heightDrag" title="上下拖改键盘高度">
+              <span class="arr">▲</span>
+              <span class="h-icon">⇕</span>
+              <span class="arr">▼</span>
             </div>
           </div>
         </div>
