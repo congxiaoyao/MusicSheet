@@ -1,0 +1,75 @@
+/* Waterfall 练琴页瀑布流方块组件样式
+ *
+ * 设计文档:docs/钢琴与方块组件设计.md §4。类名前缀 wf-。
+ *
+ * 方块横轴 = 键盘位置(midiToX),宽度 = 对应键宽(noteWidth)。
+ * 掉落区域:setBounds 设的 topY~bottomY,overflow hidden 裁掉区域外,上边缘 mask 渐变淡出。
+ * 判定线 = 区域底(键盘上沿),方块底边贴到此线 = 该按时刻。
+ * 左右手颜色:R 蓝、L 橙(与键盘高亮一致,文档 §5.2)。
+ */
+
+.wf-fall {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+  /* 上边缘 fade:方块接近上边缘时自然淡出(文档 §4.5)。
+   * mask 渐变:顶部透明渐变到不透明(40px 内完成),区域底不裁。 */
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 40px);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 40px);
+}
+
+/* 方块:绝对定位,left/top/width/height 由 onTick 每帧设。
+ * 宽度用百分比(对应键宽),随容器等比缩放(文档 §4.3,修正原型写死 28px)。 */
+.wf-note {
+  position: absolute;
+  box-sizing: border-box;
+  border-radius: 3px 3px 0 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding-bottom: 3px;
+  font-size: 9px;
+  font-weight: 600;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+  transition: none;   /* onTick 每帧设位置,不要 transition 干扰 */
+  will-change: transform, opacity;
+  transform: translateX(-50%);   /* left 是中心,居中对齐 */
+}
+
+/* 右手蓝 */
+.wf-note.R {
+  background: linear-gradient(180deg, #60a5fa, #2563eb);
+  box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.4), inset 0 -2px 0 rgba(0, 0, 0, 0.15);
+}
+/* 左手橙 */
+.wf-note.L {
+  background: linear-gradient(180deg, #fb923c, #ea580c);
+  box-shadow: 0 0 0 1px rgba(234, 88, 12, 0.4), inset 0 -2px 0 rgba(0, 0, 0, 0.15);
+}
+
+/* 命中:接近判定线时放大 + 光环(文档 §4.4) */
+.wf-note.active {
+  transform: translateX(-50%) scale(1.04);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.85), 0 0 12px rgba(79, 70, 229, 0.5);
+  z-index: 5;
+}
+
+/* 判定线:区域底(键盘上沿),2px 强调线 + 节拍脉冲(可选) */
+.wf-hit {
+  position: absolute;
+  left: 0; right: 0;
+  bottom: 0;
+  height: 2px;
+  background: var(--accent, #4f46e5);
+  opacity: 0.7;
+  z-index: 4;
+  transition: box-shadow 0.08s, height 0.08s;
+}
+.wf-hit.pulse {
+  height: 3px;
+  box-shadow: 0 0 10px var(--accent, #4f46e5);
+}
