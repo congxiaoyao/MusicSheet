@@ -144,29 +144,15 @@ void ensureFontLoaded().then(() => {
   }
   bar.appendChild(densGroup);
 
-  // 播放控制
+  // 播放控制:单一定时器,不使用 mkBtn(避免其 active 切换副作用)。
   const playGroup = mkGroup('播放');
   let playing = false;
   let beat = 0;
   let timer: ReturnType<typeof setInterval> | null = null;
-  const playBtn = mkBtn('▶ 播放', false, () => {
-    playing = !playing;
-    playBtn.textContent = playing ? '⏸ 暂停' : '▶ 播放';
-    if (playing) {
-      timer = setInterval(() => {
-        beat += 0.5;
-        const total = songs[currentSong].meta.totalMeasures * beatsPerBar(songs[currentSong].meta.time);
-        if (beat > total) beat = 0;
-        sheet.onTick(beat);
-      }, 500);
-    } else if (timer) {
-      clearInterval(timer);
-      timer = null;
-    }
-  });
-  // 播放按钮不参与 active 切换,单独处理
-  playBtn.classList.add('active');
-  playBtn.onclick = () => {
+  const playBtn = document.createElement('button');
+  playBtn.className = 'demo-btn active';
+  playBtn.textContent = '▶ 播放';
+  const togglePlay = () => {
     playing = !playing;
     playBtn.textContent = playing ? '⏸ 暂停' : '▶ 播放';
     if (playing) {
@@ -181,6 +167,10 @@ void ensureFontLoaded().then(() => {
       timer = null;
     }
   };
+  playBtn.onclick = togglePlay;
   playGroup.appendChild(playBtn);
   bar.appendChild(playGroup);
+
+  // 调试钩子(控制台手动调):window.__sheet
+  (window as any).__sheet = sheet;
 });

@@ -591,6 +591,8 @@ export function buildScoreSheet(
   let lastSysIdx = -1;
 
   // 渲染:算行宽(容器宽) → renderScore → 挂 SVG。
+  // SVG 用 width:100% + height:auto(按 viewBox 自适应高度),保持 scaleX=scaleY=1。
+  // 避免 preserveAspectRatio=meet 导致垂直 letterbox(scaleY≠scaleX,scroll/playhead 换算出错)。
   const render = () => {
     const width = Math.min(1200, Math.max(640, el.clientWidth || 940));
     renderCache = renderScore(score, width, mode, density);
@@ -598,8 +600,11 @@ export function buildScoreSheet(
     const svgEl = sheetEl.querySelector('svg');
     if (svgEl) {
       svgEl.setAttribute('width', '100%');
-      svgEl.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+      svgEl.setAttribute('height', 'auto');   // height auto:按 viewBox 比例自适应,scaleX=scaleY
+      svgEl.removeAttribute('preserveAspectRatio');
     }
+    // innerHTML 清空了子节点,重新挂回播放头层。
+    sheetEl.appendChild(playheadEl);
     // 重渲染后清状态(行内 idx 体系可能变了)。
     lastHiTreble = new Set();
     lastHiBass = new Set();
@@ -684,21 +689,22 @@ export function buildScoreSheet(
     apply('.ss-bass', hiBass);
   };
 
-  /** 行滚动锁定(提词器式):当前行顶部对齐清晰带顶部(距 scrollEl 顶 CURRENT_TOP_PAD)。
-   *  清晰带顶部位置 + 渐变范围按当前 mode 实际行高动态(文档 §6.4:不能写死)。 */
+  /** 行滚动锁定(提词器式):当前行顶部对齐清晰带顶部(距 scrollEl 视口顶 CURRENT_TOP_PAD)。
+   *  清晰带顶部位置 + 渐变范围按当前 mode 实际行高动态(文档 §6.4:不能写死)。
+   *  换行一致性:每行 sys 都按"system 元素的屏幕 top"换算 scrollTop,首行/末行公式一致,
+   *  不累加(避免逐行偏差)。 */
   const CURRENT_TOP_PAD = 24;   // 当前行顶部距 scrollEl 视口顶的留白(谱号完整显示空间)
   const scrollToSystem = (sysIdx: number) => {
     if (!renderCache) return;
-    const sys = renderCache.systems[sysIdx];
-    if (!sys) return;
-    // SVG 内坐标 → 像素换算:SVG 用 width:100% + preserveAspectRatio meet 缩放。
-    // 缩放比 = sheetEl 实际宽 / SVG viewBox 宽。
-    const svgEl = sheetEl.querySelector('svg');
-    if (!svgEl) return;
-    const svgRect = svgEl.getBoundingClientRect();
-    const scale = renderCache.width > 0 ? svgRect.width / renderCache.width : 1;
-    // 当前行顶部在 SVG 内的 y(= sys.yTop)→ 像素 = yTop × scale。
-    const targetTop = sys.yTop * scale - CURRENT_TOP_PAD;
+    const sysEl = sheetEl.querySelector<SVGGElement>(`g.ss-system[data-sys="${sysIdx}"]`);
+    if (!sysEl) return;
+    // 直接用 system 元素在 scrollEl 内的真实屏幕位置换算 scrollTop(最可靠):
+    //   目标 scrollTop = 当前 sys 屏幕 top 相对 scrollEl 的偏移 - 留白。
+    // 这样每行换算公式完全相同(不依赖 SVG 缩放比),换行不累积偏差。
+    const sysRect = sysEl.getBoundingClientRect();
+    const scrollRect = scrollEl.getBoundingClientRect();
+    const offsetInScroll = sysRect.top - scrollRect.top + scrollEl.scrollTop;
+    const targetTop = offsetInScroll - CURRENT_TOP_PAD;
     scrollEl.scrollTo({ top: Math.max(0, targetTop), behavior: 'smooth' });
   };
 
@@ -717,21 +723,25 @@ export function buildScoreSheet(
 
   /** 播放头定位:竖条盖在当前音符上,纵向覆盖当前 system 高度。
    *  参考 app.ts updatePreviewPlayhead:横向跟随时值更短的组音(短音是节奏主驱动),
-   *  两组都无音时线性铺到内容区。用百分比定位(SVG width:100% + meet 缩放)。 */
+   *  两组都无音时线性铺到内容区。
+   *  全部用纯几何 + svgRect 缩放换算 —— 不用 system <g> 的 getBoundingClientRect
+   *  (g 的 bbox 含 <text> 符头的字体度量框,高度严重虚高 2-3 倍,不可靠)。 */
   const updatePlayhead = (sysIdx: number, beatInLine: number) => {
     if (!renderCache) return;
     const sys = renderCache.systems[sysIdx];
     if (!sys) { playheadEl.style.display = 'none'; return; }
     const svgEl = sheetEl.querySelector('svg');
     if (!svgEl) return;
+    const svgRect = svgEl.getBoundingClientRect();
+    // SVG 内坐标 → 像素:height:auto 下 scaleX=scaleY,用任一边换算一致。
+    const scale = renderCache.width > 0 ? svgRect.width / renderCache.width : 1;
     // 当前音符 idx(行内):复用 onTick 的 noteIndexAtBeat 逻辑
     const tStarts = noteStartBeats(sys.treblePiece);
     const bStarts = noteStartBeats(sys.bassPiece);
     const tIdx = noteIndexAtBeat(beatInLine, tStarts, sys.treblePiece.notes);
     const bIdx = noteIndexAtBeat(beatInLine, bStarts, sys.bassPiece.notes);
     const lay = sys.trebleLayout;   // 两组 barLines 同 x,noteX 各自;宽度基准用 treble layout
-    // 宽度:盖住符头(2×noteHeadHalf),用 SVG 内坐标占 width 的百分比
-    const wSvg = lay.noteHeadHalf * 2;
+    // 横向中心 x0(SVG 内坐标)
     let x0: number;
     if (tIdx >= 0 && bIdx >= 0) {
       // 两组都在响:跟随时值更短的(短音节奏主驱动,参考 app.ts)
@@ -748,17 +758,19 @@ export function buildScoreSheet(
       const ratio = total > 0 ? Math.max(0, Math.min(1, beatInLine / total)) : 0;
       x0 = lay.contentLeft + ratio * lay.contentWidth;
     }
-    // 百分比定位(SVG width:100% 占 sheetEl,scale 一致)
-    const leftPct = (x0 - wSvg / 2) / lay.width * 100;
-    const widthPct = wSvg / lay.width * 100;
-    // 纵向:当前 system 的 yTop..yTop+height,占 SVG 高度的百分比
-    const topPct = sys.yTop / renderCache.height * 100;
-    const heightPct = sys.height / renderCache.height * 100;
+    // 横向:符头宽(盖住符头 2×noteHeadHalf)→ 像素
+    const wPx = lay.noteHeadHalf * 2 * scale;
+    const leftPx = x0 * scale - wPx / 2;
+    // 纵向:纯几何(sys.yTop/sys.height)→ 像素,偏移以 svgRect 在 sheetEl 内的位置为基。
+    const sheetRect = sheetEl.getBoundingClientRect();
+    const svgTopInSheet = svgRect.top - sheetRect.top;
+    const topPx = svgTopInSheet + sys.yTop * scale;
+    const heightPx = sys.height * scale;
     playheadEl.style.display = '';
-    playheadEl.style.left = leftPct.toFixed(2) + '%';
-    playheadEl.style.width = widthPct.toFixed(2) + '%';
-    playheadEl.style.top = topPct.toFixed(2) + '%';
-    playheadEl.style.height = heightPct.toFixed(2) + '%';
+    playheadEl.style.left = leftPx.toFixed(1) + 'px';
+    playheadEl.style.width = wPx.toFixed(1) + 'px';
+    playheadEl.style.top = topPx.toFixed(1) + 'px';
+    playheadEl.style.height = heightPx.toFixed(1) + 'px';
   };
 
   /** 通知 onLineLayout:当前行底部 y(相对 el,屏幕坐标)。

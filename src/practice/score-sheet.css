@@ -37,6 +37,7 @@
  * padding-top 让首行不贴顶;padding-bottom 用 100vh 保证末行后留足整屏空间,
  * 末行能滚到顶部清晰带位置(文档需求 §4.1:"最后几行也能滚到位")。 */
 .score-sheet-sheet {
+  position: relative;       /* 播放头 absolute 定位的参照(否则相对 .score-sheet) */
   padding: 24px 24px 100vh 24px;
   box-sizing: border-box;
 }
