@@ -602,10 +602,6 @@ export function buildScoreSheet(
   let lastHiTreble = new Set<number>();
   let lastHiBass = new Set<number>();
   let lastSysIdx = -1;
-  // 播放头防回退:记录上次播放头 x0(SVG 内坐标)+ 所在 system。同一行内播放头不得往左跳
-  // (高音有间隙时 bass 长音位置可能在左侧,跟随它会视觉回退)。换行重置。
-  let lastPlayheadX0 = -1;
-  let lastPlayheadSys = -1;
 
   // 渲染:算行宽(容器宽) → renderScore → 挂 SVG。
   // SVG 用 width:100% + height:auto(按 viewBox 自适应高度),保持 scaleX=scaleY=1。
@@ -626,8 +622,6 @@ export function buildScoreSheet(
     lastHiTreble = new Set();
     lastHiBass = new Set();
     lastSysIdx = -1;
-    lastPlayheadX0 = -1;   // 重渲染后 noteX 体系变了,清防回退基线
-    lastPlayheadSys = -1;
   };
   render();
 
@@ -770,7 +764,11 @@ export function buildScoreSheet(
     const tIdx = noteIndexAtBeat(beatInLine, tStarts, sys.treblePiece.notes);
     const bIdx = noteIndexAtBeat(beatInLine, bStarts, sys.bassPiece.notes);
     const lay = sys.trebleLayout;   // 两组 barLines 同 x,noteX 各自;宽度基准用 treble layout
-    // 横向中心 x0(SVG 内坐标)
+    // 横向中心 x0(SVG 内坐标)。播放头是【节奏进度指示器】,始终沿节奏轨道单调前进:
+    //   - 节奏音在响 → 该音位置(短音是节奏主驱动,两组都在响取时值短者)
+    //   - 节奏轨道有间隙(treble 空拍) → 在前一音位置与下一音位置间线性插值,
+    //     保证向前推进,既不回退(跟随 bass 长音位置在左)也不跳过(直接到下一音)。
+    //   bass 长音是和声铺垫,不参与播放头定位(其符头高亮另由 updateHighlight 处理)。
     let x0: number;
     if (tIdx >= 0 && bIdx >= 0) {
       // 两组都在响:跟随时值更短的(短音节奏主驱动,参考 app.ts)
@@ -779,22 +777,39 @@ export function buildScoreSheet(
       x0 = bDur < tDur ? sys.bassLayout.noteX[bIdx] : lay.noteX[tIdx];
     } else if (tIdx >= 0) {
       x0 = lay.noteX[tIdx];
-    } else if (bIdx >= 0) {
-      x0 = sys.bassLayout.noteX[bIdx];
     } else {
-      // 无音:线性铺到内容区
-      const total = sys.beatEnd - sys.beatStart;
-      const ratio = total > 0 ? Math.max(0, Math.min(1, beatInLine / total)) : 0;
-      x0 = lay.contentLeft + ratio * lay.contentWidth;
+      // treble 间隙或行末:在 treble 前一音(若有)位置 与 下一音(或内容右端)位置间插值,
+      // 使播放头在间隙内匀速前进。prevX/nextX 取 treble noteX(bass 长音位置不参与)。
+      let prevX: number, nextX: number, prevBeat: number, nextBeat: number;
+      // 前一音:最后一个 start ≤ beatInLine 的音
+      let prevIdx = -1;
+      for (let i = 0; i < tStarts.length; i++) {
+        if (tStarts[i] > beatInLine + BEAT_EPS) break;
+        prevIdx = i;
+      }
+      // 下一音:第一个 start > beatInLine 的音
+      let nextIdx = -1;
+      for (let i = 0; i < tStarts.length; i++) {
+        if (tStarts[i] > beatInLine + BEAT_EPS) { nextIdx = i; break; }
+      }
+      if (prevIdx >= 0) {
+        prevX = lay.noteX[prevIdx];
+        prevBeat = tStarts[prevIdx] + durationBeats(sys.treblePiece.notes[prevIdx]);  // 前一音结束拍
+      } else {
+        prevX = lay.contentLeft;
+        prevBeat = 0;
+      }
+      if (nextIdx >= 0) {
+        nextX = lay.noteX[nextIdx];
+        nextBeat = tStarts[nextIdx];
+      } else {
+        nextX = lay.contentRight;   // 行末无后续音:推进到内容右端
+        nextBeat = sys.beatEnd - sys.beatStart;
+      }
+      const span = nextBeat - prevBeat;
+      const ratio = span > 0 ? Math.max(0, Math.min(1, (beatInLine - prevBeat) / span)) : 0;
+      x0 = prevX + ratio * (nextX - prevX);
     }
-    // 防回退:同一行内播放头不得往左跳。高音(节奏主驱动)有间隙时,bass 长音的位置可能在
-    // 当前播放头左侧(如欢乐颂第2小节末),跟随它会造成视觉回退。行内取 max(x0, 上次位置),
-    // 让播放头在间隙处停留等下一个音,而非倒退。换行(sysIdx 变化)时重置,允许跳到新行首位。
-    if (sysIdx === lastPlayheadSys && lastPlayheadX0 >= 0) {
-      x0 = Math.max(x0, lastPlayheadX0);
-    }
-    lastPlayheadX0 = x0;
-    lastPlayheadSys = sysIdx;
     // 横向:符头宽(盖住符头 2×noteHeadHalf)→ 像素,加 SVG 在 sheet 内的左偏移。
     const wPx = lay.noteHeadHalf * 2 * scale;
     const leftPx = svgLeftInSheet + x0 * scale - wPx / 2;
