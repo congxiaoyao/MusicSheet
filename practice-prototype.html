@@ -365,10 +365,10 @@ html, body { height: 100%; overflow: hidden;
 }
 .pr-resizer-thumb:hover { transform: translate(-50%, -50%) scale(1.15); }
 
-/* 高度图标容器：三个方案并排供挑选 */
+/* 高度调整：文字 + CSS三角箭头（不用字符） */
 .pr-resizer-height {
   flex: none;
-  width: 28px;
+  width: 30px;
   height: 44px;
   display: flex;
   flex-direction: column;
@@ -377,59 +377,34 @@ html, body { height: 100%; overflow: hidden;
   gap: 3px;
   cursor: ns-resize;
   border-left: 1px solid var(--line-2);
-  margin-left: 2px;
+  margin-left: 4px;
   border-radius: 4px;
   transition: background 0.12s;
 }
 .pr-resizer-height:hover { background: var(--bg); }
 .pr-resizer-height:active { background: var(--accent-soft); }
 
-/* 方案A：上下箭头夹圆点 */
-.pr-resizer-height .h-arrow {
+/* CSS 三角箭头：上 */
+.pr-resizer-height .h-tri-up {
   width: 0; height: 0;
-  border-left: 4px solid transparent;
-  border-right: 4px solid transparent;
-  border-bottom: 5px solid var(--muted);
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-bottom: 6px solid var(--muted);
 }
-.pr-resizer-height .h-arrow-down {
+/* CSS 三角箭头：下 */
+.pr-resizer-height .h-tri-down {
   width: 0; height: 0;
-  border-left: 4px solid transparent;
-  border-right: 4px solid transparent;
-  border-top: 5px solid var(--muted);
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 6px solid var(--muted);
 }
-.pr-resizer-height .h-dot {
-  width: 6px; height: 6px;
-  border-radius: 50%;
-  background: var(--accent);
-}
-.pr-resizer-height:hover .h-arrow { border-bottom-color: var(--accent); }
-.pr-resizer-height:hover .h-arrow-down { border-top-color: var(--accent); }
+.pr-resizer-height:hover .h-tri-up { border-bottom-color: var(--accent); }
+.pr-resizer-height:hover .h-tri-down { border-top-color: var(--accent); }
 
-/* 方案B共用：文字标签 */
 .pr-resizer-height .grip-label {
-  font-size: 9px; color: var(--muted); font-weight: 500; line-height: 1;
+  font-size: 10px; color: var(--muted); font-weight: 500; line-height: 1;
 }
 .pr-resizer-height:hover .grip-label { color: var(--accent); }
-
-/* 方案C：竖向胶囊 */
-.pr-resizer-height .h-pill {
-  width: 8px; height: 22px;
-  border-radius: 4px;
-  border: 1.5px solid var(--muted);
-  position: relative;
-}
-.pr-resizer-height .h-pill::before {
-  content: '';
-  position: absolute;
-  left: 50%; top: 50%;
-  transform: translate(-50%, -50%);
-  width: 4px; height: 1.5px;
-  background: var(--muted);
-  border-radius: 1px;
-  box-shadow: 0 -4px 0 var(--muted), 0 4px 0 var(--muted);
-}
-.pr-resizer-height:hover .h-pill { border-color: var(--accent); }
-.pr-resizer-height:hover .h-pill::before { background: var(--accent); box-shadow: 0 -4px 0 var(--accent), 0 4px 0 var(--accent); }
 .key-w {
   flex: 1 1 0; position: relative;
   background: #fff;
@@ -552,19 +527,11 @@ html, body { height: 100%; overflow: hidden;
                 <div class="pr-resizer-thumb"></div>
               </div>
             </div>
-            <!-- 高度图标三个方案并排，供挑选 -->
+            <!-- 高度调整：文字 + CSS三角箭头 -->
             <div class="pr-resizer-height" id="heightDrag" title="上下拖改键盘高度">
-              <div class="h-arrow"></div>
-              <div class="h-dot"></div>
-              <div class="h-arrow-down"></div>
-            </div>
-            <div class="pr-resizer-height" title="文字+箭头">
-              <div class="h-arrow"></div>
+              <div class="h-tri-up"></div>
               <div class="grip-label">高度</div>
-              <div class="h-arrow-down"></div>
-            </div>
-            <div class="pr-resizer-height" title="竖向胶囊">
-              <div class="h-pill"></div>
+              <div class="h-tri-down"></div>
             </div>
           </div>
         </div>
