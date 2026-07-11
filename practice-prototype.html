@@ -305,18 +305,18 @@ html, body { height: 100%; overflow: hidden;
 }
 .pr-resizer-zone:hover::after { opacity: 0.5; }
 
-/* 卡片：左键宽滑块 + 右高度 grip。整体字号间距舒适。 */
+/* 卡片：左键宽滑块 + 右高度 grip */
 .pr-resizer-card {
   background: rgba(255,255,255,0.97);
   border: 1px solid var(--line);
   border-radius: 10px;
   box-shadow: 0 4px 16px rgba(16,24,40,0.14);
-  padding: 14px 16px;
+  padding: 10px 10px;
   width: 260px;
   display: flex;
   flex-direction: row;
   align-items: center;
-  gap: 14px;
+  gap: 10px;
   backdrop-filter: blur(8px);
   opacity: 0;
   pointer-events: none;
@@ -368,7 +368,7 @@ html, body { height: 100%; overflow: hidden;
 /* 高度调整：文字 + CSS三角箭头（不用字符） */
 .pr-resizer-height {
   flex: none;
-  width: 30px;
+  width: 36px;
   height: 44px;
   display: flex;
   flex-direction: column;
@@ -377,7 +377,8 @@ html, body { height: 100%; overflow: hidden;
   gap: 3px;
   cursor: ns-resize;
   border-left: 1px solid var(--line-2);
-  margin-left: 4px;
+  padding-left: 8px;       /* 分割线到图标内容的间距 */
+  margin-left: 2px;
   border-radius: 4px;
   transition: background 0.12s;
 }
@@ -400,6 +401,48 @@ html, body { height: 100%; overflow: hidden;
 }
 .pr-resizer-height:hover .h-tri-up { border-bottom-color: var(--accent); }
 .pr-resizer-height:hover .h-tri-down { border-top-color: var(--accent); }
+
+/* === 以下为箭头样式备选（并排展示供挑选）=== */
+
+/* 箭头B：V形（两条线组成的角度，用 CSS 旋转） */
+.pr-resizer-height .h-chev-up,
+.pr-resizer-height .h-chev-down {
+  width: 8px; height: 8px;
+  border-top: 1.5px solid var(--muted);
+  border-right: 1.5px solid var(--muted);
+}
+.pr-resizer-height .h-chev-up { transform: rotate(-45deg); margin-bottom: -2px; }
+.pr-resizer-height .h-chev-down { transform: rotate(135deg); margin-top: -2px; }
+.pr-resizer-height:hover .h-chev-up,
+.pr-resizer-height:hover .h-chev-down { border-color: var(--accent); }
+
+/* 箭头C：细线箭头（用 SVG-like 的 border 画细长箭头） */
+.pr-resizer-height .h-line-up,
+.pr-resizer-height .h-line-down {
+  width: 2px; height: 8px;
+  background: var(--muted);
+  position: relative;
+}
+.pr-resizer-height .h-line-up::before {
+  content: ''; position: absolute; top: 0; left: 50%;
+  width: 6px; height: 6px;
+  border-top: 1.5px solid var(--muted);
+  border-left: 1.5px solid var(--muted);
+  transform: translateX(-50%) rotate(45deg);
+  transform-origin: top left;
+}
+.pr-resizer-height .h-line-down::after {
+  content: ''; position: absolute; bottom: 0; left: 50%;
+  width: 6px; height: 6px;
+  border-bottom: 1.5px solid var(--muted);
+  border-right: 1.5px solid var(--muted);
+  transform: translateX(-50%) rotate(45deg);
+  transform-origin: bottom right;
+}
+.pr-resizer-height:hover .h-line-up,
+.pr-resizer-height:hover .h-line-down { background: var(--accent); }
+.pr-resizer-height:hover .h-line-up::before { border-color: var(--accent); }
+.pr-resizer-height:hover .h-line-down::after { border-color: var(--accent); }
 
 .pr-resizer-height .grip-label {
   font-size: 10px; color: var(--muted); font-weight: 500; line-height: 1;
@@ -527,11 +570,21 @@ html, body { height: 100%; overflow: hidden;
                 <div class="pr-resizer-thumb"></div>
               </div>
             </div>
-            <!-- 高度调整：文字 + CSS三角箭头 -->
-            <div class="pr-resizer-height" id="heightDrag" title="上下拖改键盘高度">
+            <!-- 高度调整：三种箭头并排供挑选 -->
+            <div class="pr-resizer-height" title="三角箭头">
               <div class="h-tri-up"></div>
               <div class="grip-label">高度</div>
               <div class="h-tri-down"></div>
+            </div>
+            <div class="pr-resizer-height" title="V形箭头">
+              <div class="h-chev-up"></div>
+              <div class="grip-label">高度</div>
+              <div class="h-chev-down"></div>
+            </div>
+            <div class="pr-resizer-height" title="细线箭头">
+              <div class="h-line-up"></div>
+              <div class="grip-label">高度</div>
+              <div class="h-line-down"></div>
             </div>
           </div>
         </div>
