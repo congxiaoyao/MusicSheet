@@ -62,15 +62,16 @@ export interface WaterfallHandle {
 }
 
 // ── 常量(从原型迁移,按用户反馈调校) ─────────────────────
-/** 垂直像素/拍(下落速度)。原型 92,提到 115(变快约25%)。 */
-const PX_PER_BEAT = 115;
+/** 垂直像素/拍(下落速度)。原型 92,提到 130(长方块快速掠过,视觉紧凑)。 */
+const PX_PER_BEAT = 130;
 /** 方块高度系数:height = max(BLOCK_H_MIN, duration × PX_PER_BEAT × 系数)。
- *  原型 0.65,提到 1.0(方块变长约一倍:4分音符旧60px→新115px)。 */
-const BLOCK_H_FACTOR = 1.0;
+ *  原型 0.65,提到 1.5(用户指定)。4分音符 = 1×130×1.5 = 195px。 */
+const BLOCK_H_FACTOR = 1.5;
 /** 方块最小高度(px)。 */
-const BLOCK_H_MIN = 16;
-/** 可见窗上界:未来多少拍内可见。原型 5 拍,缩到 4(方块长,预告窗缩短避免顶出)。 */
-const VIS_DIST_MAX = 4;
+const BLOCK_H_MIN = 20;
+/** 可见窗上界:未来多少拍内可见。原型 5,缩到 3(方块高,预告窗短避免顶出:
+ *  4分音 yTop = 600-195-3×130 = 15 > 0)。 */
+const VIS_DIST_MAX = 3;
 /** 命中窗:|beat 差| < 0.15 → active(原型 L809)。 */
 const HIT_WINDOW = 0.15;
 
@@ -78,7 +79,8 @@ const HIT_WINDOW = 0.15;
 
 /** 把完整 Score 解析成 FallNote[]:treble→R、bass→L,用 rangeToPiece 算绝对 beat。
  *  rangeToPiece 预算 trebleBeats/bassBeats(按小节固定容器,空/半填小节不前移),
- *  保证和弦尾音/tuplet 的 beat 正确。 */
+ *  保证和弦尾音/tuplet 的 beat 正确。
+ *  连续相同音(midi 相同、紧邻无间隔)合并成一个长方块 —— 不做成独立碎块。 */
 export function parseFallNotes(score: Score): FallNote[] {
   const total = score.meta.totalMeasures;
   if (total <= 0) return [];
@@ -87,15 +89,38 @@ export function parseFallNotes(score: Score): FallNote[] {
   // noteStartBeats 读预设的 trebleBeats/bassBeats(若长度匹配)。
   const tStarts = noteStartBeats(treblePiece);
   const bStarts = noteStartBeats(bassPiece);
-  const out: FallNote[] = [];
+  const raw: FallNote[] = [];
   treblePiece.treble.forEach((n, i) => {
     if (n.midi === null) return;   // 休止符无方块
-    out.push({ midi: n.midi, beat: tStarts[i], duration: durationBeats(n), hand: 'R' });
+    raw.push({ midi: n.midi, beat: tStarts[i], duration: durationBeats(n), hand: 'R' });
   });
   bassPiece.bass.forEach((n, i) => {
     if (n.midi === null) return;
-    out.push({ midi: n.midi, beat: bStarts[i], duration: durationBeats(n), hand: 'L' });
+    raw.push({ midi: n.midi, beat: bStarts[i], duration: durationBeats(n), hand: 'L' });
   });
+  return mergeConsecutive(raw);
+}
+
+/** 合并连续相同音:相邻同 midi 同 hand 且前音结束=后音起始(无间隔)的,累加 duration 合并。
+ *  例:C4(0拍,1拍)+C4(1拍,1拍) → C4(0拍,2拍)一个方块。
+ *  有间隔(休止符隔开)或不同音的不合并。 */
+function mergeConsecutive(notes: FallNote[]): FallNote[] {
+  if (notes.length === 0) return [];
+  // 先按 hand + beat 排序,保证相邻关系正确。
+  const sorted = [...notes].sort((a, b) => a.hand === b.hand ? a.beat - b.beat : (a.hand < b.hand ? -1 : 1));
+  const out: FallNote[] = [];
+  let cur = { ...sorted[0] };
+  for (let i = 1; i < sorted.length; i++) {
+    const n = sorted[i];
+    // 同手 + 同 midi + 前音结束 = 后音起始 → 合并。
+    if (n.hand === cur.hand && n.midi === cur.midi && Math.abs(n.beat - (cur.beat + cur.duration)) < 0.01) {
+      cur.duration += n.duration;
+    } else {
+      out.push(cur);
+      cur = { ...n };
+    }
+  }
+  out.push(cur);
   return out;
 }
 
