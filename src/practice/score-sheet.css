@@ -1,0 +1,74 @@
+/* ScoreSheet 练琴页谱面组件样式
+ *
+ * 三档布局共享同一套滚动/渐变机制:
+ *   - .score-sheet:外层(填满练琴页谱面区)
+ *   - .score-sheet-scroll:滚动容器(提词器式行滚动,当前行锁定顶部清晰带)
+ *   - .score-sheet-sheet:谱面宿主(多行 SVG)
+ *
+ * 卡拉OK渐变:当前行(.ss-system.current)清晰,后续行(.future)半透明。
+ * 渐变范围按行高动态 —— 用 CSS linear-gradient 遮罩,当前行底部起约一行高度内
+ * 从清晰(opacity 1)过渡到半透明(opacity 0.35)。
+ * 文档 §6.4:三档行高不同,渐变范围不可写死,故用 em/行内单位 + JS 动态设遮罩高度。
+ */
+
+.score-sheet {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #f8fafc;
+}
+
+/* 滚动容器:提词器式。隐藏滚动条(谱面是主角,不显滚动条干扰)。
+ * 当前行锁定顶部清晰带(scrollTo 把当前行顶部对齐到 padding 顶)。 */
+.score-sheet-scroll {
+  width: 100%;
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scroll-behavior: smooth;
+  scrollbar-width: none;       /* Firefox */
+}
+.score-sheet-scroll::-webkit-scrollbar {
+  display: none;               /* Chrome/Safari */
+}
+
+/* 谱面宿主:承载多行 SVG。上下留出首行清晰带 + 末行滚动到底的空间。
+ * padding-top 让首行不贴顶;padding-bottom 让最后几行也能滚到位(文档需求 §4.1)。 */
+.score-sheet-sheet {
+  padding: 24px 24px 40vh 24px;
+  box-sizing: border-box;
+}
+.score-sheet-sheet svg {
+  display: block;
+  margin: 0 auto;
+}
+
+/* ── 卡拉OK渐变:当前行清晰,后续半透明 ────────────────────
+ * current/past 行完全清晰;future 行半透明(背景谱面)。
+ * 渐变过渡:用 opacity 分档 + transition,视觉上换行时平滑淡出。
+ * 精细的"一行高度内渐变"需渐变遮罩(后续视觉精修可加 mask-image)。 */
+.score-sheet-sheet .ss-system {
+  transition: opacity 320ms ease-out;
+  opacity: 1;
+}
+.score-sheet-sheet .ss-system.past {
+  opacity: 0.55;
+}
+.score-sheet-sheet .ss-system.future {
+  opacity: 0.35;
+}
+
+/* 当前行微微强调(可选:底部光带,标识"正在演奏")。 */
+.score-sheet-sheet .ss-system.current {
+  opacity: 1;
+}
+
+/* ── 符头高亮(谱面播放头,文档 §4)────────────────────────
+ * .note-elem / .jp-elem 默认 currentColor(黑色),播放时变高亮色。
+ * 高亮 = 变色(主色调),复用编辑器同款 class 语义(.playing)。 */
+.score-sheet-sheet .note-elem.playing,
+.score-sheet-sheet .jp-elem.playing {
+  fill: #2563eb;            /* 蓝色高亮(与瀑布流右手色系呼应,可后续统一) */
+  color: #2563eb;
+}

@@ -45,6 +45,11 @@ export interface RenderInput {
   playingIndex: number;
   /** 悬停预览的音高（null = 无悬停）。点击落点 x 用于画 ghost。 */
   hover: { midi: number; x: number } | null;
+  /** 抑制小节线/起始线/终止线的绘制(默认 false)。
+   *  编辑器不传(画自己的);ScoreSheet 传 true 后自己画贯穿双谱表的系统线。
+   *  用于练琴页大谱表:小节线需贯穿 treble+bass,终止线仅末行 —— staff.ts 单谱表
+   *  视角无法满足,故交给 ScoreSheet 统一画。不传时行为完全不变(零回归)。 */
+  suppressBarLines?: boolean;
 }
 
 // ── SVG 基元 ────────────────────────────────────────────────
@@ -860,7 +865,7 @@ export function renderStaffSVG(input: RenderInput): string {
   s += renderClef(piece, layout);
   s += renderKeySignature(piece, layout);
   s += renderTimeSignature(piece, layout);
-  s += renderBarLines(layout);
+  if (!input.suppressBarLines) s += renderBarLines(layout);
   s += renderNextSlot(layout);
   s += renderHover(input, layout);
   // 连梁：先算几何，画横梁（置于音符符头之下，符干之上 → 渲染顺序：梁先画，后画符头/符干会盖住梁端）

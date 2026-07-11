@@ -79,15 +79,18 @@ export function renderJianpuSVG(input: RenderInput): string {
   const baseY = layout.jianpuBaseline;
   let s = '';
 
-  // 小节竖线（淡色，与五线谱对齐）
-  for (let i = 1; i < layout.barLines.length - 1; i++) {
-    const x = layout.barLines[i];
-    s += line(x, layout.jianpuTop + 6, x, layout.jianpuBottom - 6, '#cbd5e1', 1);
+  // 小节竖线 + 起止竖线(淡色)。suppressBarLines 时跳过 —— ScoreSheet 统一画贯穿双行的系统线
+  // (规范:简谱双行小节线应贯穿上下对齐,与五线谱大谱表同理)。
+  if (!input.suppressBarLines) {
+    // 小节竖线（淡色，与五线谱对齐）
+    for (let i = 1; i < layout.barLines.length - 1; i++) {
+      const x = layout.barLines[i];
+      s += line(x, layout.jianpuTop + 6, x, layout.jianpuBottom - 6, '#cbd5e1', 1);
+    }
+    // 起止竖线
+    s += line(layout.barLines[0], layout.jianpuTop + 6, layout.barLines[0], layout.jianpuBottom - 6, '#94a3b8', 1.4);
+    s += line(layout.barLines[layout.barLines.length - 1], layout.jianpuTop + 6, layout.barLines[layout.barLines.length - 1], layout.jianpuBottom - 6, '#94a3b8', 2.2);
   }
-  // 起止竖线
-  s += line(layout.barLines[0], layout.jianpuTop + 6, layout.barLines[0], layout.jianpuBottom - 6, '#94a3b8', 1.4);
-  s += line(layout.barLines[layout.barLines.length - 1], layout.jianpuTop + 6, layout.barLines[layout.barLines.length - 1], layout.jianpuBottom - 6, '#94a3b8', 2.2);
-
   // 把 notes 切成「时间位」:连续同 chordId 归一段;无 chordId 单音自成一段 [start,end]
   const slots: [number, number][] = [];
   for (let i = 0; i < piece.notes.length;) {

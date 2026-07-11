@@ -41,6 +41,9 @@ export const G = {
   legerLine: glyph('legerLine'),
   timeSig: (d: number) => glyph(`timeSig${d}`),
   timeSigCommon: glyph('timeSigCommon'),
+  /** 连谱号 brace(U+E000)。ScoreSheet 用于连接 treble+bass 两谱表(跨整个 system 高度)。
+   *  字形宽高比大,需配合 viewBox 缩放定位(见 score-sheet.ts renderBrace)。 */
+  brace: glyph('brace'),
 };
 
 /** 字形前进宽度（以 staff space 为单位，em = 4 staff spaces）。来自 Bravura metadata。 */

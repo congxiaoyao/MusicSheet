@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ScoreSheet 演示 · 练琴谱面</title>
+    <style>
+      html, body {
+        margin: 0;
+        height: 100%;
+        background: #0f172a;
+        font-family: system-ui, -apple-system, sans-serif;
+        overflow: hidden;
+      }
+      #root { width: 100vw; height: 100vh; display: flex; flex-direction: column; }
+
+      .demo-bar {
+        display: flex;
+        gap: 16px;
+        align-items: center;
+        padding: 8px 16px;
+        background: #1e293b;
+        border-bottom: 1px solid #334155;
+        flex-shrink: 0;
+        height: 48px;
+        box-sizing: border-box;
+        flex-wrap: wrap;
+      }
+      .demo-btn-group { display: flex; gap: 4px; align-items: center; }
+      .demo-btn-label {
+        color: #64748b;
+        font-size: 11px;
+        margin-right: 4px;
+        white-space: nowrap;
+      }
+      .demo-btn {
+        background: #334155;
+        color: #cbd5e1;
+        border: 1px solid #475569;
+        padding: 4px 10px;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 12px;
+        white-space: nowrap;
+        transition: background 0.15s;
+      }
+      .demo-btn:hover { background: #475569; }
+      .demo-btn.active { background: #2563eb; border-color: #3b82f6; color: #fff; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/practice/demo.ts"></script>
+  </body>
+</html>

@@ -18,7 +18,6 @@ import { deserializeScore, scoreFileName } from '../core/serialize';
 import { twinkleExample } from './examples';
 import { Score, ScoreMeta, MeasureData, rangeToPiece, pieceBackToScore, emptyMeasure } from '../core/score';
 import { listPieces, createPiece as apiCreatePiece, getPiece as apiGetPiece, updateMeta as apiUpdateMeta, putMeasure, deletePiece as apiDeletePiece, exportPiece as apiExportScore, MeasureFlusher } from '../core/storage';
-import { buildPreviewModal, PreviewModalHandle } from './score-preview-modal';
 import { buildPromptModal, PromptModalHandle } from './prompt-modal';
 import { buildLibrary, LibraryHandle } from './library';
 import { buildEditorBar, EditorBarHandle } from './editor-bar';
@@ -110,7 +109,6 @@ export class App {
   private editActionsEl: HTMLElement | null = null;
   /** 预览模式的 五线谱/简谱/两者 radio(挂在 edit-toolbar 内,仅预览可见)。 */
   private previewRadioEl: HTMLElement | null = null;
-  private previewModal: PreviewModalHandle | null = null;
   /** 通用自定义弹窗(新建起名等),替代原生 prompt。 */
   private promptModal: PromptModalHandle = buildPromptModal();
   /** 当前视图层级:library=曲谱库首屏;editor=编辑器(二级页)。 */
@@ -462,30 +460,35 @@ export class App {
     }
   }
 
-  /** 点小节书签:切编辑区到「从第 n 小节起的 N 个连续小节」。保留其它小节。 */
-  private selectMeasure(n0Based: number): void {
-    if (!this.score) return;
-    // 切前先 flush 当前窗口改动。
-    void this.flusher?.flush();
-    const maxStart = Math.max(0, this.score.meta.totalMeasures - this.tool.measureCount);
-    this.currentStartMeasure = Math.max(0, Math.min(n0Based, maxStart));
-    this.rebuildRangePiece();
-    this.player.stop();
-    this.playingIndex = -1;
-    this.currentBeat = 0;
-    this.playState = 'stopped';
-    this.hover = null;
-    this.currentChordId = null;
-    this.tupletProgress = null;
-    this.refreshEditorBar();
-    this.rebuildCards();
-    this.render();
+  /** 方向键 ←/→:普通 = 选框平移(start±1);Shift = 右把手(count±1)。
+   *  - ←/→:[1 2] 3 → 1 [2 3](start∓1)
+   *  - Shift+→:[1 2] 3 → [1 2 3](count+1);Shift+←:[1 2] → [1](count-1)
+   *  到边界不动。走 MS.setSelection(吸附动画)+ onMeasureSelectorChange(同步编辑区)。 */
+  private onArrowKey(delta: number, shift: boolean): void {
+    if (!this.score || !this.msHandle) return;
+    const total = this.score.meta.totalMeasures;
+    let newStart = this.currentStartMeasure;
+    let newCount = this.tool.measureCount;
+    if (shift) {
+      // 右把手:改 count,clamp 到 [1, min(MAX_COUNT=8, total-start)](MS 内部也会 clamp)
+      const maxCount = Math.min(8, total - newStart);
+      newCount = Math.max(1, Math.min(newCount + delta, maxCount));
+    } else {
+      // 平移:改 start,clamp 到 [0, total-count]
+      const maxStart = Math.max(0, total - newCount);
+      newStart = Math.max(0, Math.min(newStart + delta, maxStart));
+    }
+    if (newStart === this.currentStartMeasure && newCount === this.tool.measureCount) return;   // 无变化
+    this.msHandle.setSelection(newStart, newCount);
+    this.onMeasureSelectorChange(newStart, newCount);
   }
 
-  /** 打开整曲预览弹窗。 */
+  /** 打开整曲预览(练琴页)。
+   *  旧「整曲预览弹窗」(full-score.ts + score-preview-modal.ts) 已被 ScoreSheet 组件替代。
+   *  练琴页入口接线是后续 plan 的范围,此处暂留为占位提示。 */
   private openPreview(): void {
-    if (!this.score) { this.flash('无曲谱可预览'); return; }
-    this.previewModal?.open();
+    if (!this.score) { this.flash('无曲谱'); return; }
+    this.flash('练琴页开发中');
   }
 
   private buildDOM(): void {
@@ -515,12 +518,6 @@ export class App {
       },
     );
     this.editorHost.appendChild(this.editorBar.el);
-
-    // 整曲预览弹窗(惰性 open)。
-    this.previewModal = buildPreviewModal({
-      onSelectMeasure: (n) => this.selectMeasure(n),
-      getScore: () => this.score,
-    });
 
     this.toolbar = this.buildToolsPanelEl();
     this.editorHost.appendChild(this.toolbar);
@@ -1406,7 +1403,7 @@ export class App {
   private bindKeys(): void {
     window.addEventListener('keydown', (e) => {
       const tag = (e.target as HTMLElement)?.tagName;
-      if (tag === 'SELECT' || tag === 'INPUT') return;
+      if (tag === 'SELECT' || tag === 'INPUT' || (e.target as HTMLElement)?.isContentEditable) return;
       // 预览模式只读:除空格(播放控制)外,禁止所有编辑类快捷键。
       if (this.viewMode === 'preview' && e.key !== ' ') return;
       switch (e.key) {
@@ -1423,6 +1420,8 @@ export class App {
         case 'f': this.toggleTupletMode('quintuplet'); break;
         case 'x': this.toggleTupletMode('sextuplet'); break;
         case '0': this.appendRest(); break;
+        case 'ArrowLeft': this.onArrowKey(-1, e.shiftKey); e.preventDefault(); break;
+        case 'ArrowRight': this.onArrowKey(1, e.shiftKey); e.preventDefault(); break;
         case 'Backspace': this.deleteLastNote(); e.preventDefault(); break;
         case ' ': this.togglePlay(); e.preventDefault(); break;
       }
