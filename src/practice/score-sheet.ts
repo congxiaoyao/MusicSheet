@@ -741,14 +741,18 @@ export function buildScoreSheet(
     });
   };
 
-  /** 播放头定位:竖条按【拍位】线性落在当前小节的对应 x 上,纵向覆盖当前行
-   *  五线谱顶线到低音谱表底线(实际音乐范围,不含加线留白)。
+  /** 播放头定位:竖条跟随【最近一个 onset】的音符,纵向覆盖当前行五线谱顶线到
+   *  低音谱表底线(实际音乐范围,不含加线留白)。
    *
-   *  播放头是标准乐谱的【播放光标】——按拍位在 barLines 间线性插值,匀速单调前进:
-   *    - 不会跟随某组音符 noteX 跳动(那是符头高亮 updateHighlight 的职责);
-   *    - 不会因 treble 间隙/bass 长音位置偏移而回退或跳过某音;
-   *    - 经过的每个音(无论 treble 还是 bass)都被符头高亮覆盖,视觉上"播放头扫过该音"。
-   *  barLines 由 applyDensityBars 按音符密度分配小节宽度,故拍位→x 映射贴近音符实际排布。
+   *  模型:把 treble+bass 合并成一条按 startBeat 排序的统一时间线(等价于把两只手
+   *  合并到一张谱子)。播放头始终站在"最近一个已开始的 onset"的位置:
+   *    - 每个 onset(含 bass 长音如 G3)在它开始的瞬间都被站到 → 不飞越;
+   *    - onset 按 startBeat 递增,同小节内 noteX 也递增 → 不回退;
+   *    - 没有"选哪只手"的歧义 → 不跳过。
+   *  这与编辑页"跟随音符"思路一致;编辑页等宽布局下两组同 beat 的音同 x,隐含选 treble
+   *  即可;密度布局下两组同 beat 仍同 x(applyDensityBars 共用 barWidths + 同 offset),
+   *  故合并 onset 后跟随最近 onset 自然正确。
+   *  符头高亮(updateHighlight)独立指示"当前哪些音在响"(含持续中的长音)。
    *
    *  全部用纯几何 + svgRect 缩放换算。 */
   const updatePlayhead = (sysIdx: number, beatInLine: number) => {
@@ -759,19 +763,32 @@ export function buildScoreSheet(
     if (!svgEl) return;
     const svgRect = svgEl.getBoundingClientRect();
     const sheetRect = sheetEl.getBoundingClientRect();
-    // SVG 内坐标 → 像素:height:auto 下 scaleX=scaleY,用任一边换算一致。
     const scale = renderCache.width > 0 ? svgRect.width / renderCache.width : 1;
     const svgLeftInSheet = svgRect.left - sheetRect.left;
     const svgTopInSheet = svgRect.top - sheetRect.top;
-    const lay = sys.trebleLayout;
-    // 拍位 → 小节 → barLines 间线性插值。barLines[k] = 第 k 小节左线 x。
-    const bpb = beatsPerBar(sys.treblePiece.time);
-    const measureF = beatInLine / bpb;          // 行内小数小节号
-    const mIdx = Math.min(Math.floor(measureF), lay.barLines.length - 2);
-    const ratioInMeas = measureF - mIdx;        // 小节内比例 [0,1)
-    const x0 = lay.barLines[mIdx] + ratioInMeas * (lay.barLines[mIdx + 1] - lay.barLines[mIdx]);
+    const tLay = sys.trebleLayout;
+    const bLay = sys.bassLayout;
+    // 合并 onset:遍历两组所有音符的 startBeat,找"最近一个 ≤ beatInLine"的 onset。
+    // 同一 startBeat 可能有多个音(treble+bass 同起),它们 noteX 相同(共用 barWidths+offset),
+    // 取任一即可;这里取该 beat 上 x 最大的(更靠右的 onset 优先,视觉上跟随"最新出现"的音)。
+    const tStarts = noteStartBeats(sys.treblePiece);
+    const bStarts = noteStartBeats(sys.bassPiece);
+    let bestX0 = -1, bestStart = -Infinity;
+    for (let i = 0; i < tStarts.length; i++) {
+      if (tStarts[i] <= beatInLine + BEAT_EPS && tStarts[i] > bestStart) {
+        bestStart = tStarts[i]; bestX0 = tLay.noteX[i];
+      }
+    }
+    for (let i = 0; i < bStarts.length; i++) {
+      // 同 startBeat 的 bass 音与 treble 同 x;若 bass 的 start 更晚(更新 onset),优先取 bass。
+      if (bStarts[i] <= beatInLine + BEAT_EPS && bStarts[i] >= bestStart - BEAT_EPS) {
+        bestStart = bStarts[i]; bestX0 = bLay.noteX[i];
+      }
+    }
+    // 无 onset(行首拍0前/异常):退到内容左端。
+    const x0 = bestX0 >= 0 ? bestX0 : tLay.contentLeft;
     // 横向:符头宽(盖住符头 2×noteHeadHalf)→ 像素,加 SVG 在 sheet 内的左偏移。
-    const wPx = lay.noteHeadHalf * 2 * scale;
+    const wPx = tLay.noteHeadHalf * 2 * scale;
     const leftPx = svgLeftInSheet + x0 * scale - wPx / 2;
     // 纵向:覆盖五线谱顶线到低音谱表底线(实际音乐范围),不含加线留白。
     const topPx = svgTopInSheet + sys.staffTopY * scale;
