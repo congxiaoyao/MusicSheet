@@ -1,0 +1,231 @@
+/* Keyboard 练琴页钢琴组件样式
+ *
+ * 设计文档:docs/钢琴与方块组件设计.md §3。
+ * 类名前缀 kb-(与 playback-card 的 pb- 区分,避免冲突)。
+ *
+ * 坐标系基准(文档 §2.3,关键):.kb-keys 无 padding,白键 flex 等分 + 黑键百分比定位
+ * 与 key-coords 纯函数用同一套数学,天然对齐,不需要 rAF 兜底(修正 playback-card 的 padding 坑)。
+ *
+ * 浮空调整卡片(文档 §3.3,反复试错验证过):桥接容器覆盖窄带+间隙+卡片,间隙用 padding(内部)
+ * 而非 margin(外部),鼠标路径全程不断区。JS 控制显隐,不用 CSS :hover(断区问题)。
+ */
+
+.kb-keyboard {
+  --kb-hand-R: #2563eb;
+  --kb-hand-L: #ea580c;
+  --kb-hand-R-soft: rgba(37, 99, 235, 0.14);
+  --kb-hand-L-soft: rgba(234, 88, 12, 0.14);
+
+  position: relative;
+  width: 100%;
+  background: var(--line-2, #eef0f3);
+  border-top: 1px solid var(--line, #e6e8ec);
+  /* height 由 JS 设(高度调整) */
+  box-sizing: border-box;
+}
+
+/* 键区:承载白键(flex 排列,各键 width 由 JS 设 px)+ 黑键(绝对定位)。
+ * overflow hidden 裁掉超出容器的键(键数 ceil 补满,右侧超出裁掉)。 */
+.kb-keys {
+  position: relative;
+  height: 100%;
+  display: flex;
+  overflow: hidden;
+  background: var(--line-2, #eef0f3);
+}
+/* 白键:固定宽 px(width 由 JS 设),不再 flex 等分。
+ * flex:none 防止 flex 压缩键宽,保持精确 px。 */
+.kb-key-w {
+  flex: none;
+  position: relative;
+  background: #fff;
+  border: 1px solid var(--line, #e6e8ec);
+  border-top: none;
+  box-sizing: border-box;
+  border-radius: 0 0 4px 4px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding-bottom: 6px;
+  box-shadow: inset 0 -3px 0 rgba(16, 24, 40, 0.05);
+  z-index: 1;
+}
+.kb-key-w .kb-kname { font-size: 9px; color: var(--muted, #8b919c); font-weight: 600; }
+.kb-key-w .kb-klabel { font-size: 9px; color: var(--muted, #8b919c); font-weight: 600; }
+.kb-key-w .kb-ksolfege { font-size: 8px; color: var(--muted, #8b919c); }
+.kb-key-w .kb-koctave { font-size: 8px; color: var(--muted, #8b919c); }
+
+/* 黑键:绝对定位,left/width 由 JS 设 = midiToX%/blackKeyWidth% */
+.kb-key-b {
+  position: absolute;
+  top: 0;
+  height: 62%;
+  background: #1f2430;
+  border-radius: 0 0 3px 3px;
+  box-shadow: inset 0 -3px 0 rgba(0, 0, 0, 0.4), 0 1px 2px rgba(0, 0, 0, 0.2);
+  z-index: 3;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding-bottom: 4px;
+}
+.kb-key-b .kb-klabel { font-size: 7px; color: #cbd5e1; font-weight: 600; }
+.kb-key-b .kb-ksolfege { font-size: 7px; color: #cbd5e1; }
+
+/* 中央 C 标记 */
+.kb-key-w.kb-center-c::before {
+  content: '';
+  position: absolute;
+  top: 2px; left: 50%;
+  transform: translateX(-50%);
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--accent, #4f46e5);
+  opacity: 0.4;
+}
+
+/* ── 高亮:右手蓝/左手橙(与方块颜色一致,文档 §5.2) ── */
+.kb-key-w.glow-R { background: linear-gradient(180deg, #93c5fd, var(--kb-hand-R-soft)); }
+.kb-key-w.glow-L { background: linear-gradient(180deg, #fdba74, var(--kb-hand-L-soft)); }
+.kb-key-w.glow-R, .kb-key-w.glow-L {
+  box-shadow: inset 0 -3px 0 rgba(0, 0, 0, 0.08), 0 0 0 2px var(--accent-ring, rgba(79, 70, 229, 0.16));
+}
+.kb-key-b.glow-R { background: linear-gradient(180deg, #1d4ed8, var(--kb-hand-R)); }
+.kb-key-b.glow-L { background: linear-gradient(180deg, #c2410c, var(--kb-hand-L)); }
+.kb-key-b.glow-R, .kb-key-b.glow-L { box-shadow: 0 0 0 2px var(--accent-ring, rgba(79, 70, 229, 0.16)); }
+/* 高亮键文字色 */
+.kb-key-w.glow-R .kb-kname, .kb-key-w.glow-L .kb-kname,
+.kb-key-w.glow-R .kb-klabel, .kb-key-w.glow-L .kb-klabel { color: #9f1239; }
+
+/* ── 浮空调整卡片:hover 窄带时在键盘上方浮出 ──
+   桥接容器(kb-resizer-bridge)覆盖 窄带+间隙+卡片 的完整范围,
+   间隙用 padding(内部)而非 margin(外部),鼠标路径全程不断区。 */
+.kb-resizer-bridge {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 100%;           /* 底部贴键盘顶 */
+  padding-bottom: 6px;    /* 内部间隙:窄带到键盘的距离,鼠标在此区域内 */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  z-index: 12;
+  pointer-events: none;   /* 默认不拦截(让键盘正常交互) */
+}
+/* 窄带:桥接容器最底部 */
+.kb-resizer-zone {
+  position: absolute;
+  bottom: 0;              /* 贴桥接容器底(=键盘顶) */
+  left: 0; right: 0;
+  height: 6px;
+  pointer-events: auto;
+  z-index: 1;
+  cursor: default;
+}
+.kb-resizer-zone::after {
+  content: '';
+  position: absolute;
+  left: 45%; right: 45%;
+  top: 2px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--muted, #8b919c);
+  opacity: 0.2;
+  transition: opacity 0.15s;
+}
+.kb-resizer-zone:hover::after { opacity: 0.5; }
+
+/* 卡片:左键宽滑块 + 右高度 grip */
+.kb-resizer-card {
+  background: rgba(255, 255, 255, 0.97);
+  border: 1px solid var(--line, #e6e8ec);
+  border-radius: 10px;
+  box-shadow: 0 4px 16px rgba(16, 24, 40, 0.14);
+  padding: 10px 10px;
+  width: 340px;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  backdrop-filter: blur(8px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s;
+  margin-bottom: 10px;
+}
+.kb-resizer-card.open { opacity: 1; pointer-events: auto; }
+
+/* 键宽区 */
+.kb-resizer-keywidth { flex: 1; min-width: 0; }
+.kb-resizer-label {
+  font-size: 12px; color: var(--muted, #8b919c); margin-bottom: 8px; display: block;
+}
+.kb-resizer-label b { color: var(--ink, #16181d); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* 滑块轨道:固定高度,不用 flex 拉伸 */
+.kb-resizer-track {
+  position: relative;
+  width: 100%;
+  height: 6px;
+  background: var(--line, #e6e8ec);
+  border-radius: 3px;
+  cursor: ew-resize;
+}
+.kb-resizer-fill {
+  position: absolute; left: 0; top: 0; bottom: 0;
+  background: var(--accent, #4f46e5);
+  border-radius: 3px;
+  width: 50%;
+}
+.kb-resizer-thumb {
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  width: 16px; height: 16px;
+  border-radius: 50%;
+  background: var(--accent, #4f46e5);
+  border: 2px solid #fff;
+  cursor: ew-resize;
+  box-shadow: 0 1px 4px rgba(79, 70, 229, 0.4);
+  z-index: 2;
+  transition: transform 0.1s;
+}
+.kb-resizer-thumb:hover { transform: translate(-50%, -50%) scale(1.15); }
+
+/* 高度调整:V 形 chevron + 文字 */
+.kb-resizer-height {
+  flex: none;
+  width: 38px;
+  height: 44px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  cursor: ns-resize;
+  border-left: 1px solid var(--line-2, #eef0f3);
+  margin-left: 4px;        /* 分割线到图标的间距(在 box 外,不进 hover 高亮) */
+  padding: 0 6px;          /* 图标内容左右对称内边距,hover 高亮左右等距 */
+  border-radius: 4px;
+  transition: background 0.12s;
+}
+.kb-resizer-height:hover { background: var(--bg, #f6f7f9); }
+.kb-resizer-height:active { background: var(--accent-soft, #eef2ff); }
+
+/* V 形 chevron 箭头(CSS border 画,不用字符/emoji) */
+.kb-resizer-height .kb-h-chev-up,
+.kb-resizer-height .kb-h-chev-down {
+  width: 8px; height: 8px;
+  border-top: 1.5px solid var(--muted, #8b919c);
+  border-right: 1.5px solid var(--muted, #8b919c);
+}
+.kb-resizer-height .kb-h-chev-up { transform: rotate(-45deg); margin-bottom: -2px; }
+.kb-resizer-height .kb-h-chev-down { transform: rotate(135deg); margin-top: -2px; }
+.kb-resizer-height:hover .kb-h-chev-up,
+.kb-resizer-height:hover .kb-h-chev-down { border-color: var(--accent, #4f46e5); }
+
+.kb-resizer-height .kb-grip-label {
+  font-size: 10px; color: var(--muted, #8b919c); font-weight: 500; line-height: 1;
+}
+.kb-resizer-height:hover .kb-grip-label { color: var(--accent, #4f46e5); }
