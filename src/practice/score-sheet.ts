@@ -19,14 +19,14 @@ import { Score } from '../core/score';
 import './score-sheet.css';
 import { rangeToPiece } from '../core/score';
 import { Note, Piece } from '../core/types';
-import { resolvePitch } from '../core/theory';
+import { resolvePitch, noteToJianpu } from '../core/theory';
 import { durationBeats } from '../core/types';
 import { beatsPerBar } from '../core/types';
 import { computeLayout, Layout, NOTE_INK_HALF } from '../render/layout';
 import { G } from '../render/glyphs';
 import { renderStaffSVG, RenderInput } from '../render/staff';
 import { renderJianpuSVG } from '../render/jianpu';
-import { noteStartBeats, measureOfBeat, BEAT_EPS } from '../core/model';
+import { noteStartBeats, measureOfBeat, BEAT_EPS, computeMaxJianpuHeight } from '../core/model';
 
 // ── 谱面档 ──────────────────────────────────────────────────
 
@@ -302,6 +302,124 @@ function renderBrace(topY: number, botY: number, layout: Layout): string {
   return `<text class="ss-brace" data-top="${topY.toFixed(1)}" data-bot="${botY.toFixed(1)}" x="${x.toFixed(1)}" y="${baselineY.toFixed(1)}" font-family="Bravura" font-size="${fs.toFixed(1)}" text-anchor="middle" fill="#1f2430">${G.brace}</text>`;
 }
 
+// ── renderDigitBand:both 档的「五线下数字助记带」 ─────────────
+//   与 renderJianpuSVG 的区别:只画数字(1~7/0)+ 八度点 + 调外临时记号(♯♭),
+//   和弦纵向堆叠;**不画**减时线/短横/附点/tie/tuplet/小节线/nextSlot。
+//   时值由五线谱符头/符干/连梁承担,数字仅作音高助记。
+//   bandBaseline 之上/下对称分布(jianpuTop + halfHeight 居中),与 jianpu 纯档
+//   「jianpuBaseline = jianpuTop + needHalf」同构 —— 几何常量须与 jianpu.ts/model.ts 同源。
+const BAND_DIGIT_FS = 26;                       // 数字字号(同 jianpu.ts DIGIT_FS)
+const BAND_DIGIT_HEIGHT = BAND_DIGIT_FS * 0.72; // 数字字形高(baseline→顶)
+const BAND_DIGIT_DESCEND = BAND_DIGIT_FS * 0.18;// 数字下伸余量(baseline→底)
+const BAND_DOT_GAP = 6;                         // 八度点间距
+const BAND_DOT_R = 2.2;                         // 八度点半径
+const BAND_VOICE_GAP = 4;                       // 和弦声部间最小间隙
+const BAND_ACC_BASE = 10;                       // 临时记号左偏移基准(随 slot 宽缩放,见 jianpu.ts:13-19)
+const BAND_ACC_MIN = 5;
+const BAND_ACC_NARROW_SLOT = 30;
+const BAND_ACC_LIFT = 10;                       // 临时记号相对 baseline 上抬
+const BAND_ACC_SHARP_EXTRA_LIFT = 2;            // ♯ 重心偏低,额外上抬
+const BAND_NUMBER_FONT = '"Times New Roman", "Cambria", serif';
+/** 第 n 个(1-indexed)高音点中心距 baseline 的上偏移(y 减)。 */
+const bandDotUp = (n: number) => BAND_DIGIT_HEIGHT + 6 + (n - 1) * BAND_DOT_GAP;
+/** 第 n 个(1-indexed)低音点中心距 baseline 的下偏移(y 加)。 */
+const bandDotDn = (n: number) => BAND_DIGIT_DESCEND + 6 + (n - 1) * BAND_DOT_GAP;
+/** 声部 baseline 上方占据(正数)。 */
+const bandUpExtent = (octDots: number) => octDots > 0 ? bandDotUp(octDots) + BAND_DOT_R : BAND_DIGIT_HEIGHT;
+/** 声部 baseline 下方占据(正数)。 */
+const bandDnExtent = (octDots: number) => {
+  const n = octDots < 0 ? -octDots : 0;
+  const dots = n > 0 ? bandDotDn(n) + BAND_DOT_R : 0;
+  return Math.max(dots, BAND_DIGIT_DESCEND);
+};
+
+/**
+ * 渲染 both 档的数字带(SVG 片段)。数字按 layout.noteX 与五线谱符头垂直对齐。
+ * bandBaseline:数字带中线 baseline(SVG 内坐标,= jianpuTop + halfHeight)。
+ * 元素带 class="jp-elem" data-idx=首音,复用现有 .jp-elem.playing 高亮 + updateHighlight。 */
+function renderDigitBand(piece: Piece, layout: Layout, bandBaseline: number): string {
+  let s = '';
+  // 按 chordId 切时间位:连续同 chordId 归一段;无 chordId 单音自成一段 [start,end]。
+  const slots: [number, number][] = [];
+  for (let i = 0; i < piece.notes.length;) {
+    const cid = piece.notes[i].chordId;
+    let j = cid ? i : i + 1;
+    if (cid) while (j < piece.notes.length && piece.notes[j].chordId === cid) j++;
+    slots.push([i, j - 1]);
+    i = j;
+  }
+  const bandText = (content: string, x: number, y: number, fs: number, opts: { anchor?: string; weight?: string; dataIdx: number }): string => {
+    const weight = opts.weight ? ` font-weight="${opts.weight}"` : '';
+    return `<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" font-family='${BAND_NUMBER_FONT}' font-size="${fs}" text-anchor="${opts.anchor ?? 'middle'}" dominant-baseline="alphabetic" fill="currentColor" class="jp-elem"${weight} data-idx="${opts.dataIdx}">${content}</text>`;
+  };
+  const bandCircle = (cx: number, cy: number, dataIdx: number): string =>
+    `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${BAND_DOT_R}" fill="currentColor" class="jp-elem" data-idx="${dataIdx}"/>`;
+
+  for (const [s0, s1] of slots) {
+    const x = layout.noteX[s0];
+    const jpOpts = (weight?: string) => ({ weight, dataIdx: s0 });
+    // 组内非休止声部:休止过滤(noteToJianpu 对 midi=null 返回 {0,0,null},但助记带仍可画 0?
+    // —— 不画:休止在五线谱上有独立休止符,数字带不需要 0,留白更干净)。
+    type Member = { idx: number; jp: NonNullable<ReturnType<typeof noteToJianpu>> };
+    const members: Member[] = [];
+    for (let k = s0; k <= s1; k++) {
+      const jp = noteToJianpu(piece.notes[k], piece.key);
+      if (!jp || jp.digit === 0) continue;   // 休止跳过
+      members.push({ idx: k, jp });
+    }
+    if (members.length === 0) continue;
+
+    // 和弦纵排:按 midi 升序(高音在上),各声部 baseline 相对 bandBaseline 偏移,确保不重叠。
+    const sorted = members.slice().sort((a, b) => {
+      const ma = piece.notes[a.idx].midi ?? 0;
+      const mb = piece.notes[b.idx].midi ?? 0;
+      return ma - mb;
+    });
+    const nM = sorted.length;
+    const octOf = (m: Member) => m.jp.octaveDots;
+    const slotHeights = sorted.map(m => bandUpExtent(octOf(m)) + bandDnExtent(octOf(m)));
+    const totalH = slotHeights.reduce((a, b) => a + b, 0) + BAND_VOICE_GAP * (nM - 1);
+    // 各声部 baseline 相对 bandBaseline 的偏移:
+    //   单音:offset=0(数字始终在 bandBaseline,整行纵向对齐,八度点挂外侧)。
+    //   和弦:从 totalH 顶部起累加,高音在上、低音在下。
+    const offsets = new Map<number, number>();
+    if (nM === 1) {
+      offsets.set(sorted[0].idx, 0);
+    } else {
+      let topAcc = -totalH / 2;
+      for (const m of sorted) {
+        offsets.set(m.idx, topAcc + bandUpExtent(octOf(m)));
+        topAcc += bandUpExtent(octOf(m)) + bandDnExtent(octOf(m)) + BAND_VOICE_GAP;
+      }
+    }
+
+    // 临时记号左偏移(随 slot 宽缩放,与 jianpu.ts:172 同款)。
+    const slotW = layout.noteSlotW[s0];
+    const accOffset = Math.max(BAND_ACC_MIN, BAND_ACC_BASE - Math.max(0, BAND_ACC_NARROW_SLOT - slotW) * 0.35);
+
+    for (const m of members) {
+      const off = offsets.get(m.idx) ?? 0;
+      const yRow = bandBaseline + off;
+      const jp = m.jp;
+      // 调外临时记号(noteToJianpu 已自动过滤调内升降音:调内 ♯/♭ 的 accidental=null)。
+      if (jp.accidental === 'sharp') {
+        s += bandText('♯', x - accOffset, yRow - BAND_ACC_LIFT - BAND_ACC_SHARP_EXTRA_LIFT, BAND_DIGIT_FS * 0.7, jpOpts());
+      } else if (jp.accidental === 'flat') {
+        s += bandText('♭', x - accOffset, yRow - BAND_ACC_LIFT, BAND_DIGIT_FS * 0.7, jpOpts());
+      }
+      // 数字
+      s += bandText(String(jp.digit), x, yRow, BAND_DIGIT_FS, jpOpts('500'));
+      // 八度点:高音点在数字上方,低音点在数字下方(直接跟数字,无减时线避让)。
+      if (jp.octaveDots > 0) {
+        for (let d = 0; d < jp.octaveDots; d++) s += bandCircle(x, yRow - bandDotUp(d + 1), s0);
+      } else if (jp.octaveDots < 0) {
+        for (let d = 0; d < -jp.octaveDots; d++) s += bandCircle(x, yRow + bandDotDn(d + 1), s0);
+      }
+    }
+  }
+  return s;
+}
+
 // ── renderSystem:单行 treble+bass 大谱表(档1 纯五线) ───────
 
 /** 一行渲染结果(inner SVG + 该行可见高度 + 宽度)。 */
@@ -369,36 +487,102 @@ function renderSystem(
   const tInput: RenderInput = { piece: treblePiece, layout: trebleLayout, playingIndex: -1, hover: null, suppressBarLines: true };
   const bInput: RenderInput = { piece: bassPiece, layout: bassLayout, playingIndex: -1, hover: null, suppressBarLines: true };
   const tStaff = showStaff ? renderStaffSVG(tInput) : '';
-  const tJianpu = showJianpu ? renderJianpuSVG(tInput) : '';
   const bStaff = showStaff ? renderStaffSVG(bInput) : '';
-  const bJianpu = showJianpu ? renderJianpuSVG(bInput) : '';
+  // both 档:五线下画「数字助记带」(renderDigitBand),不再画整行简谱。
+  // jianpu 纯档:继续用 renderJianpuSVG(不受影响)。
+  // 数字带几何(both 档):数字「紧贴」五线谱底 —— bandBaseline 让最高数字顶距 staffBottom
+  //   约 DIGIT_TIGHT_GAP(6px),和弦向下堆叠(往 treble/bass 之间空白延伸,不顶五线)。
+  //   bandBottom = baseline + 最大下占高(含低音八度点),作可见区底。
+  //   **低音避让**:该行若有音符低到五线之下(下加线,step<0),其符头会侵入数字带区域。
+  //   取该行最低符头 y,把整行数字带下移到该符头墨迹之下(符头半高 + 间距),避免数字压符头。
+  //   treble/bass 都做(两者数字带都在各自五线下方,低音同理侵入)。
+  const isDigitBand = mode === 'both';
+  const DIGIT_TIGHT_GAP = 6;
+  /** piece 内所有声部的最大「上占高」(数字顶到 baseline 的距离,含高音八度点)。 */
+  const maxUpExtentOf = (piece: Piece): number => {
+    let mx = bandUpExtent(0);
+    for (const nt of piece.notes) {
+      if (nt.midi === null) continue;
+      const jp = noteToJianpu(nt, piece.key);
+      if (!jp || jp.digit === 0) continue;
+      mx = Math.max(mx, bandUpExtent(jp.octaveDots));
+    }
+    return mx;
+  };
+  /** 该行最低音符头相对 staffBottom 的下伸(正值=符头在五线下方)。无下加线音则返回 0。
+   *  用 resolvePitch(midi).step → y = staffBottom - step*ss/2;step<0 → y>staffBottom(下方)。 */
+  const lowestHeadOffset = (piece: Piece, layout: Layout): number => {
+    const ss2 = layout.staffSpace;
+    let maxBelow = 0;   // 最低符头中心相对 staffBottom 的下伸(正数)
+    for (const nt of piece.notes) {
+      if (nt.midi === null) continue;
+      const { step } = resolvePitch(nt.midi, piece.clef, piece.key, nt.accidental);
+      const below = -step * ss2 / 2;   // step<0 → below>0(符头在五线下方)
+      if (below > maxBelow) maxBelow = below;
+    }
+    return maxBelow;
+  };
+  /** 数字带 baseline 相对 staffBottom 的下偏移 = max(紧贴量, 最低符头避让量)。
+   *  紧贴量 = GAP + maxUpExtent(数字顶贴 staffBottom+GAP);
+   *  避让量 = 最低符头下伸 + 符头半高(≈0.5ss)+ GAP(数字顶在符头墨迹之下)。 */
+  const bandBaselineOffset = (piece: Piece, layout: Layout): number => {
+    const tight = DIGIT_TIGHT_GAP + maxUpExtentOf(piece);
+    const headHalf = 0.5 * layout.staffSpace;   // 符头墨迹半高(≈1 step)
+    const avoid = lowestHeadOffset(piece, layout) + headHalf + DIGIT_TIGHT_GAP + maxUpExtentOf(piece);
+    return Math.max(tight, avoid);
+  };
+  /** piece 内所有声部的最大「下占高」(baseline 到数字底,含低音八度点),和弦按组取组总下伸。 */
+  const maxDownExtentOf = (piece: Piece): number => {
+    // 扫所有 slot(和弦组),取每组总下伸最大值。单声部下伸=bandDnExtent;和弦则最低声部 baseline
+    // 在组中心下方,组下伸 = totalH/2(若对称分布)。简化:取 computeMaxJianpuHeight 一半(对称模型)。
+    const h = computeMaxJianpuHeight(piece);
+    return Math.max(bandDnExtent(0), Math.ceil(h / 2));
+  };
+  const tBandBaseline = trebleLayout.staffBottom + bandBaselineOffset(treblePiece, trebleLayout);
+  const bBandBaseline = bassLayout.staffBottom + bandBaselineOffset(bassPiece, bassLayout);
+  const tBandBottom = tBandBaseline + maxDownExtentOf(treblePiece);
+  const bBandBottom = bBandBaseline + maxDownExtentOf(bassPiece);
+  const tJianpu = showJianpu
+    ? (isDigitBand ? renderDigitBand(treblePiece, trebleLayout, tBandBaseline) : renderJianpuSVG(tInput))
+    : '';
+  const bJianpu = showJianpu
+    ? (isDigitBand ? renderDigitBand(bassPiece, bassLayout, bBandBaseline) : renderJianpuSVG(bInput))
+    : '';
 
   // 可见区顶/底(按 mode 取 staff/jianpu 区段)。
-  //   staff/both: top=-viewBoxYOffset(高音加线扩展区),bottom=height(both 含简谱)或 jianpuTop(staff only)
-  //   jianpu:    top=jianpuTop, bottom=jianpuBottom(简谱区)
+  //   staff/both: top=-viewBoxYOffset(高音加线扩展区)
+  //     bottom: both=数字带底(数字带只占 jianpuTop~bandBottom,比原 height 矮);
+  //             staff only=jianpuTop;原 both=height(整行简谱)。
+  //   jianpu 纯档:top=jianpuTop, bottom=jianpuBottom(简谱区)
   const ss = trebleLayout.staffSpace;
   const visTop = (lay: Layout) => showStaff ? -lay.viewBoxYOffset : lay.jianpuTop;
-  const visBottom = (lay: Layout) => showStaff ? (showJianpu ? lay.height : lay.jianpuTop) : lay.jianpuBottom;
+  // visBottom 仅 jianpu 纯档用(brace/系统线简谱分支取简谱区底)。staff/both 各组已用 tVisBottom/bVisBottom。
+  const visBottom = (lay: Layout) => lay.jianpuBottom;
+  const tVisBottom = showStaff ? (showJianpu ? (isDigitBand ? tBandBottom : trebleLayout.height) : trebleLayout.jianpuTop) : trebleLayout.jianpuBottom;
+  const bVisBottom = showStaff ? (showJianpu ? (isDigitBand ? bBandBottom : bassLayout.height) : bassLayout.jianpuTop) : bassLayout.jianpuBottom;
   // 简谱档上下加留白(简谱内容太贴近边缘,与 buildGrandSVG 一致)。
   const jpPad = showStaff && showJianpu ? 0 : (!showStaff ? 28 : 0);
   const tTop = visTop(trebleLayout) - jpPad;
-  const tBot = visBottom(trebleLayout);
+  const tBot = tVisBottom;
   const bTop = visTop(bassLayout) - jpPad;
-  const bBot = visBottom(bassLayout) + jpPad;
+  const bBot = bVisBottom + jpPad;
   const tVisH = tBot - tTop;
   const lineW = Math.max(trebleLayout.width, bassLayout.width);
 
   // treble 组:translate 抵消可见区顶部(可见内容从 y=0 起)。按 mode 包含 staff-group/jianpu-group。
   const trebleGroup = `<g class="ss-treble" transform="translate(0, ${(-tTop).toFixed(2)})">${showStaff ? `<g class="staff-group">${tStaff}</g>` : ''}${showJianpu ? `<g class="jianpu-group">${tJianpu}</g>` : ''}</g>`;
-  // bass 组:平移到 treble 可见高度之下。
-  // staff 档(纯五线):treble五线底↔bass五线顶 间距 = STAFF_GAP_SS(标准 6 staff space)。
+  // bass 组:平移到 treble 之下。
+  // staff/both 档:treble五线底↔bass五线顶 间距 = STAFF_GAP_SS(标准 6 staff space)。
   //   STAFF_GAP_SS=8.4 是设定值,实测因坐标系偏差约等于 6ss。
+  //   both 档复用同款间距 —— 数字带落在两谱表之间的空白里(STAFF_GAP≈193px 远大于数字带高),
+  //   不额外撑开行高,故 both 行高 ≈ staff 行高 + 数字带超出 staffGap 的部分(几乎为 0)。
   //   **动态防重叠**:用 noteHeadRects 算 treble/bass 符头精确墨迹位置,若默认间距下重叠,
   //   增大间距。treble 符头在 treble 坐标系(+trebleTranslate=-tTop),bass 在 bass 坐标系
   //   (+bassTranslateY);先算默认 bassTranslateY,测重叠,若重叠则加 overlap 量。
+  //   both 档额外检查:treble 数字带底 vs bass 谱表顶(数字带超长和弦时可能需要下推 bass)。
   const STAFF_GAP_SS = 8.4;
   let bassTranslateY: number;
-  if (showStaff && !showJianpu) {
+  if (showStaff) {
     const trebleStaffBotY = -tTop + trebleLayout.staffBottom;
     bassTranslateY = trebleStaffBotY + STAFF_GAP_SS * ss - bassLayout.staffTop;
     // 动态防重叠:算符头墨迹,treble 最低底 vs bass 最高顶(都在堆叠坐标系)
@@ -411,6 +595,14 @@ function renderSystem(
       const gapPad = 1 * ss;   // 符头间最小安全间距 1ss
       const overlap = tLowBot + gapPad - bHighTop;
       if (overlap > 0) bassTranslateY += overlap;   // bass 下移,消除重叠
+    }
+    // both 档:数字带底(treble 坐标系 tBandBottom + treble translate) vs bass 谱表顶。
+    if (isDigitBand) {
+      const trebleTranslateY = -tTop;
+      const bandLowBot = tBandBottom + trebleTranslateY;
+      const bHighTop2 = bassTranslateY + bassLayout.staffTop;   // bass 五线第一线(堆叠坐标)
+      const bandOverlap = bandLowBot + 4 - bHighTop2;            // 4px 安全间距
+      if (bandOverlap > 0) bassTranslateY += bandOverlap;
     }
   } else {
     bassTranslateY = tVisH - bTop;
