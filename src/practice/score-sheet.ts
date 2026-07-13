@@ -735,7 +735,7 @@ interface SystemGeom {
 /** 渲染整个乐谱为多行 SVG(三档 mode + 密度 preset)。各 system 用 translate 垂直堆叠。 */
 export function renderScore(score: Score, width: number, mode: ScoreMode, preset: DensityPreset = DENSITY_PRESETS.compact): ScoreRender {
   const systems = planSystems(score, width, preset);
-  const SYSTEM_GAP = 10;
+  const SYSTEM_GAP = 6;
   const rendered = systems.map((sys, i) => {
     const ideal = sys.idealWidths ?? [preset.minBarW];   // planSystems 已算好,直接用
     return renderSystem(score, sys, i, systems.length, width, ideal, mode);
@@ -801,6 +801,10 @@ export function buildScoreSheet(
   playheadEl.style.display = 'none';
   sheetEl.appendChild(playheadEl);
 
+  // 当前行五线谱顶线距 scrollEl 视口顶的留白(谱号+连梁完整显示空间)。
+  // 声明在 render 前(render 动态算 padding-top 要用)。
+  const CURRENT_TOP_PAD = 90;
+
   // 最近一次渲染几何(供 onTick 用)。
   let renderCache: ScoreRender | null = null;
   // 当前高亮的音符 idx 集合(行内局部 idx),避免每帧无变化时重复 DOM 操作。
@@ -821,6 +825,20 @@ export function buildScoreSheet(
       svgEl.setAttribute('width', '100%');
       svgEl.setAttribute('height', 'auto');   // height auto:按 viewBox 比例自适应,scaleX=scaleY
       svgEl.removeAttribute('preserveAspectRatio');
+    }
+    // 动态 padding-top:让首行(sys0,scrollTop=0 无法上移)五线顶线天然落在清晰带。
+    // sys0 staffTopLine = scrollViewportTop + paddingTop + staffTopInSys×scale,目标 = +CURRENT_TOP_PAD,
+    // 故 paddingTop = CURRENT_TOP_PAD - staffTopInSys×scale。scale 随宽度变(宽度变→viewBox变→scale变),
+    // 故 paddingTop 必须动态算——固定值会在改宽度后偏(用户反馈"改宽度后定位不对")。
+    if (renderCache.systems.length > 0) {
+      const sys0 = renderCache.systems[0];
+      const staffTopInSys = sys0.staffTopY - sys0.yTop;   // sys0 五线顶线在 SVG 内的 y(恒定 ~60)
+      // scale = SVG 实际宽 / viewBox 宽。SVG width:100% 占 sheetEl content box(= clientWidth - 左右padding 48)。
+      // clientWidth 含 padding,需减去左右各 24 才是 SVG 实际占据宽。
+      const svgPxWidth = sheetEl.clientWidth - 48;
+      const scale = renderCache.width > 0 ? svgPxWidth / renderCache.width : 1;
+      const padTop = Math.max(0, CURRENT_TOP_PAD - staffTopInSys * scale);
+      sheetEl.style.paddingTop = padTop.toFixed(1) + 'px';
     }
     // innerHTML 清空了子节点,重新挂回播放头层。
     sheetEl.appendChild(playheadEl);
@@ -927,7 +945,6 @@ export function buildScoreSheet(
    *
    *  换算:用 SVG 在 scrollEl 内容坐标内的真实位置 + scale 把 staffTopY(SVG 内 y) 转成 scrollTop。
    *  scale 用 svgRect 高度 / viewBox 高(height:auto 下 scaleX=scaleY)。 */
-  const CURRENT_TOP_PAD = 90;   // 当前行五线谱顶线距 scrollEl 视口顶的留白(谱号+连梁完整显示空间)
   const scrollToSystem = (sysIdx: number) => {
     if (!renderCache) return;
     const sys = renderCache.systems[sysIdx];
