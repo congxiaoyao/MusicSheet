@@ -1,7 +1,8 @@
 // 五线谱渲染：谱号、调号、拍号、小节线、音符、下一个待输入位置的圆角矩形指示器
 
 import { Piece, Note } from '../core/types';
-import { staffStepToMidi, resolvePitch } from '../core/theory';
+import { staffStepToMidi, resolvePitch, CLEF_ANCHOR } from '../core/theory';
+import { Accidental } from '../core/types';
 import { Layout } from './layout';
 import { G, advanceSS } from './glyphs';
 import { computeBeams, BeamGroup, beamCountForNote } from './beam';
@@ -893,8 +894,19 @@ export function renderStaffSVG(input: RenderInput): string {
 
 // ── 点击 → 音高 / x ─────────────────────────────────────────
 
-/** 把点击的 y 坐标换算成 MIDI（吸附到最近线/间）。stepToY 的反函数（1 step = staffSpace/2） */
-export function clickYToMidi(y: number, piece: Piece, layout: Layout): number {
+/** 把点击的 y 坐标换算成 MIDI（吸附到最近线/间）。stepToY 的反函数（1 step = staffSpace/2）。
+ *  调号感知:accidental=null(本位/遵循调号)时,若该位置的字母落在调号降号里 → midi-1,
+ *  升号里 → midi+1。例:Ab 调点 A3 位置 → 存 Ab3(56)而非 A3(57)。
+ *  accidental='sharp'/'flat' 时不做调号修正(forced 是显示修饰,保持自然音 midi)。 */
+export function clickYToMidi(y: number, piece: Piece, layout: Layout, accidental: Accidental = null): number {
   const step = Math.round((layout.bottomLineY - y) / (layout.staffSpace / 2));
-  return staffStepToMidi(piece.clef, step);
+  let midi = staffStepToMidi(piece.clef, step);
+  // 只在遵循调号(本位)时修正;forced(sharp/flat)保持自然音 midi。
+  if (accidental === null) {
+    const a = CLEF_ANCHOR[piece.clef];
+    const letter = (((a.letter + step) % 7) + 7) % 7;
+    if (piece.key.flats.includes(letter)) midi -= 1;
+    else if (piece.key.sharps.includes(letter)) midi += 1;
+  }
+  return midi;
 }

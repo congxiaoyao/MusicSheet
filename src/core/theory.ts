@@ -17,6 +17,7 @@ const CLEF_ANCHOR: Record<Clef, ClefAnchor> = {
   treble: { letter: 2, octave: 4 }, // 最下线 E4
   bass: { letter: 4, octave: 2 }, // 最下线 G2
 };
+export { CLEF_ANCHOR };
 
 /** (谱号, step) → MIDI（不带临时记号） */
 export function staffStepToMidi(clef: Clef, step: number): number {
@@ -128,8 +129,13 @@ export function resolvePitch(
     accidental = null;
   }
 
-  const { step } = midiToStaffStep(clef, midi);
   const octave = Math.floor(midi / 12) - 1;
+  // step 用上面已算出的 letter（调号感知）重算,保证 letter 和 step 一致。
+  // 旧实现调 midiToStaffStep(clef, midi),它不感知调号,对黑键 midi(如 Ab=56)会选错字母
+  // (midi=56 → letter=G、step=-5 G位置),但调号 Ab 下 letter 该是 A → step 该是 -4(A位置)。
+  // 用 letter 重算:step = (letter - 谱号letter) + (octave - 谱号octave) × 7。
+  const a = CLEF_ANCHOR[clef];
+  const step = (letter - a.letter) + (octave - a.octave) * 7;
   return { midi, letter, octave, accidental, step };
 }
 
