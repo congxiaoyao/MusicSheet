@@ -81,7 +81,7 @@ const HIT_WINDOW = 0.15;
 /** 把完整 Score 解析成 FallNote[]:treble→R、bass→L,用 rangeToPiece 算绝对 beat。
  *  rangeToPiece 预算 trebleBeats/bassBeats(按小节固定容器,空/半填小节不前移),
  *  保证和弦尾音/tuplet 的 beat 正确。
- *  连续相同音(midi 相同、紧邻无间隔)合并成一个长方块 —— 不做成独立碎块。 */
+ *  每个音一个独立方块(不做合并 —— 反复弹的同音如震音/16分重复,合并会丢失节奏感)。 */
 export function parseFallNotes(score: Score): FallNote[] {
   const total = score.meta.totalMeasures;
   if (total <= 0) return [];
@@ -90,38 +90,15 @@ export function parseFallNotes(score: Score): FallNote[] {
   // noteStartBeats 读预设的 trebleBeats/bassBeats(若长度匹配)。
   const tStarts = noteStartBeats(treblePiece);
   const bStarts = noteStartBeats(bassPiece);
-  const raw: FallNote[] = [];
+  const out: FallNote[] = [];
   treblePiece.treble.forEach((n, i) => {
     if (n.midi === null) return;   // 休止符无方块
-    raw.push({ midi: n.midi, beat: tStarts[i], duration: durationBeats(n), hand: 'R' });
+    out.push({ midi: n.midi, beat: tStarts[i], duration: durationBeats(n), hand: 'R' });
   });
   bassPiece.bass.forEach((n, i) => {
     if (n.midi === null) return;
-    raw.push({ midi: n.midi, beat: bStarts[i], duration: durationBeats(n), hand: 'L' });
+    out.push({ midi: n.midi, beat: bStarts[i], duration: durationBeats(n), hand: 'L' });
   });
-  return mergeConsecutive(raw);
-}
-
-/** 合并连续相同音:相邻同 midi 同 hand 且前音结束=后音起始(无间隔)的,累加 duration 合并。
- *  例:C4(0拍,1拍)+C4(1拍,1拍) → C4(0拍,2拍)一个方块。
- *  有间隔(休止符隔开)或不同音的不合并。 */
-function mergeConsecutive(notes: FallNote[]): FallNote[] {
-  if (notes.length === 0) return [];
-  // 先按 hand + beat 排序,保证相邻关系正确。
-  const sorted = [...notes].sort((a, b) => a.hand === b.hand ? a.beat - b.beat : (a.hand < b.hand ? -1 : 1));
-  const out: FallNote[] = [];
-  let cur = { ...sorted[0] };
-  for (let i = 1; i < sorted.length; i++) {
-    const n = sorted[i];
-    // 同手 + 同 midi + 前音结束 = 后音起始 → 合并。
-    if (n.hand === cur.hand && n.midi === cur.midi && Math.abs(n.beat - (cur.beat + cur.duration)) < 0.01) {
-      cur.duration += n.duration;
-    } else {
-      out.push(cur);
-      cur = { ...n };
-    }
-  }
-  out.push(cur);
   return out;
 }
 
