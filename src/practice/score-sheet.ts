@@ -974,13 +974,12 @@ export function buildScoreSheet(
    *  全部用纯几何 + svgRect 缩放换算。 */
   /** 设播放头 left。合并 onset 模型下 left 只在 onset 切换时变(离散跳跃),需 CSS transition
    *  平滑过渡。同行内 onset 切换总是往前的(noteX 递增),transition 不回退;
-   *  换行(sysIdx 变)跳到新行首,target 远小于 current,此时禁用 transition 瞬移避免回退假象。
+   *  换行(sysIdx 变)跳到新行首,top/height/left 全变,此时禁用所有 transition 瞬移,
+   *  避免横向回退假象 + 纵向平移滑动(用户反馈"换行纵向平移动画奇怪")。
    *  transition 时长 ~150ms:覆盖典型 onset 间隔(16分@120bpm=125ms),又不拖沓。 */
   const setPlayheadLeft = (target: number, sysIdx: number) => {
     const sameLine = sysIdx === lastPhSys;
-    playheadEl.style.transition = sameLine
-      ? 'left 0.15s linear, top 0.3s ease-out, height 0.3s ease-out'
-      : 'top 0.3s ease-out, height 0.3s ease-out';   // 换行:无 left transition,瞬移
+    playheadEl.style.transition = sameLine ? 'left 0.15s linear' : 'none';
     playheadEl.style.left = target.toFixed(1) + 'px';
     lastPhSys = sysIdx;
   };

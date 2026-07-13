@@ -89,7 +89,6 @@
   pointer-events: none;
   z-index: 3;
   box-sizing: border-box;
-  /* transition 由 JS 动态设(setPlayheadLeft):同行 onset 间 left 0.15s 平滑过渡;
-   * 换行时去掉 left transition 瞬移。此处仅留 top/height 默认。 */
-  transition: top 0.3s ease-out, height 0.3s ease-out;
+  /* transition 由 JS 动态设(setPlayheadLeft):同行 onset 间 left 0.15s 平滑;
+   * 换行时 transition:none 全瞬移(避免横向回退 + 纵向平移滑动)。 */
 }
