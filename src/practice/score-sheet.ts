@@ -311,7 +311,7 @@ function renderBrace(topY: number, botY: number, layout: Layout): string {
 //   「jianpuBaseline = jianpuTop + needHalf」同构 —— 几何常量须与 jianpu.ts/model.ts 同源。
 // 数字带整体缩放:相对 jianpu.ts 基准字号(26)的比例。缩放后数字/八度点/临时记号/间距等比变小,
 // 进一步压缩占用空间。改这一个值即可整体放大/缩小数字带。
-const BAND_SCALE = 0.5;
+const BAND_SCALE = 0.7;
 const BAND_DIGIT_FS = 26 * BAND_SCALE;          // 数字字号(同 jianpu.ts DIGIT_FS × 缩放)
 const BAND_DIGIT_HEIGHT = BAND_DIGIT_FS * 0.72; // 数字字形高(baseline→顶)
 const BAND_DIGIT_DESCEND = BAND_DIGIT_FS * 0.18;// 数字下伸余量(baseline→底)
@@ -932,15 +932,19 @@ export function buildScoreSheet(
     if (!renderCache) return;
     const sys = renderCache.systems[sysIdx];
     if (!sys) return;
-    const svgEl = sheetEl.querySelector('svg');
-    if (!svgEl) return;
-    const svgRect = svgEl.getBoundingClientRect();
-    const scale = renderCache.height > 0 ? svgRect.height / renderCache.height : 1;
-    // SVG 在 scrollEl 内容坐标内的 y 起点 = 当前屏幕 top - scrollEl 视口顶 + 已滚 scrollTop。
-    const svgTopInContent = svgRect.top - scrollEl.getBoundingClientRect().top + scrollEl.scrollTop;
-    // staffTopY(整曲 SVG 绝对 y)→ 内容坐标 scrollTop 目标。
-    const targetTop = svgTopInContent + sys.staffTopY * scale - CURRENT_TOP_PAD;
-    scrollEl.scrollTo({ top: Math.max(0, targetTop), behavior: 'smooth' });
+    // 用 rAF 延迟读取几何:render()/setScore/setMode/setDensity 刚 innerHTML 重建 SVG,
+    // 浏览器尚未 reflow,getBoundingClientRect 拿到旧布局 → scrollTop 算错(宽度变化后定位偏)。
+    // 推迟到下一帧(已 reflow)再读 svgRect,所有调用路径(onTick/seek/重渲染恢复)统一正确。
+    requestAnimationFrame(() => {
+      if (!renderCache) return;   // rAF 回调时可能已 destroy/重渲染
+      const svgEl = sheetEl.querySelector('svg');
+      if (!svgEl) return;
+      const svgRect = svgEl.getBoundingClientRect();
+      const scale = renderCache.height > 0 ? svgRect.height / renderCache.height : 1;
+      const svgTopInContent = svgRect.top - scrollEl.getBoundingClientRect().top + scrollEl.scrollTop;
+      const targetTop = svgTopInContent + sys.staffTopY * scale - CURRENT_TOP_PAD;
+      scrollEl.scrollTo({ top: Math.max(0, targetTop), behavior: 'smooth' });
+    });
   };
 
   /** 卡拉OK渐变:当前行及之前清晰,之后半透明。通过给每个 system 加 class 标记,
@@ -1087,24 +1091,31 @@ export function buildScoreSheet(
     setMode(m: ScoreMode) {
       if (m === mode) return;
       mode = m;
+      // render() 会重置 lastSysIdx=-1,先捕获当前行;重渲染后推迟一帧等 reflow 再恢复
+      // (getBoundingClientRect 在 reflow 前读到旧几何 → scrollTop 算错)。
+      const idx = lastSysIdx;
       render();
-      // mode 切换后行高变,若正在播放需重新对齐当前行。
-      if (lastSysIdx >= 0) {
-        scrollToSystem(lastSysIdx);
-        updateGradient(lastSysIdx);
-        notifyLineLayout(lastSysIdx);
+      if (idx >= 0) {
+        requestAnimationFrame(() => {
+          scrollToSystem(idx);
+          updateGradient(idx);
+          notifyLineLayout(idx);
+        });
       }
     },
     setDensity(key: string) {
       const preset = DENSITY_PRESETS[key];
       if (!preset || preset === density) return;
       density = preset;
+      // 同 setMode:render 前捕获 lastSysIdx,推迟一帧等 reflow 再恢复。
+      const idx = lastSysIdx;
       render();
-      // 密度切换后切行变了,重新对齐当前行。
-      if (lastSysIdx >= 0) {
-        scrollToSystem(lastSysIdx);
-        updateGradient(lastSysIdx);
-        notifyLineLayout(lastSysIdx);
+      if (idx >= 0) {
+        requestAnimationFrame(() => {
+          scrollToSystem(idx);
+          updateGradient(idx);
+          notifyLineLayout(idx);
+        });
       }
     },
     setScore(s: Score) {
