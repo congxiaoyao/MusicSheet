@@ -28,7 +28,7 @@ const SOLFEGE_SYLLABLES = ['do', 're', 'mi', 'fa', 'sol', 'la', 'si'];
 interface DemoState {
   bpm: number;
   currentIndex: number;                        // 当前播放到的音符下标（静态固定）
-  fingering: 'follow' | 'cfixed';              // 跟随乐谱调号 / 固定 C 调指法
+  fingering: 'follow' | 'cfixed';              // 原调指法 / 移调指法
   show: { name: boolean; solfege: boolean; octave: boolean };
 }
 
@@ -324,8 +324,8 @@ function renderSettings(): HTMLElement {
   const fingeRow = h('div', 'pb-set-row');
   const fingeSeg = h('div', 'seg');
   const fOpts: { v: DemoState['fingering']; label: string; title: string }[] = [
-    { v: 'cfixed', label: '固定 C 调', title: '简谱 1-7 永远映射到 C-D-E-F-G-A-B 白键，配合电钢琴移调' },
-    { v: 'follow', label: '跟随调号', title: '高亮乐谱真实音高（含黑键），电钢琴需关移调' },
+    { v: 'cfixed', label: '移调指法', title: '简谱 1-7 永远映射到 C-D-E-F-G-A-B 白键，配合电钢琴移调' },
+    { v: 'follow', label: '原调指法', title: '高亮乐谱真实音高（含黑键），电钢琴需关移调' },
   ];
   for (const o of fOpts) {
     const b = h('button', 'seg-btn', o.label);
