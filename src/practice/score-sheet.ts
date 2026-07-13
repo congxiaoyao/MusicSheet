@@ -5,7 +5,7 @@
 //   Step 2 渲染层 档1(纯五线大谱表):planSystems 密度切行 + renderSystem + 连谱号。✅(本步)
 //   Step 3 渲染层 档2/档3(简谱/对照)。
 //   Step 4 动态层(onTick 滚动 + 渐变 + 符头高亮)。
-//   Step 5 交互(点击小节 onSeek + setMode 三档切换)。
+//   Step 5 交互(点击谱面 onSeek beat 粒度 + setMode 三档切换)。
 //
 // 复用边界(文档 §8):
 //   - 直接 import(零改动):glyphs/layout/jianpu/score(model)/model/types
@@ -22,7 +22,7 @@ import { Note, Piece } from '../core/types';
 import { resolvePitch, noteToJianpu } from '../core/theory';
 import { durationBeats } from '../core/types';
 import { beatsPerBar } from '../core/types';
-import { computeLayout, Layout, NOTE_INK_HALF } from '../render/layout';
+import { computeLayout, Layout, NOTE_INK_HALF, STAFF_TOP_PRACTICE } from '../render/layout';
 import { G } from '../render/glyphs';
 import { renderStaffSVG, RenderInput } from '../render/staff';
 import { renderJianpuSVG } from '../render/jianpu';
@@ -43,12 +43,13 @@ export interface ScoreSheetInitial {
   density?: string;
 }
 
-/** 当前行底部位置变化时通知(供瀑布流组件算方块区上边界);点击小节跳转。 */
+  /** 当前行底部位置变化时通知(供瀑布流组件算方块区上边界);点击谱面跳转。 */
 export interface ScoreSheetCallbacks {
   /** 当前行底部位置变化时通知。瀑布流组件据此算方块区上边界。 */
   onLineLayout?: (info: { lineBottomY: number; linePx: number }) => void;
-  /** 点击某小节 → 跳转(进度融进谱面的交互)。 */
-  onSeek?: (measure: number) => void;
+  /** 点击谱面任意位置 → 跳转到该处的 beat(拍粒度:小节内按 x 比例线性反算拍位,
+   *  点哪跳哪,可命中半拍/连音等非音符起点)。beat 为整曲绝对 beat。 */
+  onSeek?: (beat: number) => void;
 }
 
 /** 组件句柄:谱面 DOM + 播放驱动 + 切档/换谱。由 controller 在 onTick 里调 onTick。 */
@@ -308,22 +309,25 @@ function renderBrace(topY: number, botY: number, layout: Layout): string {
 //   时值由五线谱符头/符干/连梁承担,数字仅作音高助记。
 //   bandBaseline 之上/下对称分布(jianpuTop + halfHeight 居中),与 jianpu 纯档
 //   「jianpuBaseline = jianpuTop + needHalf」同构 —— 几何常量须与 jianpu.ts/model.ts 同源。
-const BAND_DIGIT_FS = 26;                       // 数字字号(同 jianpu.ts DIGIT_FS)
+// 数字带整体缩放:相对 jianpu.ts 基准字号(26)的比例。缩放后数字/八度点/临时记号/间距等比变小,
+// 进一步压缩占用空间。改这一个值即可整体放大/缩小数字带。
+const BAND_SCALE = 0.5;
+const BAND_DIGIT_FS = 26 * BAND_SCALE;          // 数字字号(同 jianpu.ts DIGIT_FS × 缩放)
 const BAND_DIGIT_HEIGHT = BAND_DIGIT_FS * 0.72; // 数字字形高(baseline→顶)
 const BAND_DIGIT_DESCEND = BAND_DIGIT_FS * 0.18;// 数字下伸余量(baseline→底)
-const BAND_DOT_GAP = 6;                         // 八度点间距
-const BAND_DOT_R = 2.2;                         // 八度点半径
-const BAND_VOICE_GAP = 4;                       // 和弦声部间最小间隙
-const BAND_ACC_BASE = 10;                       // 临时记号左偏移基准(随 slot 宽缩放,见 jianpu.ts:13-19)
-const BAND_ACC_MIN = 5;
-const BAND_ACC_NARROW_SLOT = 30;
-const BAND_ACC_LIFT = 10;                       // 临时记号相对 baseline 上抬
-const BAND_ACC_SHARP_EXTRA_LIFT = 2;            // ♯ 重心偏低,额外上抬
+const BAND_DOT_GAP = 6 * BAND_SCALE;            // 八度点间距
+const BAND_DOT_R = 2.2 * BAND_SCALE;            // 八度点半径
+const BAND_VOICE_GAP = 4 * BAND_SCALE;          // 和弦声部间最小间隙
+const BAND_ACC_BASE = 10 * BAND_SCALE;          // 临时记号左偏移基准(随 slot 宽缩放,见 jianpu.ts:13-19)
+const BAND_ACC_MIN = 5 * BAND_SCALE;
+const BAND_ACC_NARROW_SLOT = 30 * BAND_SCALE;
+const BAND_ACC_LIFT = 10 * BAND_SCALE;          // 临时记号相对 baseline 上抬
+const BAND_ACC_SHARP_EXTRA_LIFT = 2 * BAND_SCALE; // ♯ 重心偏低,额外上抬
 const BAND_NUMBER_FONT = '"Times New Roman", "Cambria", serif';
 /** 第 n 个(1-indexed)高音点中心距 baseline 的上偏移(y 减)。 */
-const bandDotUp = (n: number) => BAND_DIGIT_HEIGHT + 6 + (n - 1) * BAND_DOT_GAP;
+const bandDotUp = (n: number) => BAND_DIGIT_HEIGHT + 6 * BAND_SCALE + (n - 1) * BAND_DOT_GAP;
 /** 第 n 个(1-indexed)低音点中心距 baseline 的下偏移(y 加)。 */
-const bandDotDn = (n: number) => BAND_DIGIT_DESCEND + 6 + (n - 1) * BAND_DOT_GAP;
+const bandDotDn = (n: number) => BAND_DIGIT_DESCEND + 6 * BAND_SCALE + (n - 1) * BAND_DOT_GAP;
 /** 声部 baseline 上方占据(正数)。 */
 const bandUpExtent = (octDots: number) => octDots > 0 ? bandDotUp(octDots) + BAND_DOT_R : BAND_DIGIT_HEIGHT;
 /** 声部 baseline 下方占据(正数)。 */
@@ -463,8 +467,9 @@ function renderSystem(
   const treblePiece = systemToPiece(score, sys, 'treble');
   const bassPiece = systemToPiece(score, sys, 'bass');
   // computeLayout:等宽基础布局(contentRight 固定,小节等分)。密度分配在 applyDensityBars 覆盖。
-  let trebleLayout = computeLayout(treblePiece, width, 'quarter');
-  let bassLayout = computeLayout(bassPiece, width, 'quarter');
+  // 传 STAFF_TOP_PRACTICE(60):练琴页多行堆叠时压缩五线顶留白,让行间距匀称(编辑页不受影响)。
+  let trebleLayout = computeLayout(treblePiece, width, 'quarter', undefined, undefined, undefined, STAFF_TOP_PRACTICE);
+  let bassLayout = computeLayout(bassPiece, width, 'quarter', undefined, undefined, undefined, STAFF_TOP_PRACTICE);
   // 密度驱动:按理想宽度比例重算 barLines/noteX(两组用同一套 trebleIdeal,保证小节线 x 对齐)。
   trebleLayout = applyDensityBars(treblePiece, trebleLayout, trebleIdeal, sys);
   bassLayout = applyDensityBars(bassPiece, bassLayout, trebleIdeal, sys);
@@ -524,11 +529,13 @@ function renderSystem(
   };
   /** 数字带 baseline 相对 staffBottom 的下偏移 = max(紧贴量, 最低符头避让量)。
    *  紧贴量 = GAP + maxUpExtent(数字顶贴 staffBottom+GAP);
-   *  避让量 = 最低符头下伸 + 符头半高(≈0.5ss)+ GAP(数字顶在符头墨迹之下)。 */
+   *  避让量 = 最低符头下伸 + 符头墨迹半高(≈0.6ss)+ 避让空隙(0.7ss)+ maxUpExtent。
+   *  避让空隙 > 紧贴 GAP:低音(下加线)符头与数字需明显空隙,否则视觉挤死(芒种尾奏 F3 案例)。 */
   const bandBaselineOffset = (piece: Piece, layout: Layout): number => {
     const tight = DIGIT_TIGHT_GAP + maxUpExtentOf(piece);
-    const headHalf = 0.5 * layout.staffSpace;   // 符头墨迹半高(≈1 step)
-    const avoid = lowestHeadOffset(piece, layout) + headHalf + DIGIT_TIGHT_GAP + maxUpExtentOf(piece);
+    const headInkHalf = 0.6 * layout.staffSpace;          // 符头墨迹半高(noteheadBlack 椭圆 ≈0.587ss,留余量)
+    const AVOID_GAP = 0.7 * layout.staffSpace;            // 低音避让时符头↔数字的空隙(≈16px)
+    const avoid = lowestHeadOffset(piece, layout) + headInkHalf + AVOID_GAP + maxUpExtentOf(piece);
     return Math.max(tight, avoid);
   };
   /** piece 内所有声部的最大「下占高」(baseline 到数字底,含低音八度点),和弦按组取组总下伸。 */
@@ -668,7 +675,13 @@ function renderSystem(
   }
 
   const svg = trebleGroup + bassGroup + systemLines + brace;
-  const height = tVisH + (bBot - bTop);
+  // 行高 = system 内可见内容底(bass translate 后的实际底)。
+  //   trebleGroup translate(-tTop)把 treble 可见顶拉到 y=0;bass translate 到 bassTranslateY,
+  //   其可见底 bBot(相对 bass 自身坐标)→ system 内实际底 = bassTranslateY + bBot。
+  //   故 height = bassTranslateY + bBot。
+  //   注:旧公式 tVisH + (bBot - bTop) 假设 bass 紧贴 treble(else 分支),对 staff/both 固定间距档
+  //   会虚高(bassTranslateY ≠ tVisH - bTop),导致行底留大段空白。
+  const height = bassTranslateY + bBot;
   return {
     svg,
     height,
@@ -722,7 +735,7 @@ interface SystemGeom {
 /** 渲染整个乐谱为多行 SVG(三档 mode + 密度 preset)。各 system 用 translate 垂直堆叠。 */
 export function renderScore(score: Score, width: number, mode: ScoreMode, preset: DensityPreset = DENSITY_PRESETS.compact): ScoreRender {
   const systems = planSystems(score, width, preset);
-  const SYSTEM_GAP = 40;
+  const SYSTEM_GAP = 10;
   const rendered = systems.map((sys, i) => {
     const ideal = sys.idealWidths ?? [preset.minBarW];   // planSystems 已算好,直接用
     return renderSystem(score, sys, i, systems.length, width, ideal, mode);
@@ -817,8 +830,8 @@ export function buildScoreSheet(
   };
   render();
 
-  // 点击谱面小节 → onSeek(进度融进谱面的交互,文档 §7)。
-  // 事件委托在 scrollEl(render 会重建 SVG 内部,绑在 SVG 上会丢失)。
+  // 点击谱面任意位置 → onSeek(beat 粒度)。事件委托在 scrollEl(render 会重建 SVG 内部,
+  // 绑在 SVG 上会丢失)。点哪跳哪:小节内按 x 比例线性反算拍位,可命中半拍/连音等位置。
   scrollEl.addEventListener('click', (e: MouseEvent) => {
     if (!renderCache || !callbacks.onSeek) return;
     const svgEl = sheetEl.querySelector('svg');
@@ -845,8 +858,16 @@ export function buildScoreSheet(
       if (svgX >= bl[k] && svgX < bl[k + 1]) { m = k; break; }
       if (k === bl.length - 2) m = k;   // 末尾兜底
     }
-    // 整曲 0-based 小节号 = 行起点 + 行内小节序号。
-    callbacks.onSeek(sys.plan.startMeasure + m);
+    // 小节内按 x 比例线性反算拍位(与 layout.positionInBar 的拍位→x 映射互逆)。
+    // positionInBar:x = bl[m] + beatInMeas/bpb × barW + NOTE_INK_HALF(符头半宽偏移,
+    //   让符头离开小节线)。反算时先减去该偏移,再按比例求拍位,点击符头中心即命中其起始拍。
+    const bpb = beatsPerBar(sys.treblePiece.time);
+    const barW = bl[m + 1] - bl[m];
+    const xAtBeat0 = svgX - NOTE_INK_HALF;
+    const ratio = barW > 0 ? Math.max(0, Math.min(1, (xAtBeat0 - bl[m]) / barW)) : 0;
+    const beatInMeas = ratio * bpb;
+    const absBeat = (sys.plan.startMeasure + m) * bpb + beatInMeas;
+    callbacks.onSeek(absBeat);
   });
 
   /** beat → 所在 system 索引(整曲绝对 beat 落在哪行)。末行兜底。 */

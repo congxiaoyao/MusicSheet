@@ -84,7 +84,7 @@ void ensureFontLoaded().then(() => {
   const sheet = buildScoreSheet(
     { score: songs[currentSong], mode: currentMode, density: currentDensity },
     {
-      onSeek: (m) => { console.log('seek measure', m); },
+      onSeek: (beat) => { console.log('seek beat', beat); },
       onLineLayout: (info) => { /* 瀑布流组件用,此处空 */ void info; },
     },
   );
