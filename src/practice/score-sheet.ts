@@ -1050,20 +1050,28 @@ export function buildScoreSheet(
     setPlayheadLeft(leftPx, sysIdx);
   };
 
-  /** 通知 onLineLayout:当前行底部 y(相对 el,屏幕坐标)。
-   *  瀑布流组件据此算方块区上边界(文档 §7 onLineLayout)。 */
+  /** 通知 onLineLayout:当前行底部 y(相对 el,固定坐标系——不随滚动变化)。
+   *  瀑布流组件据此算方块区上边界(文档 §7 onLineLayout)。
+   *
+   *  lineBottomY 是【相对 el 的固定 y】:SVG 在 sheetEl padding-top 之下,行底 y =
+   *  paddingTop + (sys.yTop + sys.height) × scale。不读 getBoundingClientRect(它随
+   *  scrollEl.scrollTop 变),保证改宽度/重渲染后行底位置稳定,不随滚动漂移。
+   *  rAF 延迟到 reflow 后:sheetEl.clientWidth(算 scale 用)在 render 后需 reflow 才准。 */
   const notifyLineLayout = (sysIdx: number) => {
-    if (!renderCache || !callbacks.onLineLayout) return;
+    if (!renderCache) return;
     const sys = renderCache.systems[sysIdx];
-    if (!sys) return;
-    const svgEl = sheetEl.querySelector('svg');
-    if (!svgEl) return;
-    const svgRect = svgEl.getBoundingClientRect();
-    const elRect = el.getBoundingClientRect();
-    const scale = renderCache.width > 0 ? svgRect.width / renderCache.width : 1;
-    // 当前行底部在 SVG 内 y = sys.yTop + sys.height → 像素 → 相对 el。
-    const lineBottomY = (sys.yTop + sys.height) * scale + (svgRect.top - elRect.top);
-    callbacks.onLineLayout({ lineBottomY, linePx: sys.height * scale });
+    const cb = callbacks.onLineLayout;
+    if (!sys || !cb) return;
+    requestAnimationFrame(() => {
+      if (!renderCache) return;
+      // scale = SVG 实际宽 / viewBox 宽(同 render 算 padding-top 用的口径)。
+      const svgPxWidth = sheetEl.clientWidth - 48;
+      const scale = renderCache.width > 0 ? svgPxWidth / renderCache.width : 1;
+      // SVG 在 sheetEl 内的固定顶部偏移 = paddingTop(JS 动态设),不含滚动偏移。
+      const paddingTop = parseFloat(getComputedStyle(sheetEl).paddingTop) || 0;
+      const lineBottomY = paddingTop + (sys.yTop + sys.height) * scale;
+      cb({ lineBottomY, linePx: sys.height * scale });
+    });
   };
 
   return {
@@ -1108,31 +1116,28 @@ export function buildScoreSheet(
     setMode(m: ScoreMode) {
       if (m === mode) return;
       mode = m;
-      // render() 会重置 lastSysIdx=-1,先捕获当前行;重渲染后推迟一帧等 reflow 再恢复
-      // (getBoundingClientRect 在 reflow 前读到旧几何 → scrollTop 算错)。
+      // render() 会重置 lastSysIdx=-1,先捕获当前行。重渲染后:
+      // updateGradient 同步(只 toggle class,不依赖 reflow);scrollToSystem/notifyLineLayout
+      // 各自用 rAF 等 reflow 后读几何(否则改宽度后旧几何 → 定位/方块区错乱)。
       const idx = lastSysIdx;
       render();
       if (idx >= 0) {
-        requestAnimationFrame(() => {
-          scrollToSystem(idx);
-          updateGradient(idx);
-          notifyLineLayout(idx);
-        });
+        updateGradient(idx);
+        scrollToSystem(idx);
+        notifyLineLayout(idx);
       }
     },
     setDensity(key: string) {
       const preset = DENSITY_PRESETS[key];
       if (!preset || preset === density) return;
       density = preset;
-      // 同 setMode:render 前捕获 lastSysIdx,推迟一帧等 reflow 再恢复。
+      // 同 setMode:render 前捕获 lastSysIdx,重渲染后恢复(updateGradient 同步,余者 rAF)。
       const idx = lastSysIdx;
       render();
       if (idx >= 0) {
-        requestAnimationFrame(() => {
-          scrollToSystem(idx);
-          updateGradient(idx);
-          notifyLineLayout(idx);
-        });
+        updateGradient(idx);
+        scrollToSystem(idx);
+        notifyLineLayout(idx);
       }
     },
     setScore(s: Score) {
