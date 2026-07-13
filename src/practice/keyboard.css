@@ -103,9 +103,10 @@
 .kb-key-b.glow-R { background: linear-gradient(180deg, #1d4ed8, var(--kb-hand-R)); }
 .kb-key-b.glow-L { background: linear-gradient(180deg, #c2410c, var(--kb-hand-L)); }
 .kb-key-b.glow-R, .kb-key-b.glow-L { box-shadow: 0 0 0 2px var(--accent-ring, rgba(79, 70, 229, 0.16)); }
-/* 高亮键文字色 */
+/* 高亮键文字色:白键高亮底色浅(浅蓝/浅橙),文字用深墨色(清晰且与蓝橙底都协调);
+ * 黑键高亮底色深,文字保持白色(继承默认)。 */
 .kb-key-w.glow-R .kb-kname, .kb-key-w.glow-L .kb-kname,
-.kb-key-w.glow-R .kb-klabel, .kb-key-w.glow-L .kb-klabel { color: #9f1239; }
+.kb-key-w.glow-R .kb-klabel, .kb-key-w.glow-L .kb-klabel { color: #1f2430; }
 
 /* ── 浮空调整卡片:hover 窄带时在键盘上方浮出 ──
    桥接容器(kb-resizer-bridge)覆盖 窄带+间隙+卡片 的完整范围,
