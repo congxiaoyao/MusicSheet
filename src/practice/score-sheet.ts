@@ -64,6 +64,11 @@ export interface ScoreSheetHandle {
   setDensity(key: string): void;
   /** 乐谱变更时重渲染。 */
   setScore(score: Score): void;
+  /** 当前行底部在屏幕上的 y(相对 viewport,含滚动偏移)。
+   *  瀑布流方块区据此实时跟随当前行(滚动时行屏幕位置变,方块区起点跟变)。
+   *  用纯几何(sys.yTop+sys.height)×scale + SVG 屏幕偏移,不用 getBBox(text 虚高)。
+   *  返回 null 表示无当前行/未渲染。 */
+  currentLineBottomScreenY(): number | null;
 }
 
 // ── 换行算法:密度预设配置(文档 §5.3) ────
@@ -1143,6 +1148,17 @@ export function buildScoreSheet(
     setScore(s: Score) {
       score = s;
       render();
+    },
+    currentLineBottomScreenY() {
+      if (!renderCache) return null;
+      if (lastSysIdx < 0 || lastSysIdx >= renderCache.systems.length) return null;
+      const sys = renderCache.systems[lastSysIdx];
+      const svgEl = sheetEl.querySelector('svg');
+      if (!svgEl) return null;
+      const svgRect = svgEl.getBoundingClientRect();
+      const scale = renderCache.width > 0 ? svgRect.width / renderCache.width : 1;
+      // 当前行底部 SVG 内 y = sys.yTop + sys.height → 屏幕 y。
+      return svgRect.top + (sys.yTop + sys.height) * scale;
     },
   };
 }
