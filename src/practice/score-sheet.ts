@@ -807,6 +807,13 @@ export function buildScoreSheet(
   let lastHiTreble = new Set<number>();
   let lastHiBass = new Set<number>();
   let lastSysIdx = -1;
+  // 播放头横向插值动画状态:rAF 在"当前位置→目标位置"间插值,使音符间跳跃平滑滑动;
+  // 目标≤当前(换行跳转)瞬移不插值,避免回退假象。声明在 render 前(render 会重置它)。
+  const PLAYHEAD_ANIM_MS = 130;   // ~16分音符步进 125ms@120bpm
+  let playheadAnimFrom = -1;       // 插值起点 left(像素)
+  let playheadAnimTarget = -1;     // 目标 left
+  let playheadAnimStartT = 0;      // 插值开始时间戳
+  let playheadAnimRaf = 0;         // rAF handle
 
   // 渲染:算行宽(容器宽) → renderScore → 挂 SVG。
   // SVG 用 width:100% + height:auto(按 viewBox 自适应高度),保持 scaleX=scaleY=1。
@@ -827,6 +834,11 @@ export function buildScoreSheet(
     lastHiTreble = new Set();
     lastHiBass = new Set();
     lastSysIdx = -1;
+    // 重渲染后播放头位置体系变了,清插值动画状态(下次 updatePlayhead 从新位置起算)。
+    if (playheadAnimRaf) cancelAnimationFrame(playheadAnimRaf);
+    playheadAnimRaf = 0;
+    playheadAnimFrom = -1;
+    playheadAnimTarget = -1;
   };
   render();
 
@@ -967,7 +979,44 @@ export function buildScoreSheet(
    *  故合并 onset 后跟随最近 onset 自然正确。
    *  符头高亮(updateHighlight)独立指示"当前哪些音在响"(含持续中的长音)。
    *
+   *  横向平滑:用 rAF 在"当前位置→目标位置"间插值(目标>当前才插值,往前平滑滑动);
+   *  目标≤当前(换行跳到新行首)瞬移不插值,避免回退假象。纵向用 CSS transition。
    *  全部用纯几何 + svgRect 缩放换算。 */
+  const playheadAnimTick = () => {
+    if (playheadAnimFrom < 0 || playheadAnimTarget < 0) return;
+    const elapsed = performance.now() - playheadAnimStartT;
+    const t = Math.min(1, elapsed / PLAYHEAD_ANIM_MS);
+    // ease-out:快进慢停,符合"到位"的视觉预期
+    const eased = 1 - (1 - t) * (1 - t);
+    const cur = playheadAnimFrom + (playheadAnimTarget - playheadAnimFrom) * eased;
+    playheadEl.style.left = cur.toFixed(1) + 'px';
+    if (t < 1) {
+      playheadAnimRaf = requestAnimationFrame(playheadAnimTick);
+    } else {
+      playheadAnimRaf = 0;
+      playheadAnimFrom = playheadAnimTarget;   // 到位,后续从这继续
+    }
+  };
+  /** 设播放头 left:往前(target>当前)用 rAF 平滑插值;往后(换行)瞬移。
+   *  这样音符间跳跃平滑滑动,换行跳转不产生回退假象。 */
+  const setPlayheadLeft = (target: number) => {
+    const cur = playheadAnimRaf > 0 ? playheadAnimTarget : parseFloat(playheadEl.style.left) || target;
+    if (target >= cur - 0.5) {
+      // 往前(或原地):平滑插值
+      if (playheadAnimRaf) cancelAnimationFrame(playheadAnimRaf);
+      playheadAnimFrom = cur;
+      playheadAnimTarget = target;
+      playheadAnimStartT = performance.now();
+      playheadAnimRaf = requestAnimationFrame(playheadAnimTick);
+    } else {
+      // 往后(换行跳到新行首):瞬移,不插值
+      if (playheadAnimRaf) cancelAnimationFrame(playheadAnimRaf);
+      playheadAnimRaf = 0;
+      playheadAnimFrom = target;
+      playheadAnimTarget = target;
+      playheadEl.style.left = target.toFixed(1) + 'px';
+    }
+  };
   const updatePlayhead = (sysIdx: number, beatInLine: number) => {
     if (!renderCache) return;
     const sys = renderCache.systems[sysIdx];
@@ -1007,10 +1056,11 @@ export function buildScoreSheet(
     const topPx = svgTopInSheet + sys.staffTopY * scale;
     const heightPx = (sys.staffBotY - sys.staffTopY) * scale;
     playheadEl.style.display = '';
-    playheadEl.style.left = leftPx.toFixed(1) + 'px';
     playheadEl.style.width = wPx.toFixed(1) + 'px';
     playheadEl.style.top = topPx.toFixed(1) + 'px';
     playheadEl.style.height = heightPx.toFixed(1) + 'px';
+    // 横向用 rAF 插值(往前平滑,换行瞬移)。
+    setPlayheadLeft(leftPx);
   };
 
   /** 通知 onLineLayout:当前行底部 y(相对 el,屏幕坐标)。
