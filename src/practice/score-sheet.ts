@@ -807,13 +807,7 @@ export function buildScoreSheet(
   let lastHiTreble = new Set<number>();
   let lastHiBass = new Set<number>();
   let lastSysIdx = -1;
-  // 播放头横向插值动画状态:rAF 在"当前位置→目标位置"间插值,使音符间跳跃平滑滑动;
-  // 目标≤当前(换行跳转)瞬移不插值,避免回退假象。声明在 render 前(render 会重置它)。
-  const PLAYHEAD_ANIM_MS = 130;   // ~16分音符步进 125ms@120bpm
-  let playheadAnimFrom = -1;       // 插值起点 left(像素)
-  let playheadAnimTarget = -1;     // 目标 left
-  let playheadAnimStartT = 0;      // 插值开始时间戳
-  let playheadAnimRaf = 0;         // rAF handle
+  let lastPhSys = -1;   // 播放头上次所在 system(同行 onset 间用 transition,换行瞬移)
 
   // 渲染:算行宽(容器宽) → renderScore → 挂 SVG。
   // SVG 用 width:100% + height:auto(按 viewBox 自适应高度),保持 scaleX=scaleY=1。
@@ -834,11 +828,7 @@ export function buildScoreSheet(
     lastHiTreble = new Set();
     lastHiBass = new Set();
     lastSysIdx = -1;
-    // 重渲染后播放头位置体系变了,清插值动画状态(下次 updatePlayhead 从新位置起算)。
-    if (playheadAnimRaf) cancelAnimationFrame(playheadAnimRaf);
-    playheadAnimRaf = 0;
-    playheadAnimFrom = -1;
-    playheadAnimTarget = -1;
+    lastPhSys = -1;   // 重渲染后播放头行归属失效,下次设 left 默认瞬移
   };
   render();
 
@@ -982,40 +972,17 @@ export function buildScoreSheet(
    *  横向平滑:用 rAF 在"当前位置→目标位置"间插值(目标>当前才插值,往前平滑滑动);
    *  目标≤当前(换行跳到新行首)瞬移不插值,避免回退假象。纵向用 CSS transition。
    *  全部用纯几何 + svgRect 缩放换算。 */
-  const playheadAnimTick = () => {
-    if (playheadAnimFrom < 0 || playheadAnimTarget < 0) return;
-    const elapsed = performance.now() - playheadAnimStartT;
-    const t = Math.min(1, elapsed / PLAYHEAD_ANIM_MS);
-    // ease-out:快进慢停,符合"到位"的视觉预期
-    const eased = 1 - (1 - t) * (1 - t);
-    const cur = playheadAnimFrom + (playheadAnimTarget - playheadAnimFrom) * eased;
-    playheadEl.style.left = cur.toFixed(1) + 'px';
-    if (t < 1) {
-      playheadAnimRaf = requestAnimationFrame(playheadAnimTick);
-    } else {
-      playheadAnimRaf = 0;
-      playheadAnimFrom = playheadAnimTarget;   // 到位,后续从这继续
-    }
-  };
-  /** 设播放头 left:往前(target>当前)用 rAF 平滑插值;往后(换行)瞬移。
-   *  这样音符间跳跃平滑滑动,换行跳转不产生回退假象。 */
-  const setPlayheadLeft = (target: number) => {
-    const cur = playheadAnimRaf > 0 ? playheadAnimTarget : parseFloat(playheadEl.style.left) || target;
-    if (target >= cur - 0.5) {
-      // 往前(或原地):平滑插值
-      if (playheadAnimRaf) cancelAnimationFrame(playheadAnimRaf);
-      playheadAnimFrom = cur;
-      playheadAnimTarget = target;
-      playheadAnimStartT = performance.now();
-      playheadAnimRaf = requestAnimationFrame(playheadAnimTick);
-    } else {
-      // 往后(换行跳到新行首):瞬移,不插值
-      if (playheadAnimRaf) cancelAnimationFrame(playheadAnimRaf);
-      playheadAnimRaf = 0;
-      playheadAnimFrom = target;
-      playheadAnimTarget = target;
-      playheadEl.style.left = target.toFixed(1) + 'px';
-    }
+  /** 设播放头 left。合并 onset 模型下 left 只在 onset 切换时变(离散跳跃),需 CSS transition
+   *  平滑过渡。同行内 onset 切换总是往前的(noteX 递增),transition 不回退;
+   *  换行(sysIdx 变)跳到新行首,target 远小于 current,此时禁用 transition 瞬移避免回退假象。
+   *  transition 时长 ~150ms:覆盖典型 onset 间隔(16分@120bpm=125ms),又不拖沓。 */
+  const setPlayheadLeft = (target: number, sysIdx: number) => {
+    const sameLine = sysIdx === lastPhSys;
+    playheadEl.style.transition = sameLine
+      ? 'left 0.15s linear, top 0.3s ease-out, height 0.3s ease-out'
+      : 'top 0.3s ease-out, height 0.3s ease-out';   // 换行:无 left transition,瞬移
+    playheadEl.style.left = target.toFixed(1) + 'px';
+    lastPhSys = sysIdx;
   };
   const updatePlayhead = (sysIdx: number, beatInLine: number) => {
     if (!renderCache) return;
@@ -1059,8 +1026,8 @@ export function buildScoreSheet(
     playheadEl.style.width = wPx.toFixed(1) + 'px';
     playheadEl.style.top = topPx.toFixed(1) + 'px';
     playheadEl.style.height = heightPx.toFixed(1) + 'px';
-    // 横向用 rAF 插值(往前平滑,换行瞬移)。
-    setPlayheadLeft(leftPx);
+    // 横向:同行 onset 间用 CSS transition 平滑,换行瞬移。
+    setPlayheadLeft(leftPx, sysIdx);
   };
 
   /** 通知 onLineLayout:当前行底部 y(相对 el,屏幕坐标)。

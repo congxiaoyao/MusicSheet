@@ -89,8 +89,7 @@
   pointer-events: none;
   z-index: 3;
   box-sizing: border-box;
-  /* left 不加 transition:播放头 x0 由 JS 按拍位线性算出,本身单调匀速;加过渡会在
-   * 换行/步进时产生中间帧回退假象。125ms(16分@120bpm)步进 + 匀速 x0 已足够平滑。
-   * top/height 加过渡:换行时纵向移动更顺滑。 */
+  /* transition 由 JS 动态设(setPlayheadLeft):同行 onset 间 left 0.15s 平滑过渡;
+   * 换行时去掉 left transition 瞬移。此处仅留 top/height 默认。 */
   transition: top 0.3s ease-out, height 0.3s ease-out;
 }
