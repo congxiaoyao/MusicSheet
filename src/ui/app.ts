@@ -2,7 +2,7 @@
 // 录入模型：追加式（短信验证码）—— 只能往末尾加，只能从末尾删。
 
 import { Note, Piece, DurationValue, durationBeats, ViewMode, KeyName, TimeSig } from '../core/types';
-import { KEYS, resolvePitch } from '../core/theory';
+import { KEYS, resolvePitch, transposeShift } from '../core/theory';
 import { createPiece, appendNote, popNote, remainingBeats, remainingBeatsInCurrentBar, capacityBeats, totalBeats, totalBeatsBoth, noteStartBeats } from '../core/model';
 import { computeLayout } from '../render/layout';
 import { buildSVG, exportPNG, buildGrandSVG } from '../render/export';
@@ -306,8 +306,18 @@ export class App {
   }
 
   /** appbar 调号徽章:同步 tool.key 后走 onToolChange(落盘 + 重建)。 */
-  private changeKey(k: KeyName): void {
+  private async changeKey(k: KeyName): Promise<void> {
     if (this.tool.key === k) return;
+    // 已有音符时弹窗确认(转调会移位所有音高,不可撤销)。
+    const hasNotes = this.score && this.score.measures.some(m => m.treble.length || m.bass.length);
+    if (hasNotes) {
+      const ok = await this.promptModal.confirm({
+        title: `切换到 ${KEYS[k].name} 大调`,
+        message: '将转调所有音符（音高整体移位），不可撤销。确认？',
+        danger: true,
+      });
+      if (!ok) { this.refreshEditorBar(); return; }  // 取消:恢复顶栏显示,不改调号
+    }
     this.tool.key = k;
     this.onToolChange();
   }
@@ -1357,7 +1367,22 @@ export class App {
           key: this.score.meta.key, time: this.score.meta.time, viewMode: this.score.meta.viewMode,
         }).catch(err => this.flash('保存设置失败:' + err.message));
       } else if (oldKey !== newKey || oldViewMode !== this.tool.viewMode) {
-        // 仅调号/视图模式变:落盘 meta(不清音符)。
+        // 调号变:转调所有音符(midi 整体移位 + 清 accidental,新调号下重新算显示)。
+        if (oldKey !== newKey) {
+          const shift = transposeShift(KEYS[oldKey], KEYS[newKey]);
+          if (shift !== 0) {
+            for (let i = 0; i < this.score.meta.totalMeasures; i++) {
+              const m = this.score.measures[i] || emptyMeasure();
+              for (const n of [...m.treble, ...m.bass]) {
+                if (n.midi !== null) n.midi += shift;
+                n.accidental = null;
+              }
+              this.score.measures[i] = m;
+              if (this.flusher) this.flusher.markDirty(i, m);
+            }
+          }
+        }
+        // 落盘 meta(调号/视图模式)。
         void apiUpdateMeta(this.score.meta.id, {
           key: this.score.meta.key, viewMode: this.score.meta.viewMode,
         }).catch(err => this.flash('保存设置失败:' + err.message));

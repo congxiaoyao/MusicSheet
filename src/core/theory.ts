@@ -76,6 +76,21 @@ export function isInKeyFlat(key: KeySig, letter: number): boolean {
   return key.flats.includes(letter);
 }
 
+/** 调号主音的半音值(pc 0-11)。tonic 是字母索引,再按升降号修正
+ *  (主音字母在 sharps → +1,flats → -1)。如 Ab: tonic=5(A),A 在 flats → 9-1=8。 */
+export function keyTonicPc(key: KeySig): number {
+  let pc = NATURAL_SEMITONE[key.tonic];
+  if (key.sharps.includes(key.tonic)) pc = (pc + 1) % 12;
+  if (key.flats.includes(key.tonic)) pc = (pc + 11) % 12;
+  return pc;
+}
+
+/** 旧调→新调的半音偏移(最短路径,±6 内)。用于转调:所有音符 midi += shift。 */
+export function transposeShift(oldKey: KeySig, newKey: KeySig): number {
+  const diff = keyTonicPc(newKey) - keyTonicPc(oldKey);
+  return ((diff + 6) % 12 + 12) % 12 - 6;
+}
+
 export interface PitchInfo {
   midi: number;
   letter: number;
@@ -174,10 +189,7 @@ export function noteToJianpu(note: Note, key: KeySig): JianpuGlyph | null {
   const midi = note.midi;
   const pc = midi % 12;
   const tonicLetter = key.tonic;
-  // 主音的实际半音：若主音字母在调号升降里，要相应 ±1（如 Bb 大调主音 B 在 flats 里 → 11-1=10）
-  let tonicPc = NATURAL_SEMITONE[tonicLetter];
-  if (key.sharps.includes(tonicLetter)) tonicPc = (tonicPc + 1) % 12;
-  if (key.flats.includes(tonicLetter)) tonicPc = (tonicPc + 11) % 12;
+  const tonicPc = keyTonicPc(key);   // 主音半音(含调号升降修正)
 
   // 用「音级中心法」决定简谱数字与字母，避免升/降调下字母解析的二义性：
   // 遍历 7 个音级，找哪个音级的自然半音距 pc 最近 → 该音级即简谱数字。
