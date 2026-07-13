@@ -835,15 +835,21 @@ export function buildScoreSheet(
     // sys0 staffTopLine = scrollViewportTop + paddingTop + staffTopInSys×scale,目标 = +CURRENT_TOP_PAD,
     // 故 paddingTop = CURRENT_TOP_PAD - staffTopInSys×scale。scale 随宽度变(宽度变→viewBox变→scale变),
     // 故 paddingTop 必须动态算——固定值会在改宽度后偏(用户反馈"改宽度后定位不对")。
+    // 用 rAF 延迟读 clientWidth:render() 可能在 el 未挂 DOM 时调(practice-app 先 buildScoreSheet
+    // 再 appendChild),此时 clientWidth=0 → scale 算错 → padding-top 错(实测 92.7 而非 36)
+    // → 初始 scrollTop 非 0(用户可往上滑一段)。
     if (renderCache.systems.length > 0) {
       const sys0 = renderCache.systems[0];
       const staffTopInSys = sys0.staffTopY - sys0.yTop;   // sys0 五线顶线在 SVG 内的 y(恒定 ~60)
-      // scale = SVG 实际宽 / viewBox 宽。SVG width:100% 占 sheetEl content box(= clientWidth - 左右padding 48)。
-      // clientWidth 含 padding,需减去左右各 24 才是 SVG 实际占据宽。
-      const svgPxWidth = sheetEl.clientWidth - 48;
-      const scale = renderCache.width > 0 ? svgPxWidth / renderCache.width : 1;
-      const padTop = Math.max(0, CURRENT_TOP_PAD - staffTopInSys * scale);
-      sheetEl.style.paddingTop = padTop.toFixed(1) + 'px';
+      const applyPad = () => {
+        if (!renderCache) return;
+        const svgPxWidth = sheetEl.clientWidth - 48;   // content box 宽(减左右 padding 各 24)
+        if (svgPxWidth <= 0) { requestAnimationFrame(applyPad); return; }  // 还没布局,等下一帧
+        const scale = renderCache.width > 0 ? svgPxWidth / renderCache.width : 1;
+        const padTop = Math.max(0, CURRENT_TOP_PAD - staffTopInSys * scale);
+        sheetEl.style.paddingTop = padTop.toFixed(1) + 'px';
+      };
+      applyPad();
     }
     // innerHTML 清空了子节点,重新挂回播放头层。
     sheetEl.appendChild(playheadEl);
