@@ -20,11 +20,10 @@ import { noteToJianpu } from '../core/theory';
 import {
   KeyRange, whiteKeys, blackKeys, midiToX,
 } from './key-coords';
+import { Fingering, highlightMidi, whiteKeyOffset, CENTER_C } from './fingering';
 
-// ── 指法模式 ──────────────────────────────────────────────
-// (从 playback-card 复刻,不 import 以免耦合编辑器组件)
-/** cfixed:移调指法(简谱 1-7 映射 C 调白键,配合电钢琴移调);follow:原调指法,真实音高(含黑键)。 */
-export type Fingering = 'cfixed' | 'follow';
+// ── 指法模式(从 fingering.ts import) ─────────────────────
+// cfixed:移调指法(简谱 1-7 映射 C 调白键,配合电钢琴移调);follow:原调指法,真实音高(含黑键)。
 
 /** 键面标注方式。 */
 export type KeyLabels = 'name' | 'solfege' | 'octave' | 'none';
@@ -34,7 +33,6 @@ const NAMES_SHARP = ['C', 'C♯', 'D', 'D♯', 'E', 'F', 'F♯', 'G', 'G♯', 'A
 const ACCIDENTAL_GLYPH: Record<string, string> = { sharp: '♯', flat: '♭' };
 const SOLFEGE_SYLLABLES = ['do', 're', 'mi', 'fa', 'sol', 'la', 'si'];
 const WHITE_PCS = [0, 2, 4, 5, 7, 9, 11];
-const CENTER_C = 60;
 
 /** 键宽上下限(px,文档 §3.3):28~80。 */
 /** 键宽上下限(px,文档 §3.3)。MIN 降到 16:使窄屏/宽屏下都能触发 88 键封顶
@@ -64,38 +62,12 @@ function midiName(midi: number): { name: string; octave: number; isBlack: boolea
 
 function isC(midi: number): boolean { return ((midi % 12) + 12) % 12 === 0; }
 
-/** 从基准白键出发偏移 n 个白键后的 midi(n 可负)。(复刻 playback-card L88-96) */
-function whiteKeyOffset(baseWhiteMidi: number, n: number): number {
-  const basePc = ((baseWhiteMidi % 12) + 12) % 12;
-  const baseIdx = WHITE_PCS.indexOf(basePc);
-  const baseOctave = Math.floor(baseWhiteMidi / 12);
-  const total = baseIdx + n;
-  const octave = baseOctave + Math.floor(total / 7);
-  const idx = ((total % 7) + 7) % 7;
-  return octave * 12 + WHITE_PCS[idx];
-}
-
 /** midi → 首调唱名(do re mi,黑键带升号)。(复刻 playback-card L138-144) */
 function midiSolfege(midi: number, key: KeySig): string {
   const g = noteToJianpu({ midi, duration: 'quarter', dotted: false, accidental: null } as Note, key);
   if (!g || g.digit === 0) return '';
   const acc = g.accidental ? ACCIDENTAL_GLYPH[g.accidental] : '';
   return `${acc}${SOLFEGE_SYLLABLES[g.digit - 1]}`;
-}
-
-/** 把「乐谱里的某个音」按指法模式映射成「应高亮的 midi」。(复刻 playback-card L125-136)
- *  - follow:原音高
- *  - cfixed:简谱唱名映射回 C 调指法位置(同音级,保持八度点,升号→C 调黑键) */
-function highlightMidi(note: Note, key: KeySig, fingering: Fingering): number | null {
-  if (note.midi === null) return null;
-  if (fingering === 'follow') return note.midi;
-  const g = noteToJianpu(note, key);
-  if (!g || g.digit === 0) return null;
-  let m = whiteKeyOffset(CENTER_C, g.digit - 1);
-  m += g.octaveDots * 12;
-  if (g.accidental === 'sharp') m += 1;
-  else if (g.accidental === 'flat') m -= 1;
-  return m;
 }
 
 /** 以中央 C(60) 为中心、向两侧对称扩展白键,直到覆盖乐谱音域。(复刻 playback-card L101-120)

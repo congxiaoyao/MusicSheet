@@ -17,9 +17,10 @@
 import './waterfall.css';
 import { Score } from '../core/score';
 import { rangeToPiece } from '../core/score';
-import { durationBeats } from '../core/types';
+import { Note, KeySig, durationBeats } from '../core/types';
 import { noteStartBeats } from '../core/model';
 import { KeyRange, whiteKeys, midiToX, noteWidth } from './key-coords';
+import { Fingering, highlightMidi } from './fingering';
 
 // ── 数据结构(文档 §4.2) ──────────────────────────────────
 
@@ -40,6 +41,10 @@ export interface WaterfallInitial {
   range: KeyRange;
   /** 白键宽 px(传给 midiToX/noteWidth 用,与键盘同套坐标系)。 */
   whiteW: number;
+  /** 指法模式(原调/移调)。cfixed 时方块定位经 highlightMidi 映射到 C 调白键。 */
+  fingering: Fingering;
+  /** 调号(cfixed 映射用)。 */
+  key: KeySig;
 }
 
 export interface WaterfallCallbacks {
@@ -54,6 +59,8 @@ export interface WaterfallHandle {
   setNotes(notes: FallNote[]): void;
   /** 键宽/音域变化时重新算横轴 + inner 宽度(键盘拖滑块时 controller 调)。 */
   setKeyLayout(info: { range: KeyRange; whiteW: number }): void;
+  /** 指法模式变化时重新映射方块横轴(切原调/移调时 controller 调)。 */
+  setFingering(fingering: Fingering): void;
   /** 单手隔离:'both' | 'R' | 'L'。 */
   setHandFilter(hand: 'both' | 'R' | 'L'): void;
   /** 设置掉落区域上边界(ScoreSheet 当前行底部)+ 下边界(键盘顶部)。
@@ -110,6 +117,8 @@ export function buildWaterfall(initial: WaterfallInitial, cb: WaterfallCallbacks
   let notes: FallNote[] = initial.notes;
   let range: KeyRange = initial.range;
   let whiteW: number = initial.whiteW;
+  let fingering: Fingering = initial.fingering;
+  let key: KeySig = initial.key;
   let handFilter: 'both' | 'R' | 'L' = 'both';
   // 掉落区域(像素,相对 wf-fall 容器)。bottomY = 判定线(键盘上沿)。
   // topY = 上边界(ScoreSheet 当前行底部,接动态值时用于裁剪;测试页=0 不裁)。
@@ -140,7 +149,9 @@ export function buildWaterfall(initial: WaterfallInitial, cb: WaterfallCallbacks
     for (const n of notes) {
       const b = document.createElement('div');
       b.className = 'wf-note ' + n.hand;
-      b.textContent = midiName(n.midi);
+      // 标签用映射后的 midi(cfixed 移调时显示 C 调音名)。
+      const mapped = highlightMidi({ midi: n.midi, duration: 'quarter', dotted: false, accidental: null } as Note, key, fingering);
+      b.textContent = midiName(mapped ?? n.midi);
       b.style.opacity = '0';
       innerEl.appendChild(b);
       blockEls.push(b);
@@ -198,10 +209,14 @@ export function buildWaterfall(initial: WaterfallInitial, cb: WaterfallCallbacks
           opacity = Math.max(0, 1 - pastRatio);
         }
         bEl.style.opacity = String(opacity);
+        // 指法映射:cfixed(移调)时把真实 midi 经 highlightMidi 映射到 C 调白键位置。
+        // 与键盘高亮同套映射(各自 import highlightMidi,不互相通信)。
+        const mapped = highlightMidi({ midi: n.midi, duration: 'quarter', dotted: false, accidental: null } as Note, key, fingering);
+        const dispMidi = mapped ?? n.midi;   // 映射失败(休止等)用原值(不会发生,休止已跳过)
         // 宽度 = 对应键宽(px),left = 键中心(px,居中)。与键盘同套纯函数坐标系。
-        bEl.style.width = noteWidth(n.midi, range, whiteW) + 'px';
+        bEl.style.width = noteWidth(dispMidi, range, whiteW) + 'px';
         // left = 键中心,相对 inner 左缘(inner 与键盘 inner 同款居中,左缘天然对齐)。
-        bEl.style.left = midiToX(n.midi, range, whiteW) + 'px';
+        bEl.style.left = midiToX(dispMidi, range, whiteW) + 'px';
         bEl.style.height = bh + 'px';
         bEl.style.top = yTop + 'px';
         // 命中:接近判定线加 active(方块自己判断,不依赖键盘,文档 §4.4)。
@@ -219,6 +234,11 @@ export function buildWaterfall(initial: WaterfallInitial, cb: WaterfallCallbacks
       // inner 宽度 = 键盘总宽(白键数×whiteW),与键盘 inner 同宽,两者各自被父容器居中 → 左缘对齐。
       innerEl.style.width = (whiteKeys(range).length * whiteW) + 'px';
       // 横轴在下次 onTick 重算,无需重建 DOM。
+    },
+    setFingering(f: Fingering) {
+      fingering = f;
+      // 标签依赖映射后的音名,重建方块 DOM 刷新标签。横轴在下次 onTick 重算。
+      buildBlocks();
     },
     setHandFilter(hand: 'both' | 'R' | 'L') {
       handFilter = hand;

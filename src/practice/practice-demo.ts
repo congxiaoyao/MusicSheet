@@ -212,7 +212,7 @@ function main() {
 
   // ── 方块组件 ──
   const waterfall = buildWaterfall(
-    { notes: fallNotes, range, whiteW: keyboard.getKeyWidth() },
+    { notes: fallNotes, range, whiteW: keyboard.getKeyWidth(), fingering: 'follow', key: score.meta.key },
     {},
   );
   fallWrap.appendChild(waterfall.el);
