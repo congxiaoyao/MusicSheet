@@ -161,7 +161,6 @@ export interface KeyboardHandle {
   el: HTMLElement;
   /** controller 每帧调:传入当前响的原始 midi 集合(带左右手)。键盘内部做指法映射后点灯。 */
   setActiveMidis(items: ActiveNote[]): void;
-  setRange(range: KeyRange): void;
   setHeight(height: number): void;
   setLabels(labels: KeyLabels): void;
   setFingering(f: Fingering): void;
@@ -191,17 +190,19 @@ export function buildKeyboard(initial: KeyboardInitial, cb: KeyboardCallbacks): 
   const el = h('div', 'kb-keyboard');
   el.style.height = height + 'px';
 
-  // 键区(无 padding,纯函数坐标系基准)。
+  // 键区(无 padding,overflow 裁超出键;flex center 居中 inner)。
   const keysEl = h('div', 'kb-keys');
   el.appendChild(keysEl);
+  // 内层容器:装白键+黑键,宽度 = 键盘总宽(白键数×whiteW),被 keysEl 居中。
+  // 黑键 absolute 相对 inner 左缘,白键在 inner 内左对齐 —— 黑白键同源,无需手动偏移。
+  // 方块组件的容器也需和 inner 同款居中(由 controller 用 getKbOffset 算偏移)。
+  let keysInner: HTMLElement = h('div', 'kb-keys-inner');
+  keysEl.appendChild(keysInner);
 
   // midi → 键元素 映射(重建时填充),供高亮切 class。
   let keyElByMidi = new Map<number, HTMLElement>();
   // 当前重建签名(音域+标注),变化才重建。
   let keyboardSig = '';
-  // 键盘居中偏移(px):88键封顶后键盘比容器窄时,白键用 justify-content:center 居中,
-  // 黑键是绝对定位(left 相对容器左边缘),必须手动加这个偏移,否则黑白键错位。
-  let kbOffset = 0;
 
   // 当前高亮的活跃音(带左右手,原始 midi),供标注/指法切换后重算高亮。
   let activeRawMidisItems: ActiveNote[] = [];
@@ -211,12 +212,17 @@ export function buildKeyboard(initial: KeyboardInitial, cb: KeyboardCallbacks): 
    *  键宽 = whiteW(精确 px),键数 = ceil(容器宽/whiteW) 补满,超出由 .kb-keys overflow 裁。 */
   function buildKeyboardDOM(): void {
     keysEl.innerHTML = '';
+    // 重建 inner(innerHTML 清空了)。
+    keysInner = h('div', 'kb-keys-inner');
+    keysEl.appendChild(keysInner);
     keyElByMidi = new Map();
     const whites = whiteKeys(range);
     const blks = blackKeys(range);
     const bw = whiteW * 0.6;   // 黑键宽 = 白键宽 × 0.6
+    // inner 宽度 = 白键数 × whiteW(键盘总宽)。keysEl flex center 居中 inner。
+    keysInner.style.width = (whites.length * whiteW) + 'px';
 
-    // 白键:固定宽 px(从左铺起,右侧超出裁掉)。
+    // 白键:固定宽 px,在 inner 内从左铺起。
     for (const wmidi of whites) {
       const k = h('div', 'kb-key-w');
       k.dataset.midi = String(wmidi);
@@ -224,17 +230,17 @@ export function buildKeyboard(initial: KeyboardInitial, cb: KeyboardCallbacks): 
       k.style.width = whiteW + 'px';
       // 标注
       appendLabel(k, wmidi);
-      keysEl.appendChild(k);
+      keysInner.appendChild(k);
       keyElByMidi.set(wmidi, k);
     }
-    // 黑键:绝对定位 px(在白键之上,z-index 3)。left 加 kbOffset 跟随白键居中。
+    // 黑键:绝对定位 px(在白键之上,z-index 3)。left 相对 inner 左缘 = midiToX,与方块同基准。
     for (const bmidi of blks) {
       const b = h('div', 'kb-key-b');
       b.dataset.midi = String(bmidi);
-      b.style.left = (midiToX(bmidi, range, whiteW) + kbOffset) + 'px';
+      b.style.left = midiToX(bmidi, range, whiteW) + 'px';
       b.style.width = bw + 'px';
       appendLabel(b, bmidi);
-      keysEl.appendChild(b);
+      keysInner.appendChild(b);
       keyElByMidi.set(bmidi, b);
     }
     // 签名:音域 + 标注(键宽变化走轻量 updateKeyWidths,不进签名)。
@@ -276,15 +282,16 @@ export function buildKeyboard(initial: KeyboardInitial, cb: KeyboardCallbacks): 
     }
   }
 
-  /** 轻量更新所有键的 width/left(键宽变化但键数不变时用,不重建 DOM)。
-   *  黑键 left 加 kbOffset 跟随白键居中。 */
+  /** 轻量更新所有键的 width/left + inner 宽度(键宽变化但键数不变时用,不重建 DOM)。 */
   function updateKeyWidths(): void {
     const bw = whiteW * 0.6;
+    // inner 宽度 = 白键数 × whiteW(键宽变了 inner 宽度也要跟着变,否则居中错位)。
+    keysInner.style.width = (whiteKeys(range).length * whiteW) + 'px';
     keyElByMidi.forEach((el, midi) => {
       if (el.classList.contains('kb-key-w')) {
         el.style.width = whiteW + 'px';
       } else {
-        el.style.left = (midiToX(midi, range, whiteW) + kbOffset) + 'px';
+        el.style.left = midiToX(midi, range, whiteW) + 'px';
         el.style.width = bw + 'px';
       }
     });
@@ -406,12 +413,8 @@ export function buildKeyboard(initial: KeyboardInitial, cb: KeyboardCallbacks): 
     }
     range = { low: newLow, high: newHigh };
     whiteW = newWhiteW;
-    // 键盘居中:88键封顶后若键盘比容器窄(52×宽 < 容器宽),水平居中;否则左对齐(超出裁)。
-    const kbTotalW = whiteKeys(range).length * whiteW;
-    const centered = kbTotalW < containerW;
-    keysEl.style.justifyContent = centered ? 'center' : 'flex-start';
-    // 黑键是绝对定位,justify-content 不影响它,必须手动加居中偏移。
-    kbOffset = centered ? Math.round((containerW - kbTotalW) / 2) : 0;
+    // inner 宽度 = 键盘总宽,由 CSS margin:0 auto 居中(88键封顶键盘比容器窄时居中留白,
+    // 超出容器时 keysEl overflow 裁掉)。黑白键都在 inner 内,同源对齐,无需 JS 偏移。
     maybeRebuild();
     updateSliderUI();
     callbacks.onKeyLayoutChange?.({ range, whiteW });
@@ -481,11 +484,6 @@ export function buildKeyboard(initial: KeyboardInitial, cb: KeyboardCallbacks): 
     setActiveMidis(items: ActiveNote[]) {
       activeRawMidisItems = items;
       applyHighlight();
-    },
-    setRange(r: KeyRange) {
-      range = r;
-      maybeRebuild();
-      updateSliderUI();
     },
     setHeight(newH: number) {
       applyHeight(newH);

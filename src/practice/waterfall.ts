@@ -19,7 +19,7 @@ import { Score } from '../core/score';
 import { rangeToPiece } from '../core/score';
 import { durationBeats } from '../core/types';
 import { noteStartBeats } from '../core/model';
-import { KeyRange, midiToX, noteWidth } from './key-coords';
+import { KeyRange, whiteKeys, midiToX, noteWidth } from './key-coords';
 
 // ── 数据结构(文档 §4.2) ──────────────────────────────────
 
@@ -52,7 +52,7 @@ export interface WaterfallHandle {
   onTick(beat: number): void;
   /** 乐谱变更时重新解析音符。 */
   setNotes(notes: FallNote[]): void;
-  /** 键宽/音域变化时重新算横轴(键盘拖滑块时 controller 调)。 */
+  /** 键宽/音域变化时重新算横轴 + inner 宽度(键盘拖滑块时 controller 调)。 */
   setKeyLayout(info: { range: KeyRange; whiteW: number }): void;
   /** 单手隔离:'both' | 'R' | 'L'。 */
   setHandFilter(hand: 'both' | 'R' | 'L'): void;
@@ -134,19 +134,27 @@ export function buildWaterfall(initial: WaterfallInitial, cb: WaterfallCallbacks
   let range: KeyRange = initial.range;
   let whiteW: number = initial.whiteW;
   let handFilter: 'both' | 'R' | 'L' = 'both';
-  // 掉落区域(像素,相对 wf-fall 容器)。默认 0~容器高度。
+  // 掉落区域(像素,相对 wf-fall 容器)。bottomY = 判定线(键盘上沿)。
+  // topY = 上边界(ScoreSheet 当前行底部,接动态值时用于裁剪;测试页=0 不裁)。
   let topY = 0;
   let bottomY = 0;   // 0 = 用容器高度(布局后设)
+  void topY;   // 保留:接 ScoreSheet 动态上边界时用于裁剪,当前测试页 topY=0 不触发
 
-  // 容器。
+  // 容器(overflow 裁 + flex center 居中 inner)。
   const el = document.createElement('div');
   el.className = 'wf-fall';
-  // 判定线(区域底)。
+  // 判定线(区域底,相对 el 定位)。
   const hitEl = document.createElement('div');
   hitEl.className = 'wf-hit';
   el.appendChild(hitEl);
+  // 内层容器:装方块,宽度 = 键盘总宽(白键数×whiteW),被 el 居中。
+  // 与键盘的 kb-keys-inner 同款机制 —— 两 inner 同宽同居中,左缘天然对齐,无需传 offset。
+  // 方块 left = midiToX 相对 inner 左缘。
+  const innerEl = document.createElement('div');
+  innerEl.className = 'wf-fall-inner';
+  el.appendChild(innerEl);
 
-  // 方块 DOM:每音一个 div,预创建(复刻原型 L682-688)。
+  // 方块 DOM:每音一个 div,预创建(放进 inner)。
   let blockEls: HTMLDivElement[] = [];
   function buildBlocks(): void {
     // 清旧。
@@ -157,11 +165,13 @@ export function buildWaterfall(initial: WaterfallInitial, cb: WaterfallCallbacks
       b.className = 'wf-note ' + n.hand;
       b.textContent = midiName(n.midi);
       b.style.opacity = '0';
-      el.appendChild(b);
+      innerEl.appendChild(b);
       blockEls.push(b);
     }
   }
   buildBlocks();
+  // 初始化 inner 宽度 = 键盘总宽。
+  innerEl.style.width = (whiteKeys(range).length * whiteW) + 'px';
 
   /** midi → 音名(C4、G♯4 等)。 */
   function midiName(midi: number): string {
@@ -169,17 +179,15 @@ export function buildWaterfall(initial: WaterfallInitial, cb: WaterfallCallbacks
     return NAMES[((midi % 12) + 12) % 12] + (Math.floor(midi / 12) - 1);
   }
 
-  /** 算容器可见高度(bottomY-topY)。bottomY=0 时用 clientHeight。 */
-  function fallHeight(): number {
-    const h = el.clientHeight;
-    if (bottomY > topY) return bottomY - topY;
-    return h;
+  /** 判定线 y(相对 wf-fall 容器顶):= bottomY(键盘上沿)。bottomY=0 时用容器高度。 */
+  function hitLineY(): number {
+    return bottomY > 0 ? bottomY : el.clientHeight;
   }
 
   return {
     el,
     onTick(beat: number) {
-      const hitY = fallHeight();   // 判定线 y(容器内,从顶算)
+      const hitY = hitLineY();   // 判定线 y = bottomY(键盘上沿),方块底边贴此线 = 该按时刻
       for (let i = 0; i < notes.length; i++) {
         const n = notes[i];
         const bEl = blockEls[i];
@@ -191,6 +199,7 @@ export function buildWaterfall(initial: WaterfallInitial, cb: WaterfallCallbacks
         }
         const dist = n.beat - beat;   // 未来为正,过去为负
         const bh = Math.max(BLOCK_H_MIN, n.duration * PX_PER_BEAT * BLOCK_H_FACTOR);
+        // 方块顶 y:底边贴判定线(hitY),未来音在判定线上方(dist>0 → yTop 更小)。
         const yTop = hitY - bh - dist * PX_PER_BEAT;
         // 可见窗:未来 VIS_DIST_MAX 拍内可见;过去音保持可见直到它真正结束(dist > -duration)。
         // 旧实现写死 dist > -0.5,导致长音(2/4 拍)还没走完时值就消失 —— 音还在响方块却没了。
@@ -214,6 +223,7 @@ export function buildWaterfall(initial: WaterfallInitial, cb: WaterfallCallbacks
         bEl.style.opacity = String(opacity);
         // 宽度 = 对应键宽(px),left = 键中心(px,居中)。与键盘同套纯函数坐标系。
         bEl.style.width = noteWidth(n.midi, range, whiteW) + 'px';
+        // left = 键中心,相对 inner 左缘(inner 与键盘 inner 同款居中,左缘天然对齐)。
         bEl.style.left = midiToX(n.midi, range, whiteW) + 'px';
         bEl.style.height = bh + 'px';
         bEl.style.top = yTop + 'px';
@@ -229,6 +239,8 @@ export function buildWaterfall(initial: WaterfallInitial, cb: WaterfallCallbacks
     setKeyLayout(info: { range: KeyRange; whiteW: number }) {
       range = info.range;
       whiteW = info.whiteW;
+      // inner 宽度 = 键盘总宽(白键数×whiteW),与键盘 inner 同宽,两者各自被父容器居中 → 左缘对齐。
+      innerEl.style.width = (whiteKeys(range).length * whiteW) + 'px';
       // 横轴在下次 onTick 重算,无需重建 DOM。
     },
     setHandFilter(hand: 'both' | 'R' | 'L') {
@@ -237,8 +249,9 @@ export function buildWaterfall(initial: WaterfallInitial, cb: WaterfallCallbacks
     setBounds(info: { topY: number; bottomY: number }) {
       topY = info.topY;
       bottomY = info.bottomY;
-      // 判定线贴区域底。
-      hitEl.style.bottom = '0';
+      // 判定线贴 bottomY(键盘上沿)。bottomY 相对容器顶,判定线用绝对定位。
+      hitEl.style.bottom = 'auto';
+      hitEl.style.top = bottomY + 'px';
     },
   };
 }

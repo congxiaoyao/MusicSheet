@@ -7,7 +7,7 @@
 //   - onTick 循环算当前响的音(computeActiveMidis,原始 midi + 左右手)
 //   - 喂 keyboard.setActiveMidis + waterfall.onTick
 //   - bounds:方块区容器相对练琴页的坐标自给(不接 ScoreSheet)
-//   - 协调:keyboard.onRangeChange → waterfall.setRange;onHeightChange → 重算 bounds
+//   - 协调:keyboard.onKeyLayoutChange → waterfall.setKeyLayout(含 kbOffset);onHeightChange → 重算 bounds
 //   - 持久化:键宽/高度存 localStorage
 
 import '../style.css';
@@ -165,11 +165,22 @@ function main() {
     ];
   }
 
-  // 初始音域:按谱面自动(whiteKeyRange),从 localStorage 恢复或重算。
+  /** 按谱面音域自动算键盘 range:同时算 treble+bass(whiteKeyRange 各算一次取并集)。
+   *  旧实现只用 treble piece,bass 音域漏算 → 低音越界。 */
+  function computeAutoRange(score: Score): KeyRange {
+    const total = score.meta.totalMeasures;
+    const tp = rangeToPiece(score, 0, total, 'treble');
+    const bp = rangeToPiece(score, 0, total, 'bass');
+    const tWhites = whiteKeyRange(tp);
+    const bWhites = whiteKeyRange(bp);
+    // 合并两组白键,去重排序,取首尾。
+    const all = [...new Set([...tWhites, ...bWhites])].sort((a, b) => a - b);
+    return rangeFromWhites(all);
+  }
+
+  // 初始音域:按谱面自动(whiteKeyRange 同时算 treble+bass),从 localStorage 恢复或重算。
   let score = songs[currentSong];
-  // 用一个临时 piece 算音域(whiteKeyRange 读 piece.notes/treble/bass)。
-  const tmpPiece = rangeToPiece(score, 0, score.meta.totalMeasures, 'treble');
-  let range: KeyRange = lsGet('range', null) ?? rangeFromWhites(whiteKeyRange(tmpPiece));
+  let range: KeyRange = lsGet('range', null) ?? computeAutoRange(score);
   let kbHeight: number = lsGet('kbHeight', 140);
   let whiteW: number = lsGet('whiteW', 44);
 
@@ -200,7 +211,10 @@ function main() {
   keysWrap.appendChild(keyboard.el);
 
   // ── 方块组件 ──
-  const waterfall = buildWaterfall({ notes: fallNotes, range, whiteW: keyboard.getKeyWidth() }, {});
+  const waterfall = buildWaterfall(
+    { notes: fallNotes, range, whiteW: keyboard.getKeyWidth() },
+    {},
+  );
   fallWrap.appendChild(waterfall.el);
 
   // ── bounds:方块区容器相对练琴页的坐标(测试页自给,不接 ScoreSheet) ──

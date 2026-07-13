@@ -24,14 +24,23 @@
   box-sizing: border-box;
 }
 
-/* 键区:承载白键(flex 排列,各键 width 由 JS 设 px)+ 黑键(绝对定位)。
- * overflow hidden 裁掉超出容器的键(键数 ceil 补满,右侧超出裁掉)。 */
+/* 键区:flex center 居中 inner;overflow hidden 裁掉超出容器的键。 */
 .kb-keys {
   position: relative;
   height: 100%;
   display: flex;
+  justify-content: center;
   overflow: hidden;
   background: var(--line-2, #eef0f3);
+}
+/* 内层容器:装白键+黑键,宽度 = 键盘总宽(JS 设),被 .kb-keys 居中。
+ * 黑键 absolute 相对此容器左缘 —— 黑白键同源,无需手动偏移。
+ * 88键封顶键盘比容器窄时此容器居中留白;超出时被 .kb-keys overflow 裁。 */
+.kb-keys-inner {
+  position: relative;
+  display: flex;
+  height: 100%;
+  flex: none;   /* 不被 flex 压缩,保持 JS 设的精确宽度 */
 }
 /* 白键:固定宽 px(width 由 JS 设),不再 flex 等分。
  * flex:none 防止 flex 压缩键宽,保持精确 px。 */

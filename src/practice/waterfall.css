@@ -13,11 +13,21 @@
   width: 100%;
   height: 100%;
   overflow: hidden;
+  display: flex;
+  justify-content: center;
   background: transparent;
   /* 上边缘 fade:方块接近上边缘时自然淡出(文档 §4.5)。
    * mask 渐变:顶部透明渐变到不透明(40px 内完成),区域底不裁。 */
   -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 40px);
   mask-image: linear-gradient(to bottom, transparent 0, #000 40px);
+}
+/* 内层容器:装方块,宽度 = 键盘总宽(JS 设),被 .wf-fall 居中。
+ * 与键盘的 .kb-keys-inner 同款机制 —— 两 inner 同宽同居中,左缘天然对齐,无需传 offset。
+ * 88键封顶键盘比容器窄时此容器居中;超出时被 .wf-fall overflow 裁。 */
+.wf-fall-inner {
+  position: relative;
+  height: 100%;
+  flex: none;
 }
 
 /* 方块:绝对定位,left/top/width/height 由 onTick 每帧设。
