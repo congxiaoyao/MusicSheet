@@ -935,7 +935,7 @@ export class App {
         return;
       }
       const { y, ok } = this.toSvgCoords(e, card);
-      this.downMidi = ok && card.layout ? clickYToMidi(y, card.pieceView, card.layout) : null;
+      this.downMidi = ok && card.layout ? clickYToMidi(y, card.pieceView, card.layout, this.tool.accidental) : null;
     });
     // 注:isMouseDown 的全局 mouseup 复位在构造器统一绑定(避免每张卡累积 window 监听器)。
 
@@ -945,7 +945,7 @@ export class App {
       if (card !== this.activeCard) return;   // 非激活卡不预览
       const { y, ok } = this.toSvgCoords(e, card);
       if (!ok || !card.layout) { this.clearHover(); return; }
-      const midi = clickYToMidi(y, card.pieceView, card.layout);
+      const midi = clickYToMidi(y, card.pieceView, card.layout, this.tool.accidental);
       if (this.hover && this.hover.midi === midi) return;
       this.hover = { midi, x: card.layout.nextSlotX };
       this.render();
