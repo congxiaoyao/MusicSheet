@@ -34,11 +34,14 @@
 }
 
 /* 谱面宿主:承载多行 SVG。上下留出首行清晰带 + 末行滚动到底的空间。
- * padding-top 让首行不贴顶;padding-bottom 用 100vh 保证末行后留足整屏空间,
- * 末行能滚到顶部清晰带位置(文档需求 §4.1:"最后几行也能滚到位")。 */
+ * padding-top 让首行五线谱顶线天然落在清晰带位置(scrollTop=0 时即对齐,与换行后一致):
+ *   scrollViewportTop + padding-top + staffTopInSys×scale = scrollViewportTop + CURRENT_TOP_PAD
+ *   → padding-top = CURRENT_TOP_PAD - staffTopInSys×scale = 90 - 58 ≈ 32。
+ *   首行无法靠滚动上移(scrollTop≥0),只能靠 padding 让它天然到位,否则首行比其他行偏高。
+ * padding-bottom 用 100vh 保证末行后留足整屏空间,末行能滚到顶部清晰带位置。 */
 .score-sheet-sheet {
   position: relative;       /* 播放头 absolute 定位的参照(否则相对 .score-sheet) */
-  padding: 24px 24px 100vh 24px;
+  padding: 32px 24px 100vh 24px;
   box-sizing: border-box;
 }
 .score-sheet-sheet svg {
