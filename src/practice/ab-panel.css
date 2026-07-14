@@ -1,0 +1,177 @@
+/* AbPanel —— AB 循环设置面板(小节网格选择器)。
+ *
+ * 结构:.ab-panel(absolute 弹层,挂在顶栏 .pr-ab 内)
+ *   └ .ab-head   [AB 循环]            [启用 switch]
+ *   └ .ab-body   (switch 关时整体隐藏)
+ *      ├ .ab-hint  拖选要循环的小节
+ *      ├ .ab-grid  小节格网格(4 列)
+ *      └ .ab-foot  [已选 X–Y(共N)]   [整曲循环]
+ *   └ .ab-empty  (switch 关时显示的置灰提示)
+ *
+ * 视觉 token 与 .pr-settings / .pr-seg 统一。switch 用 iOS 风格小滑块。 */
+
+.ab-panel {
+  position: absolute;
+  top: 40px;
+  left: 0;
+  z-index: 60;
+  width: 280px;
+  background: var(--card, #fff);
+  border: 1px solid var(--line, #e6e8ec);
+  border-radius: var(--radius, 12px);
+  box-shadow: 0 8px 28px rgba(16, 24, 40, 0.14), 0 2px 6px rgba(16, 24, 40, 0.06);
+  padding: 14px 16px 12px;
+  box-sizing: border-box;
+  display: none;
+  animation: abDropIn 0.14s ease;
+}
+.ab-panel.open { display: block; }
+
+@keyframes abDropIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── 第 1 层:标题 + 启用 switch ──────────────────────────── */
+.ab-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.ab-head .ab-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink, #16181d);
+  letter-spacing: -0.01em;
+}
+
+/* iOS 风格 switch:36×20 轨道,开色 accent。 */
+.ab-switch {
+  position: relative;
+  width: 36px;
+  height: 20px;
+  border-radius: 10px;
+  background: var(--line, #e6e8ec);
+  cursor: pointer;
+  transition: background 0.2s ease;
+  flex: none;
+}
+.ab-switch::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.2);
+  transition: transform 0.2s ease;
+}
+.ab-switch.on { background: var(--accent, #4f46e5); }
+.ab-switch.on::after { transform: translateX(16px); }
+
+/* ── 第 2 层:主体(switch 关时隐藏,显示空提示) ──────────── */
+.ab-body { }
+.ab-panel:not(.on) .ab-body { display: none; }
+.ab-panel:not(.on) .ab-empty { display: flex; }
+
+.ab-empty {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  min-height: 92px;
+  font-size: 12px;
+  color: var(--muted, #8b919c);
+  text-align: center;
+  line-height: 1.6;
+}
+
+.ab-hint {
+  font-size: 12px;
+  color: var(--muted, #8b919c);
+  margin-bottom: 8px;
+}
+
+/* 小节格网格:4 列。 */
+.ab-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+.ab-cell {
+  position: relative;
+  height: 34px;
+  border-radius: var(--radius-sm, 8px);
+  border: 1px solid var(--line, #e6e8ec);
+  background: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink-2, #344054);
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+  font-variant-numeric: tabular-nums;
+}
+.ab-cell:hover {
+  background: var(--accent-soft, #eef2ff);
+  border-color: var(--accent, #4f46e5);
+}
+.ab-cell.selected {
+  background: var(--accent, #4f46e5);
+  border-color: var(--accent, #4f46e5);
+  color: #fff;
+  font-weight: 600;
+}
+/* 拖拽预览中的候选格(尚未松手) */
+.ab-cell.preview {
+  background: var(--accent-soft, #eef2ff);
+  border-color: var(--accent, #4f46e5);
+  color: var(--accent, #4f46e5);
+}
+.ab-cell.selected.preview { /* 已选 + 拖过:保持选中态 */ }
+/* 拖拽中禁用 hover 干扰 */
+.ab-panel.dragging .ab-cell:hover { background: #fff; border-color: var(--line, #e6e8ec); color: var(--ink-2, #344054); }
+.ab-panel.dragging .ab-cell.selected:hover { background: var(--accent, #4f46e5); border-color: var(--accent, #4f46e5); color: #fff; }
+
+/* 首尾格角标 A/B(格内右上小字) */
+.ab-cell .ab-mark {
+  position: absolute;
+  top: 1px;
+  right: 3px;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--accent, #4f46e5);
+}
+.ab-cell.selected .ab-mark { color: #fff; }
+
+/* ── 第 3 层:状态条 + 整曲循环 ──────────────────────────── */
+.ab-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--muted, #8b919c);
+}
+.ab-foot .ab-range {
+  font-variant-numeric: tabular-nums;
+}
+.ab-foot .ab-range b { color: var(--ink-2, #344054); font-weight: 600; }
+.ab-all {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--line, #e6e8ec);
+  background: #fff;
+  color: var(--ink-2, #344054);
+  cursor: pointer;
+  transition: all 0.12s;
+  user-select: none;
+}
+.ab-all:hover { border-color: var(--accent, #4f46e5); color: var(--accent, #4f46e5); }

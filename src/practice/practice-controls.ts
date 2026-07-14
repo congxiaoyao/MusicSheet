@@ -11,6 +11,7 @@
 // 注意:dotEl 暴露给 Handle，供 PracticeApp 传给 Metronome 做脉冲。
 
 import './practice-controls.css';
+import { buildAbPanel, AbSelection, AbPanelHandle } from './ab-panel';
 
 export type HandFilter = 'both' | 'R' | 'L';
 export type ScoreMode = 'staff' | 'jianpu' | 'both';
@@ -31,6 +32,11 @@ export interface PracticeControlsInitial {
   handFilter: HandFilter;
   metroOn: boolean;
   abOn: boolean;
+  // AB 循环面板
+  /** 总小节数(构建面板网格用)。 */
+  totalMeasures: number;
+  /** AB 选区(null=未启用/无定义)。 */
+  abSelection: AbSelection | null;
   // 设置面板初始值
   mode: ScoreMode;
   labels: KeyLabels;
@@ -46,7 +52,10 @@ export interface PracticeControlsCallbacks {
   onTogglePlay: () => void;
   onHand: (hand: HandFilter) => void;
   onMetro: (on: boolean) => void;
-  onAb: (on: boolean) => void;
+  /** AB switch 切换(总闸)。 */
+  onAbToggle: (on: boolean) => void;
+  /** AB 选区变化(面板拖选/单击/整曲循环)。 */
+  onAbSelectionChange: (sel: AbSelection) => void;
   onSpeed: (speed: number) => void;
   // 设置面板
   onMode: (m: ScoreMode) => void;
@@ -63,6 +72,8 @@ export interface PracticeControlsHandle {
   setState(state: PlayState): void;
   /** 更新 ♩=N 显示(变速或切曲时 App 反算回显)。 */
   setBpm(bpm: number): void;
+  /** 同步 AB 状态(按钮 .on + 面板 switch/selection)。由 PracticeApp 在状态变化时调。 */
+  setAbState(state: { on: boolean; selection: AbSelection | null }): void;
 }
 
 /** 构建练琴页顶栏。返回 Handle。 */
@@ -111,16 +122,42 @@ export function buildPracticeControls(
   spacer.className = 'pr-spacer';
   el.appendChild(spacer);
 
-  // ── AB 循环开关 ──
+  // ── AB 循环(容器:触发按钮 + 嵌入面板) ──
+  // .pr-ab 作为 relative 容器,内嵌触发按钮 + ab-panel(absolute)。点按钮=开关面板,switch 在面板内。
   const ab = document.createElement('div');
   ab.className = 'pr-ab' + (initial.abOn ? ' on' : '');
-  ab.title = 'AB 循环';
-  ab.innerHTML = `<span>AB 循环</span><span class="ab-marks"><span>A</span><span>B</span></span>`;
-  let abOn = initial.abOn;
-  ab.addEventListener('click', () => {
-    abOn = !abOn;
-    ab.classList.toggle('on', abOn);
-    cb.onAb(abOn);
+  const abBtn = document.createElement('div');
+  abBtn.className = 'pr-ab-btn';
+  abBtn.title = 'AB 循环';
+  abBtn.innerHTML = `<span>AB 循环</span><span class="ab-marks"><span>A</span><span>B</span></span>`;
+  ab.appendChild(abBtn);
+
+  const abPanel: AbPanelHandle = buildAbPanel(
+    { totalMeasures: initial.totalMeasures, on: initial.abOn, selection: initial.abSelection },
+    {
+      onToggleLoop: (on) => {
+        ab.classList.toggle('on', on);
+        cb.onAbToggle(on);
+      },
+      onSelectionChange: (sel) => cb.onAbSelectionChange(sel),
+      onOpenChange: () => {},
+    },
+  );
+  ab.appendChild(abPanel.el);
+
+  let abPanelOpen = false;
+  abBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    abPanelOpen = !abPanelOpen;
+    abPanel.el.classList.toggle('open', abPanelOpen);
+  });
+  // 点外部关闭面板(同 .pr-settings 的外部关闭逻辑)。
+  document.addEventListener('click', (e) => {
+    if (!abPanelOpen) return;
+    if (!ab.contains(e.target as Node)) {
+      abPanelOpen = false;
+      abPanel.el.classList.remove('open');
+    }
   });
   el.appendChild(ab);
 
@@ -245,6 +282,11 @@ export function buildPracticeControls(
     },
     setBpm(bpm) {
       bpmLabel.innerHTML = `♩=<b>${Math.round(bpm)}</b>`;
+    },
+    setAbState(state) {
+      ab.classList.toggle('on', state.on);
+      abPanel.setOn(state.on);
+      abPanel.setSelection(state.selection);
     },
   };
 }

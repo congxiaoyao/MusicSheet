@@ -47,6 +47,9 @@ export class Player {
   /** 已调度的活跃 oscillator 列表（用于 pause/stop 时清理） */
   private activeOscs: { osc: OscillatorNode; gain: GainNode; endAt: number }[] = [];
   private rafId = 0;
+  /** tickLoop 代次:playFrom/seek 重启循环时自增,旧 step 发现代次过期即停。
+   *  修复:onTick 内 seek 回跳(AB 循环)时旧 step 用旧 originCtxTime 算 beat,会无限 ≥B 跳不回 A。 */
+  private tickGen = 0;
   private lastNoteIdx = -1;
 
   constructor(cb: PlayerCallbacks = {}) {
@@ -193,8 +196,12 @@ export class Player {
   /** rAF 循环：对照 ctx.currentTime 算当前 beat，推进 UI 回调 */
   private tickLoop(originCtxTime: number, secPerBeat: number): void {
     const ctx = this.ctx!;
+    // tick 代次:onTick 回调内若触发 seek→playFrom 会重启 tickLoop(新代次),
+    // 旧 step 再 self-reschedule 时发现自己代次过期即停,避免旧 originCtxTime 残留
+    // 导致 beat 永远 ≥ 循环 B 点(旧 step 用旧 origin 算 beat,跳不回 A)。
+    const gen = ++this.tickGen;
     const step = () => {
-      if (this.state !== 'playing') return;
+      if (this.state !== 'playing' || gen !== this.tickGen) return;
       const elapsed = ctx.currentTime - originCtxTime;
       const beat = Math.max(0, elapsed / secPerBeat);
 
@@ -212,6 +219,7 @@ export class Player {
         return;
       }
       this.cb.onTick?.(Math.min(beat, this.totalBeats));
+      if (gen !== this.tickGen) return;   // onTick 内 seek 重启了 tickLoop,本代停
       this.rafId = requestAnimationFrame(step);
     };
     this.rafId = requestAnimationFrame(step);

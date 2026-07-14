@@ -25,6 +25,7 @@ import { KeyRange } from './key-coords';
 import { buildWaterfall, parseFallNotes, FallNote } from './waterfall';
 import { buildMetronome } from './metronome';
 import { buildPracticeControls, HandFilter } from './practice-controls';
+import { AbSelection } from './ab-panel';
 import { computeActiveMidis, ActiveStaff } from './active-midis';
 
 // ── 设置(全局,不分曲子) ──────────────────────────────────
@@ -82,6 +83,25 @@ export function saveBpm(scoreId: string, bpm: number): void {
   try { localStorage.setItem(LS_BPM_PREFIX + scoreId, JSON.stringify(bpm)); } catch { /* ignore */ }
 }
 
+// ── AB 循环状态持久化(按曲子 id,同 BPM 风格) ──
+/** AB 持久化结构:selection(选区,与开关无关)+ on(开关状态)。两者独立持久化,
+ *  保证"退出啥状态进来就啥状态"(关着 switch 离开 → 进来还是关)。 */
+export interface AbState { selection: AbSelection | null; on: boolean; }
+const LS_AB_PREFIX = 'musicsheet:practice:ab:';
+/** 读某曲子的 AB 状态。读不到返回 {selection:null, on:false}(首次进入)。 */
+export function loadAbState(scoreId: string): AbState {
+  try {
+    const v = localStorage.getItem(LS_AB_PREFIX + scoreId);
+    if (!v) return { selection: null, on: false };
+    const s = JSON.parse(v) as Partial<AbState>;
+    return { selection: s.selection ?? null, on: !!s.on };
+  } catch { return { selection: null, on: false }; }
+}
+/** 写某曲子的 AB 状态。 */
+export function saveAbState(scoreId: string, state: AbState): void {
+  try { localStorage.setItem(LS_AB_PREFIX + scoreId, JSON.stringify(state)); } catch { /* ignore */ }
+}
+
 // ── 默认值 ──
 const DEFAULT_KEY_WIDTH = 44;
 const DEFAULT_KB_HEIGHT = 140;
@@ -127,7 +147,8 @@ export class PracticeApp {
   private handFilter: HandFilter = 'both';
   private metroOn: boolean;
   private abOn = false;
-  private abRange: { a: number; b: number } | null = null;   // beat 单位(底层支持,交互后续接)
+  private abSelection: AbSelection | null = null;   // AB 选区(小节级);null=未启用/无定义
+  private abRange: { a: number; b: number } | null = null;   // beat 单位(由 abSelection 派生,onTick 用)
   /** 谱面区 DOM(设宽度用)。 */
   private scoreArea!: HTMLElement;
   /** 谱面区宽度 px。 */
@@ -176,6 +197,11 @@ export class PracticeApp {
 
     // ── Player(新建) ──
     this.baseBpm = loadBpm(this.score.meta.id, DEFAULT_FALLBACK_BPM);
+    // ── AB 状态恢复(严格按 LS:关着离开进来就是关,selection 仍在) ──
+    const abState = loadAbState(this.score.meta.id);
+    this.abOn = abState.on;
+    this.abSelection = abState.selection;
+    this.abRange = this.abSelection ? this.selectionToRange(this.abSelection) : null;
     this.player = new Player({
       onTick: (beat) => this.onTick(beat),
       onStateChange: (s) => this.onStateChange(s),
@@ -242,6 +268,8 @@ export class PracticeApp {
         handFilter: this.handFilter,
         metroOn: this.metroOn,
         abOn: this.abOn,
+        totalMeasures: this.score.meta.totalMeasures,
+        abSelection: this.abSelection,
         mode: this.settings.mode ?? DEFAULT_MODE,
         labels: this.settings.labels ?? DEFAULT_LABELS,
         fingering: this.settings.fingering ?? DEFAULT_FINGERING,
@@ -253,7 +281,8 @@ export class PracticeApp {
         onTogglePlay: () => this.onTogglePlay(),
         onHand: (h) => this.onHand(h),
         onMetro: (on) => this.onMetro(on),
-        onAb: (on) => this.onAb(on),
+        onAbToggle: (on) => this.onAbToggle(on),
+        onAbSelectionChange: (sel) => this.onAbSelectionChange(sel),
         onSpeed: (s) => this.onSpeed(s),
         onMode: (m) => this.onMode(m),
         onLabels: (l) => this.onLabels(l),
@@ -313,6 +342,8 @@ export class PracticeApp {
     requestAnimationFrame(() => {
       this.scoreSheet.onTick(0);
       this.updateBounds();
+      // AB 视觉初始刷新(记忆恢复的选区 → 谱面遮罩 + A/B 标记)。
+      this.updateAbVisual();
     });
   }
 
@@ -384,8 +415,60 @@ export class PracticeApp {
     this.metronome.setEnabled(on);
   }
 
-  private onAb(on: boolean): void {
+  /** AB switch 切换。开时若 selection=null 自动全选(整曲循环);关时保留 selection(仅隐藏遮罩)。 */
+  private onAbToggle(on: boolean): void {
     this.abOn = on;
+    if (on) {
+      // 首次开(无选区):自动全选。
+      if (!this.abSelection) {
+        const total = this.score.meta.totalMeasures;
+        this.applyAbSelection({ startMeasure: 0, endMeasure: Math.max(0, total - 1) });
+      }
+      // 定位到 A 点。
+      if (this.abSelection) {
+        const a = this.abSelection.startMeasure * this.bpb;
+        this.player.seek(a, this.player.isPlaying());
+      }
+    }
+    // 存(在自动全选之后,保证存的是最新 selection)。
+    saveAbState(this.score.meta.id, { selection: this.abSelection, on: this.abOn });
+    // 同步面板(自动全选的面板 selection 显示)+ 谱面视觉。
+    this.controls.setAbState({ on: this.abOn, selection: this.abSelection });
+    this.updateAbVisual();
+  }
+
+  /** AB 选区变化(面板拖选/单击/整曲循环触发)。派生 beat range + 存 + 刷新视觉 + 定位。 */
+  private onAbSelectionChange(sel: AbSelection): void {
+    this.applyAbSelection(sel);
+    saveAbState(this.score.meta.id, { selection: this.abSelection, on: this.abOn });
+    if (this.abOn && this.abSelection) {
+      const a = this.abSelection.startMeasure * this.bpb;
+      this.player.seek(a, this.player.isPlaying());
+    }
+    this.updateAbVisual();
+  }
+
+  /** 应用选区到 abSelection + 派生 abRange(beat)。不持久化、不 seek(由调用方决定)。 */
+  private applyAbSelection(sel: AbSelection): void {
+    this.abSelection = sel;
+    this.abRange = this.selectionToRange(sel);
+  }
+
+  /** 选区(小节)→ beat range。B 含末小节末拍:[startMeasure*bpb, (endMeasure+1)*bpb)。 */
+  private selectionToRange(sel: AbSelection): { a: number; b: number } {
+    return { a: sel.startMeasure * this.bpb, b: (sel.endMeasure + 1) * this.bpb };
+  }
+
+  /** beat 是否落在当前选区内(onSeek 限制用)。无选区时返回 false(由调用方保证 abOn 判断)。 */
+  private isBeatInSelection(beat: number): boolean {
+    if (!this.abSelection) return false;
+    return beat >= this.abSelection.startMeasure * this.bpb
+      && beat < (this.abSelection.endMeasure + 1) * this.bpb;
+  }
+
+  /** 刷新谱面遮罩 + A/B 标记。开关关或无选区 → 传 null(隐藏)。 */
+  private updateAbVisual(): void {
+    this.scoreSheet.setAbRange(this.abOn ? this.abSelection : null);
   }
 
   private onSpeed(s: number): void {
@@ -431,9 +514,11 @@ export class PracticeApp {
     this.updateBounds();
   }
 
-  /** 谱面点击 → seek 到该 beat(拍粒度,AB 关时即跳转;AB 交互后续接)。
-   *  clamp 到 [0, 整曲总beat),防止点击末尾 padding 区越界。 */
+  /** 谱面点击 → seek 到该 beat(拍粒度)。
+   *  clamp 到 [0, 整曲总beat),防止点击末尾 padding 区越界。
+   *  AB 开时:点击选区外完全无效(封闭练习模式),保持当前播放位置不变。 */
   private onSeekBeat(beat: number): void {
+    if (this.abOn && this.abSelection && !this.isBeatInSelection(beat)) return;
     const totalBeats = this.score.meta.totalMeasures * this.bpb;
     const b = Math.max(0, Math.min(beat, totalBeats));
     const playing = this.player.isPlaying();

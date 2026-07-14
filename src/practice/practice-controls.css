@@ -50,21 +50,23 @@
 .pr-spacer { flex: 1; }
 
 /* —— 中/右:练习模式 + 变速 + 设置 —— */
-.pr-ab {
+/* AB 循环:.pr-ab 是 relative 容器(position 上下文给 .ab-panel),内嵌触发按钮 + 面板。 */
+.pr-ab { position: relative; display: inline-flex; align-items: center; }
+.pr-ab-btn {
   display: inline-flex; align-items: center; gap: 6px;
   padding: 5px 12px; border-radius: 16px; cursor: pointer;
   border: 1px solid var(--line, #e6e8ec); background: #fff; color: var(--muted, #8b919c);
   font-size: 13px; font-weight: 500; transition: all 0.14s; user-select: none;
 }
-.pr-ab:hover { border-color: #cbd5e1; }
-.pr-ab.on {
+.pr-ab-btn:hover { border-color: #cbd5e1; }
+.pr-ab.on .pr-ab-btn {
   border-color: var(--accent, #4f46e5);
   background: var(--accent-soft, rgba(79, 70, 229, 0.1));
   color: var(--accent, #4f46e5); font-weight: 600;
 }
-.pr-ab .ab-marks { display: none; gap: 3px; }
+.ab-marks { display: none; gap: 3px; }
 .pr-ab.on .ab-marks { display: inline-flex; }
-.pr-ab .ab-marks span {
+.ab-marks span {
   font-size: 10px; font-weight: 700; padding: 0 5px; border-radius: 3px;
   background: var(--accent, #4f46e5); color: #fff; line-height: 1.5;
 }

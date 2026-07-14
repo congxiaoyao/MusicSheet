@@ -69,6 +69,9 @@ export interface ScoreSheetHandle {
    *  用纯几何(sys.yTop+sys.height)×scale + SVG 屏幕偏移,不用 getBBox(text 虚高)。
    *  返回 null 表示无当前行/未渲染。 */
   currentLineBottomScreenY(): number | null;
+  /** 设置 AB 选区(sel=null 隐藏遮罩与标记)。
+   *  选区外小节加 .active(CSS 仅 .current 行显示压暗);A/B 标记画在首末小节边界。 */
+  setAbRange(sel: { startMeasure: number; endMeasure: number } | null): void;
 }
 
 // ── 换行算法:密度预设配置(文档 §5.3) ────
@@ -677,6 +680,17 @@ function renderSystem(
         }
       }
     }
+    // AB 小节遮罩层:每行每小节一个透明 rect,带 data-m(整曲绝对小节)。
+    //   fill 由 CSS + .active class 控制(选区外压暗)。display 默认 none,仅 .current 行显示
+    //   (future/past 行零改动)。setAbRange 负责给选区外小节加 .active。
+    //   几何复用 lineTop/lineBot + bl[k]..bl[k+1](每行小节宽度不同,按 barLines 真实 x)。
+    let abDim = '';
+    for (let k = 0; k < bl.length - 1; k++) {
+      const x = bl[k], w = bl[k + 1] - bl[k];
+      const absM = sys.startMeasure + k;
+      abDim += `<rect class="ss-ab-dim" data-m="${absM}" x="${x.toFixed(1)}" y="${lineTop.toFixed(1)}" width="${w.toFixed(1)}" height="${(lineBot - lineTop).toFixed(1)}" pointer-events="none"/>`;
+    }
+    systemLines += `<g class="ss-ab-dim-layer">${abDim}</g>`;
   }
 
   const svg = trebleGroup + bassGroup + systemLines + brace;
@@ -817,6 +831,82 @@ export function buildScoreSheet(
   let lastHiBass = new Set<number>();
   let lastSysIdx = -1;
   let lastPhSys = -1;   // 播放头上次所在 system(同行 onset 间用 transition,换行瞬移)
+  // AB 选区缓存(setAbRange 设;render 后需重应用,因 innerHTML 重建丢失 .active + 标记)。
+  let abSelection: { startMeasure: number; endMeasure: number } | null = null;
+
+  /** 造一个 AB 边界标记:小圆点 + 字母,贴在 (x, y)(行五线顶 staffTopY)。
+   *  标记画在五线之上(y 上方),不遮挡谱面;圆点直径 ~5ss,字母在圆点上方。
+   *  A 在小节起始线右侧,B 在小节终止线左侧(向选区内偏,避免出界)。 */
+  const makeAbMark = (label: 'A' | 'B', x: number, y: number): SVGElement => {
+    const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    g.setAttribute('class', 'ss-ab-mark ' + (label === 'A' ? 'is-a' : 'is-b'));
+    const r = 6.5;                // 圆点半径
+    const dx = label === 'A' ? r : -r;   // A 向右(选区内)偏,B 向左(选区内)偏
+    const cx = x + dx;
+    const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    dot.setAttribute('cx', cx.toFixed(1));
+    dot.setAttribute('cy', (y - r).toFixed(1));
+    dot.setAttribute('r', r.toFixed(1));
+    dot.setAttribute('fill', '#4f46e5');
+    g.appendChild(dot);
+    const t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    t.setAttribute('x', cx.toFixed(1));
+    t.setAttribute('y', (y - r + 3).toFixed(1));   // 圆心附近(baseline 微调让字母居中)
+    t.setAttribute('text-anchor', 'middle');
+    t.setAttribute('font-size', '9');
+    t.setAttribute('font-weight', '700');
+    t.setAttribute('fill', '#fff');
+    t.textContent = label;
+    g.appendChild(t);
+    return g;
+  };
+
+  /** 应用 AB 选区到谱面:小节遮罩(.active)+ A/B 边界标记。
+   *  遮罩:遍历 .ss-ab-dim[data-m],选区外加 .active(CSS 仅 .current 行显示压暗)。
+   *  标记:A 画在首小节起始线、B 画在末小节终止线,整曲绝对坐标 overlay group。
+   *  abSelection=null:全部移除 .active + 清标记。 */
+  const applyAbVisual = () => {
+    const svg = sheetEl.querySelector('svg');
+    if (!svg) return;
+    const dims = svg.querySelectorAll('rect.ss-ab-dim');
+    const inSel = (m: number): boolean =>
+      abSelection != null && m >= abSelection.startMeasure && m <= abSelection.endMeasure;
+    dims.forEach(d => {
+      const m = parseInt(d.getAttribute('data-m') || '-1', 10);
+      d.classList.toggle('active', abSelection != null && !inSel(m));
+    });
+    let marks = svg.querySelector('g.ss-ab-marks');
+    if (abSelection == null || !renderCache) {
+      if (marks) marks.remove();
+      return;
+    }
+    if (!marks) {
+      marks = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+      marks.setAttribute('class', 'ss-ab-marks');
+      svg.appendChild(marks);
+    }
+    marks.innerHTML = '';
+    const findRow = (absM: number): { sysIdx: number; local: number } | null => {
+      for (let i = 0; i < renderCache!.systems.length; i++) {
+        const s = renderCache!.systems[i];
+        if (absM >= s.plan.startMeasure && absM < s.plan.startMeasure + s.plan.count) {
+          return { sysIdx: i, local: absM - s.plan.startMeasure };
+        }
+      }
+      return null;
+    };
+    const aRow = findRow(abSelection.startMeasure);
+    if (aRow) {
+      const sys = renderCache.systems[aRow.sysIdx];
+      marks.appendChild(makeAbMark('A', sys.trebleLayout.barLines[aRow.local], sys.staffTopY));
+    }
+    const bRow = findRow(abSelection.endMeasure);
+    if (bRow) {
+      const sys = renderCache.systems[bRow.sysIdx];
+      const bl = sys.trebleLayout.barLines;
+      marks.appendChild(makeAbMark('B', bl[Math.min(bRow.local + 1, bl.length - 1)], sys.staffTopY));
+    }
+  };
 
   // 渲染:算行宽(容器宽) → renderScore → 挂 SVG。
   // SVG 用 width:100% + height:auto(按 viewBox 自适应高度),保持 scaleX=scaleY=1。
@@ -858,6 +948,8 @@ export function buildScoreSheet(
     lastHiBass = new Set();
     lastSysIdx = -1;
     lastPhSys = -1;   // 重渲染后播放头行归属失效,下次设 left 默认瞬移
+    // 重渲染重建了 ss-ab-dim rect(无 .active)+ 清了标记层 → 重应用当前选区。
+    applyAbVisual();
   };
   render();
 
@@ -1165,6 +1257,10 @@ export function buildScoreSheet(
       const scale = renderCache.width > 0 ? svgRect.width / renderCache.width : 1;
       // 当前行底部 SVG 内 y = sys.yTop + sys.height → 屏幕 y。
       return svgRect.top + (sys.yTop + sys.height) * scale;
+    },
+    setAbRange(sel) {
+      abSelection = sel;
+      applyAbVisual();
     },
   };
 }

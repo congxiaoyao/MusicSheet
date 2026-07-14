@@ -69,6 +69,32 @@
   opacity: 1;
 }
 
+/* ── AB 循环:小节遮罩(只在当前行生效)+ A/B 边界标记 ────────
+ * 设计:future/past 行零改动(维持现有 opacity 分档),遮罩只在 .current 行显示。
+ *   选区外小节(.ss-ab-dim.active)变淡;选区内透明。换行时由 updateGradient 的 class
+ *   切换自然驱动遮罩显隐(.current 行才 display:block)。
+ *
+ * 颜色选型(数学严格等效,非估算):目标 = .future 行 opacity 0.35 的"变淡"视觉。
+ *   关键前提:谱子背景是 .score-sheet 的 #f8fafc(svg/sheet 宿主都透明),不是白。
+ *   opacity 0.35 作用:墨迹像素 → 0.35×ink+0.65×bg;非墨迹像素(背景透出)→ 不变(#f8fafc)。
+ *   小节遮罩要等效:非墨迹区不能变(否则行间空白被提亮),故遮罩色必须 = 背景色 #f8fafc,而非白。
+ *     非墨迹:(1-a)×bg+a×bg = bg ✓(用 bg 色遮罩,背景不变)
+ *     墨迹:(1-a)×ink+a×bg,令 = 0.35×ink+0.65×bg → a=0.65。
+ *   故:fill=#f8fafc(背景色)alpha 0.65。白遮罩会让空白区提亮且墨迹终点错向纯白,不等效。 */
+.ss-ab-dim {
+  display: none;            /* 默认隐藏,仅 .current 行显示 */
+  transition: fill 200ms ease;
+}
+.score-sheet-sheet .ss-system.current .ss-ab-dim {
+  display: block;
+}
+.ss-ab-dim.active {
+  fill: rgba(248, 250, 252, 0.65);   /* #f8fafc(谱面背景色)×0.65:严格等效 opacity 0.35 */
+}
+.ss-ab-dim:not(.active) {
+  fill: transparent;
+}
+
 /* ── 符头高亮(谱面播放头,文档 §4)────────────────────────
  * .note-elem / .jp-elem 默认 currentColor(黑色),播放时变高亮色。
  * 高亮 = 变色(主色调),复用编辑器同款 class 语义(.playing)。 */
