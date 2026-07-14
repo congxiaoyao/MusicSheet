@@ -164,6 +164,8 @@ export class PracticeApp {
   // 资源句柄(destroy 用)
   private boundResize: () => void;
   private boundScroll: () => void;
+  /** Space 播放/暂停的全局 keydown(练琴页专属;mount 注册 destroy 卸载)。 */
+  private boundKeyDown!: (e: KeyboardEvent) => void;
   private hitEl: HTMLElement;
   private fallWrap!: HTMLElement;
   private destroyed = false;
@@ -355,6 +357,25 @@ export class PracticeApp {
       // AB 视觉初始刷新(记忆恢复的选区 → 谱面遮罩 + A/B 标记)。
       this.updateAbVisual();
     });
+
+    // ── Space 播放/暂停(练琴页专属 keydown)──
+    // 可见性守卫用 root.hidden:返回编辑器时 App 给 practiceHost 设 hidden 属性
+    // (CSS .practice-host[hidden]{display:none})。注意不能用 offsetParent===null ——
+    // practiceHost 是 position:fixed,其 offsetParent 规范上恒为 null(无论可见与否),
+    // 用它会把练琴页可见时也误判为隐藏 → Space 永远不触发。(库页面 host 是文档流元素才用 offsetParent。)
+    // 反复进退练琴页,故 mount 注册 / destroy 卸载配对,避免多实例堆积。
+    this.boundKeyDown = (e: KeyboardEvent) => {
+      if (this.destroyed) return;
+      if (this.root.hidden) return;   // 练琴页不可见时(已返回编辑器)不响应
+      // 输入框聚焦时不劫持 Space(防御:练琴页未来可能加输入框)。
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' || (e.target as HTMLElement)?.isContentEditable) return;
+      if (e.key === ' ') {
+        e.preventDefault();
+        this.onTogglePlay();
+      }
+    };
+    window.addEventListener('keydown', this.boundKeyDown);
   }
 
   // ── onTick 分发(文档 §2.3) ──
@@ -474,7 +495,10 @@ export class PracticeApp {
   private onHand(h: HandFilter): void {
     this.handFilter = h;
     this.waterfall.setHandFilter(h);
-    // 键盘高亮过滤由 computeActiveMidis 的 handFilter 处理(下一帧生效)。
+    // 暂停/停止态下 onTick 不再跑,键盘高亮和方块不会自动刷新 —— 另一只手的键会残留高亮、
+    // 旧手方块仍显示。用当前 beat 主动 dispatchFrame 刷一帧(与 onTick 同款完整分发:
+    // scoreSheet + waterfall + keyboard + metronome)。播放态下会被下一帧覆盖,无副作用。
+    this.dispatchFrame(this.currentBeat);
   }
 
   private onMetro(on: boolean): void {
@@ -692,6 +716,7 @@ export class PracticeApp {
     this.clearAbPauseTimer();
     this.player.dispose();
     window.removeEventListener('resize', this.boundResize);
+    window.removeEventListener('keydown', this.boundKeyDown);
     const scrollEl = this.scoreSheet.el.querySelector('.score-sheet-scroll');
     if (scrollEl) scrollEl.removeEventListener('scroll', this.boundScroll);
     this.root.innerHTML = '';

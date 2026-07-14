@@ -553,6 +553,11 @@ export class App {
     this.appView = 'practice';
     if (this.editorHost) this.editorHost.hidden = true;
     if (this.practiceHost) this.practiceHost.hidden = false;
+    // 入场动画:opacity + translateY + 轻微 scale(220ms easeOutCubic),与 .editor-enter 同款。
+    if (this.practiceHost) {
+      this.practiceHost.classList.add('practice-enter');
+      window.setTimeout(() => this.practiceHost?.classList.remove('practice-enter'), 240);
+    }
   }
 
   /** 关闭练琴页返回编辑器:存设置 → destroy(停练琴播放+移DOM+dispose Player) → 切回编辑器。
@@ -682,7 +687,9 @@ export class App {
     const editBar = document.createElement('div');
     editBar.className = 'edit-bar';
     const exampleBtn = mkBtn('示例：小星星', 'ghost', () => this.loadExample());
-    const pngBtn = mkBtn('⬇ 导出 PNG', 'ghost', () => { void this.doExport(); });
+    const pngBtn = mkBtn('', 'ghost', () => { void this.doExport(); });
+    pngBtn.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>导出 PNG';
+    pngBtn.style.gap = '6px';
     editBar.append(spacer(), exampleBtn, pngBtn);
     this.editorHost.appendChild(editBar);
 
@@ -1501,6 +1508,10 @@ export class App {
 
   private bindKeys(): void {
     window.addEventListener('keydown', (e) => {
+      // 编辑器快捷键仅编辑器激活时响应。库/练琴页各有自己的 keydown 监听
+      // (库见 library.ts;练琴页见 practice-app.ts),避免编辑器隐藏后仍被触发
+      // (如进练琴页按 Space 会误触发编辑器隐藏 Player)。
+      if (this.appView !== 'editor') return;
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'SELECT' || tag === 'INPUT' || (e.target as HTMLElement)?.isContentEditable) return;
       // 预览模式只读:仅允许空格(播放控制)+ 方向键(切换小节范围,只读安全)。

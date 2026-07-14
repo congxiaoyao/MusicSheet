@@ -74,12 +74,13 @@
   left: 0;
   right: 0;
   bottom: 0;
-  height: 2px;
+  height: 1px;
   background: var(--accent, #4f46e5);
-  box-shadow: 0 0 8px 1px rgba(79, 70, 229, 0.35);
+  opacity: 0.5;
+  box-shadow: 0 0 4px 0 rgba(79, 70, 229, 0.18);
   z-index: 10;
   pointer-events: none;
-  transition: box-shadow 0.08s, height 0.08s;
+  transition: box-shadow 0.1s, height 0.1s, opacity 0.1s;
 }
 /* .pr-hit.pulse 由 metronome.css 定义 */
 
