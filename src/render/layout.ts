@@ -80,7 +80,14 @@ export const NOTE_INK_HALF = advanceSS('noteheadBlack') * 0.497 * SS + 1.5;
 const FINAL_BAR_INSET = (0.75 + 0.16 / 2) * SS;
 const PAD_LEFT = 8;    // 五线谱横线/起始线的左边缘(顶格,仅极小留白防贴死)
 const PAD_RIGHT = 12;  // 随谱表等比缩小(原24)
-const STAFF_TOP = 75;    // 谱表顶端y:字号减半后需容纳朝上符干(stdLen=3.5ss≈40px)+梁厚度+clamp阈值,原58导致梁被裁顶
+// 谱表顶端 y(五线第一线在 SVG 内的 y)。给朝上符干(stdLen=3.5ss≈40sv)+连梁+切点偏移留空间。
+// 编辑页:75(历史值,FONT 从 92 减半到 46 时未按比例缩,留双倍余量;单谱表顶部留白,无妨)。
+// 练琴页:见 STAFF_TOP_PRACTICE(60)—— 多行堆叠时此处成了行间留白,压缩以让行间距匀称。
+const STAFF_TOP_EDIT = 75;
+/** 练琴页专用 staffTop(五线顶留白)。实测 stemUp 单音最坏(B4 step=6)需 55.9sv,60 留 ~4sv 余量。
+ *  比 EDIT(75) 少 15sv → 练琴页每行行间留白缩 15sv,system 间更接近 system 内间隙。
+ *  极端高音(超出此留白)时 viewBoxYOffset 仍会自动向上扩,不裁切。 */
+export const STAFF_TOP_PRACTICE = 60;
 // JIANPU_GAP = 34.5:默认简谱顶距 staffBottom。让默认 jianpuTop = 121+34.5 = 155.5,
 // 恰好等于 C4(中央C,step=-2)下加线场景(lowLedgerY 132.5 + PAD 23 = 155.5)。
 // 这样「空谱 → 输入 C4」简谱位置不变,不触发上缩跳动(C4 是最常用音之一)。
@@ -107,7 +114,7 @@ const SLOT_MIN: Record<DurationValue, number> = {
   thirtysecond: 2.6,
 };
 
-export function computeLayout(piece: Piece, containerWidth: number, currentDuration: DurationValue = 'quarter', chordAnchorBeat?: number, chordAnchorDuration?: DurationValue, hoverMidi?: number): Layout {
+export function computeLayout(piece: Piece, containerWidth: number, currentDuration: DurationValue = 'quarter', chordAnchorBeat?: number, chordAnchorDuration?: DurationValue, hoverMidi?: number, staffTopOverride?: number): Layout {
   const fontSize = FONT;
   const staffSpace = SS;
   // SVG 总宽下限。1056:两小节 contentWidth≈890,barWidth≈445。
@@ -116,7 +123,8 @@ export function computeLayout(piece: Piece, containerWidth: number, currentDurat
   // 到 host 宽度(不裁切不滚动条),偏移自适应仍保证不超线。
   const width = Math.max(containerWidth, 1056);
 
-  const staffTop = STAFF_TOP;
+  // staffTop:练琴页传 STAFF_TOP_PRACTICE(60)压缩行间留白;编辑页等不传 → 默认 EDIT(75)。
+  const staffTop = staffTopOverride ?? STAFF_TOP_EDIT;
   // 谱表高度 = 4 个线距 = 8 个半距。SS 现在是真实 staff space(线距)，故 ×4。
   const bottomLineY = staffTop + 4 * staffSpace;
   const staffBottom = bottomLineY;

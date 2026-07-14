@@ -539,7 +539,7 @@ function renderSystem(
   const bandBaselineOffset = (piece: Piece, layout: Layout): number => {
     const tight = DIGIT_TIGHT_GAP + maxUpExtentOf(piece);
     const headInkHalf = 0.6 * layout.staffSpace;          // 符头墨迹半高(noteheadBlack 椭圆 ≈0.587ss,留余量)
-    const AVOID_GAP = 0.7 * layout.staffSpace;            // 低音避让时符头↔数字的空隙(≈16px)
+    const AVOID_GAP = 1.0 * layout.staffSpace;            // 低音避让时符头↔数字的空隙
     const avoid = lowestHeadOffset(piece, layout) + headInkHalf + AVOID_GAP + maxUpExtentOf(piece);
     return Math.max(tight, avoid);
   };
