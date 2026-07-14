@@ -203,7 +203,11 @@ export class Player {
     const step = () => {
       if (this.state !== 'playing' || gen !== this.tickGen) return;
       const elapsed = ctx.currentTime - originCtxTime;
-      const beat = Math.max(0, elapsed / secPerBeat);
+      // beat 不低于 startBeat:playFrom 用 60ms 前瞻调度音频(startCtxTime=now+0.06),
+      // 但这 60ms 窗口内 elapsed < startBeat*secPerBeat → beat < startBeat,会让 UI 高亮
+      // 回退到上一个音(seek 后播放头"往回退一下")。前瞻是音频调度用的,UI 应停在 seek 位置
+      // 直到音频真正开始(elapsed ≥ startBeat*secPerBeat)。
+      const beat = Math.max(this.startBeat, elapsed / secPerBeat);
 
       // 高亮推进：检测进入新音区间
       const idx = this.noteIndexAtBeat(beat);

@@ -349,16 +349,18 @@ export class PracticeApp {
     });
 
     // ── Space 播放/暂停(练琴页专属 keydown)──
-    // 与库页面(library.ts onKey)同款:用 offsetParent===null 做可见性守卫——
-    // 返回编辑器后 practiceHost 设 hidden,本监听自动失效,不污染编辑器。
+    // 可见性守卫用 root.hidden:返回编辑器时 App 给 practiceHost 设 hidden 属性
+    // (CSS .practice-host[hidden]{display:none})。注意不能用 offsetParent===null ——
+    // practiceHost 是 position:fixed,其 offsetParent 规范上恒为 null(无论可见与否),
+    // 用它会把练琴页可见时也误判为隐藏 → Space 永远不触发。(库页面 host 是文档流元素才用 offsetParent。)
     // 反复进退练琴页,故 mount 注册 / destroy 卸载配对,避免多实例堆积。
     this.boundKeyDown = (e: KeyboardEvent) => {
       if (this.destroyed) return;
-      if (this.root.offsetParent === null) return;   // 练琴页不可见时(已返回编辑器)不响应
-      // 输入框聚焦时不劫持 Space(虽然练琴页目前无输入框,留防御)。
+      if (this.root.hidden) return;   // 练琴页不可见时(已返回编辑器)不响应
+      // 输入框聚焦时不劫持 Space(防御:练琴页未来可能加输入框)。
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' || (e.target as HTMLElement)?.isContentEditable) return;
-      if (e.key === ' ' || e.code === 'Space') {
+      if (e.key === ' ') {
         e.preventDefault();
         this.onTogglePlay();
       }

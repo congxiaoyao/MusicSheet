@@ -981,14 +981,15 @@ export function buildScoreSheet(
       if (svgX >= bl[k] && svgX < bl[k + 1]) { m = k; break; }
       if (k === bl.length - 2) m = k;   // 末尾兜底
     }
-    // 小节内按 x 比例线性反算拍位(与 layout.positionInBar 的拍位→x 映射互逆)。
+    // 小节内按 x 比例线性反算拍位(与 layout.positionInBar 的拍位→x 映射互逆),
+    // 再吸附到最近整数拍(拍粒度)——点哪一小节的哪一拍就跳到那一拍,不落在半拍/小数拍上。
     // positionInBar:x = bl[m] + beatInMeas/bpb × barW + NOTE_INK_HALF(符头半宽偏移,
     //   让符头离开小节线)。反算时先减去该偏移,再按比例求拍位,点击符头中心即命中其起始拍。
     const bpb = beatsPerBar(sys.treblePiece.time);
     const barW = bl[m + 1] - bl[m];
     const xAtBeat0 = svgX - NOTE_INK_HALF;
     const ratio = barW > 0 ? Math.max(0, Math.min(1, (xAtBeat0 - bl[m]) / barW)) : 0;
-    const beatInMeas = ratio * bpb;
+    const beatInMeas = Math.round(ratio * bpb);   // 吸附到最近整数拍(0..bpb)
     const absBeat = (sys.plan.startMeasure + m) * bpb + beatInMeas;
     callbacks.onSeek(absBeat);
   });
