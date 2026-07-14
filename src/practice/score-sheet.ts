@@ -786,7 +786,7 @@ export function renderScore(score: Score, width: number, mode: ScoreMode, preset
     cumY += r.height + SYSTEM_GAP;
   }
   const totalHeight = Math.max(0, cumY - SYSTEM_GAP) + 16;
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${totalWidth}" height="${totalHeight.toFixed(2)}" viewBox="0 0 ${totalWidth} ${totalHeight.toFixed(2)}">${groups.join('')}</svg>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${totalWidth}" height="${totalHeight.toFixed(2)}" viewBox="0 0 ${totalWidth} ${totalHeight.toFixed(2)}" overflow="visible">${groups.join('')}</svg>`;
   return { svg, width: totalWidth, height: totalHeight, systems: geom };
 }
 
