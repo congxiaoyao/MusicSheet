@@ -116,3 +116,9 @@
   /* transition 由 JS 动态设(setPlayheadLeft):同行 onset 间 left 0.15s 平滑;
    * 换行时 transition:none 全瞬移(避免横向回退 + 纵向平移滑动)。 */
 }
+
+/* ── AB 循环边界标记(A/B 圆点)──────────────────────────────
+ * 阴影让标记从谱面上浮起(与面板锚点的 box-shadow 呼应)。 */
+.score-sheet-sheet .ss-ab-mark {
+  filter: drop-shadow(0 1px 2px rgba(16, 24, 40, 0.25));
+}

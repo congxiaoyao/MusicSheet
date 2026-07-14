@@ -84,18 +84,18 @@ export function saveBpm(scoreId: string, bpm: number): void {
 }
 
 // ── AB 循环状态持久化(按曲子 id,同 BPM 风格) ──
-/** AB 持久化结构:selection(选区,与开关无关)+ on(开关状态)。两者独立持久化,
- *  保证"退出啥状态进来就啥状态"(关着 switch 离开 → 进来还是关)。 */
-export interface AbState { selection: AbSelection | null; on: boolean; }
+/** AB 持久化结构:selection(选区,与开关无关)+ on(开关状态)+ intervalBeats(间隔,拍数)。
+ *  三者独立持久化,保证"退出啥状态进来就啥状态"(关着 switch 离开 → 进来还是关)。 */
+export interface AbState { selection: AbSelection | null; on: boolean; intervalBeats: number; }
 const LS_AB_PREFIX = 'musicsheet:practice:ab:';
-/** 读某曲子的 AB 状态。读不到返回 {selection:null, on:false}(首次进入)。 */
+/** 读某曲子的 AB 状态。读不到返回默认(首次进入)。 */
 export function loadAbState(scoreId: string): AbState {
   try {
     const v = localStorage.getItem(LS_AB_PREFIX + scoreId);
-    if (!v) return { selection: null, on: false };
+    if (!v) return { selection: null, on: false, intervalBeats: 0 };
     const s = JSON.parse(v) as Partial<AbState>;
-    return { selection: s.selection ?? null, on: !!s.on };
-  } catch { return { selection: null, on: false }; }
+    return { selection: s.selection ?? null, on: !!s.on, intervalBeats: s.intervalBeats ?? 0 };
+  } catch { return { selection: null, on: false, intervalBeats: 0 }; }
 }
 /** 写某曲子的 AB 状态。 */
 export function saveAbState(scoreId: string, state: AbState): void {
@@ -149,6 +149,13 @@ export class PracticeApp {
   private abOn = false;
   private abSelection: AbSelection | null = null;   // AB 选区(小节级);null=未启用/无定义
   private abRange: { a: number; b: number } | null = null;   // beat 单位(由 abSelection 派生,onTick 用)
+  /** AB 循环间隔(拍数,0~8)。到 B 点后停顿 intervalBeats 拍再跳回 A;0=立即。
+   *  换算 ms:intervalBeats × 60/baseBpm × 1000(按基础 bpm,不受变速影响)。 */
+  private abIntervalBeats = 0;
+  /** 间隔停顿期间是否暂停中(onStateChange 跳过用,避免按钮态闪烁)。 */
+  private abPausing = false;
+  /** 间隔停顿的 pending timer(手动 seek/toggle/destroy 时需清除避免竞态)。 */
+  private abPauseTimer: ReturnType<typeof setTimeout> | null = null;
   /** 谱面区 DOM(设宽度用)。 */
   private scoreArea!: HTMLElement;
   /** 谱面区宽度 px。 */
@@ -204,6 +211,7 @@ export class PracticeApp {
     this.abOn = abState.on;
     this.abSelection = abState.selection;
     this.abRange = this.abSelection ? this.selectionToRange(this.abSelection) : null;
+    this.abIntervalBeats = abState.intervalBeats;
     this.player = new Player({
       onTick: (beat) => this.onTick(beat),
       onStateChange: (s) => this.onStateChange(s),
@@ -272,6 +280,7 @@ export class PracticeApp {
         abOn: this.abOn,
         totalMeasures: this.score.meta.totalMeasures,
         abSelection: this.abSelection,
+        abIntervalBeats: this.abIntervalBeats,
         mode: this.settings.mode ?? DEFAULT_MODE,
         labels: this.settings.labels ?? DEFAULT_LABELS,
         fingering: this.settings.fingering ?? DEFAULT_FINGERING,
@@ -285,6 +294,7 @@ export class PracticeApp {
         onMetro: (on) => this.onMetro(on),
         onAbToggle: (on) => this.onAbToggle(on),
         onAbSelectionChange: (sel) => this.onAbSelectionChange(sel),
+        onAbIntervalChange: (ms) => this.onAbIntervalChange(ms),
         onSpeed: (s) => this.onSpeed(s),
         onMode: (m) => this.onMode(m),
         onLabels: (l) => this.onLabels(l),
@@ -374,12 +384,20 @@ export class PracticeApp {
     if (this.destroyed) return;
     this.currentBeat = beat;
 
-    // AB 循环检测(底层支持;abOn 关时不检测)。beat 换算见风险 §2。
+    // AB 循环检测:到 B 点触发循环(含间隔逻辑)。触发后 return(由 triggerAbLoop 内分发 A 帧)。
     if (this.abOn && this.abRange && beat >= this.abRange.b - BEAT_EPS) {
-      this.player.seek(this.abRange.a, true);
+      this.triggerAbLoop();
       return;
     }
 
+    this.dispatchFrame(beat);
+  }
+
+  /** 分发一帧到所有视觉组件(scoreSheet/waterfall/keyboard/metronome)。
+   *  各组件纯函数式重算,传 beat 即恢复到该 beat 状态。循环跳转时用 A 点 beat 主动调一次,
+   *  避免当帧冻结在 B、下一帧才恢复的跳变。 */
+  private dispatchFrame(beat: number): void {
+    this.currentBeat = beat;
     this.scoreSheet.onTick(beat);
     this.waterfall.onTick(beat);
     const active = computeActiveMidis(beat, this.staffs, this.handFilter);
@@ -387,8 +405,49 @@ export class PracticeApp {
     this.metronome.onTick(beat);
   }
 
+  /** AB 循环触发:到 B 点后(可能停顿 interval)跳回 A 并从 A 重新播放 + 分发 A 帧。
+   *  interval=0:立即 seek(A)+ dispatchFrame(A)。
+   *  interval>0:pause(冻结所有组件,tickLoop 停 → onTick 不再调 → 完全静止)→ setTimeout(interval)
+   *    → seek(A, true) + dispatchFrame(A)。pause 期间 abPausing=true 让 onStateChange 跳过(按钮无感)。 */
+  private triggerAbLoop(): void {
+    if (!this.abRange) return;
+    const a = this.abRange.a;
+    this.clearAbPauseTimer();
+    if (this.abIntervalBeats <= 0) {
+      this.seekAndDispatch(a);
+      return;
+    }
+    // 间隔停顿:pause 冻结 → 延迟 intervalBeats 拍 → 从 A 继续。
+    // 拍→ms 按 baseBpm(基础节奏,不受变速影响):间隔是"音乐停几拍"的语义。
+    const ms = this.abIntervalBeats * 60 / this.baseBpm * 1000;
+    this.abPausing = true;
+    this.player.pause();   // tickLoop 停,onTick 不再被调,组件自动冻结
+    this.abPauseTimer = setTimeout(() => {
+      this.abPauseTimer = null;
+      this.abPausing = false;
+      this.seekAndDispatch(a);
+    }, ms);
+  }
+
+  /** seek 到 beat(保持播放)+ 主动分发该 beat 一帧(确保当帧立即恢复,不等下一帧 rAF)。 */
+  private seekAndDispatch(beat: number): void {
+    this.player.seek(beat, true);
+    this.dispatchFrame(beat);
+  }
+
+  /** 清除 AB 间隔的 pending timer(手动 seek/toggle/切选区/destroy 时调,避免竞态)。 */
+  private clearAbPauseTimer(): void {
+    if (this.abPauseTimer != null) {
+      clearTimeout(this.abPauseTimer);
+      this.abPauseTimer = null;
+    }
+    this.abPausing = false;
+  }
+
   private onStateChange(state: PlayState): void {
     if (this.destroyed) return;
+    // 间隔停顿期间 player 进 paused 态会触发此回调;跳过避免按钮/title 闪烁(间隔结束后自然恢复)。
+    if (this.abPausing) return;
     this.playState = state;
     if (state === 'stopped') {
       this.currentBeat = 0;
@@ -400,6 +459,13 @@ export class PracticeApp {
 
   private onEnd(): void {
     if (this.destroyed) return;
+    // 整曲循环(或选区延伸到曲终):播放自然结束触发的 onEnd,应循环回 A 而非停止。
+    // 触发条件:AB 开 + B 点 == 曲终(player 的结束判定 beat>=totalBeats 抢在 onTick 的 AB 检测前)。
+    const totalBeats = this.score.meta.totalMeasures * this.bpb;
+    if (this.abOn && this.abRange && this.abRange.b >= totalBeats - BEAT_EPS) {
+      this.triggerAbLoop();
+      return;
+    }
     this.playState = 'stopped';
     this.currentBeat = 0;
     this.keyboard.clearHighlight();
@@ -415,6 +481,7 @@ export class PracticeApp {
   }
 
   private onTogglePlay(): void {
+    this.clearAbPauseTimer();
     if (this.playState === 'playing') {
       this.player.pause();
     } else if (this.playState === 'paused') {
@@ -429,10 +496,9 @@ export class PracticeApp {
     this.handFilter = h;
     this.waterfall.setHandFilter(h);
     // 暂停/停止态下 onTick 不再跑,键盘高亮和方块不会自动刷新 —— 另一只手的键会残留高亮、
-    // 旧手方块仍显示。用当前 beat 主动刷一帧:重绘方块(handFilter 过滤)+ 重算键盘高亮。
-    // 播放态下这一帧会被下一帧 onTick 覆盖,无副作用。
-    this.waterfall.onTick(this.currentBeat);
-    this.keyboard.setActiveMidis(computeActiveMidis(this.currentBeat, this.staffs, this.handFilter));
+    // 旧手方块仍显示。用当前 beat 主动 dispatchFrame 刷一帧(与 onTick 同款完整分发:
+    // scoreSheet + waterfall + keyboard + metronome)。播放态下会被下一帧覆盖,无副作用。
+    this.dispatchFrame(this.currentBeat);
   }
 
   private onMetro(on: boolean): void {
@@ -442,6 +508,7 @@ export class PracticeApp {
 
   /** AB switch 切换。开时若 selection=null 自动全选(整曲循环);关时保留 selection(仅隐藏遮罩)。 */
   private onAbToggle(on: boolean): void {
+    this.clearAbPauseTimer();
     this.abOn = on;
     if (on) {
       // 首次开(无选区):自动全选。
@@ -456,7 +523,7 @@ export class PracticeApp {
       }
     }
     // 存(在自动全选之后,保证存的是最新 selection)。
-    saveAbState(this.score.meta.id, { selection: this.abSelection, on: this.abOn });
+    saveAbState(this.score.meta.id, { selection: this.abSelection, on: this.abOn, intervalBeats: this.abIntervalBeats });
     // 同步面板(自动全选的面板 selection 显示)+ 谱面视觉。
     this.controls.setAbState({ on: this.abOn, selection: this.abSelection });
     this.updateAbVisual();
@@ -464,13 +531,20 @@ export class PracticeApp {
 
   /** AB 选区变化(面板拖选/单击/整曲循环触发)。派生 beat range + 存 + 刷新视觉 + 定位。 */
   private onAbSelectionChange(sel: AbSelection): void {
+    this.clearAbPauseTimer();
     this.applyAbSelection(sel);
-    saveAbState(this.score.meta.id, { selection: this.abSelection, on: this.abOn });
+    saveAbState(this.score.meta.id, { selection: this.abSelection, on: this.abOn, intervalBeats: this.abIntervalBeats });
     if (this.abOn && this.abSelection) {
       const a = this.abSelection.startMeasure * this.bpb;
       this.player.seek(a, this.player.isPlaying());
     }
     this.updateAbVisual();
+  }
+
+  /** AB 间隔变化(面板滑块触发,单位拍)。存 + 供 triggerAbLoop 读取。 */
+  private onAbIntervalChange(beats: number): void {
+    this.abIntervalBeats = Math.max(0, Math.min(8, beats));
+    saveAbState(this.score.meta.id, { selection: this.abSelection, on: this.abOn, intervalBeats: this.abIntervalBeats });
   }
 
   /** 应用选区到 abSelection + 派生 abRange(beat)。不持久化、不 seek(由调用方决定)。 */
@@ -497,6 +571,7 @@ export class PracticeApp {
   }
 
   private onSpeed(s: number): void {
+    this.clearAbPauseTimer();
     this.speed = s;
     this.player.setBpm(this.baseBpm * s);
     this.controls.setBpm(Math.round(this.baseBpm * s));
@@ -543,6 +618,7 @@ export class PracticeApp {
    *  clamp 到 [0, 整曲总beat),防止点击末尾 padding 区越界。
    *  AB 开时:点击选区外完全无效(封闭练习模式),保持当前播放位置不变。 */
   private onSeekBeat(beat: number): void {
+    this.clearAbPauseTimer();
     if (this.abOn && this.abSelection && !this.isBeatInSelection(beat)) return;
     const totalBeats = this.score.meta.totalMeasures * this.bpb;
     const b = Math.max(0, Math.min(beat, totalBeats));
@@ -637,6 +713,7 @@ export class PracticeApp {
   destroy(): void {
     if (this.destroyed) return;
     this.destroyed = true;
+    this.clearAbPauseTimer();
     this.player.dispose();
     window.removeEventListener('resize', this.boundResize);
     window.removeEventListener('keydown', this.boundKeyDown);
