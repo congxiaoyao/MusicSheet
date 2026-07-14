@@ -140,7 +140,6 @@ export class PracticeApp {
   private fallWrap!: HTMLElement;
   private destroyed = false;
   /** (已废弃,保留 mount 注释引用) */
-  private lastLoggedMeasure = -1;   // log 用:上次打印的小节号(跨小节才打,避免刷屏)
   /** 调试日志收集器(见 docs/调试日志收集器.md)。 */
   private __log: { t: number; tag: string; data: unknown }[] = [];
   private log = (tag: string, data: unknown = {}): void => {
@@ -322,12 +321,6 @@ export class PracticeApp {
   private onTick(beat: number): void {
     if (this.destroyed) return;
     this.currentBeat = beat;
-    // log:跨小节时记一行(换行检测用,避免每帧刷屏)
-    const measure = Math.floor(beat / this.bpb);
-    if (measure !== this.lastLoggedMeasure) {
-      this.log('onTick', { beat: Math.round(beat * 100) / 100, measure });
-      this.lastLoggedMeasure = measure;
-    }
 
     // AB 循环检测(底层支持;abOn 关时不检测)。beat 换算见风险 §2。
     if (this.abOn && this.abRange && beat >= this.abRange.b - BEAT_EPS) {
@@ -444,7 +437,6 @@ export class PracticeApp {
     const totalBeats = this.score.meta.totalMeasures * this.bpb;
     const b = Math.max(0, Math.min(beat, totalBeats));
     const playing = this.player.isPlaying();
-    this.log('onSeekBeat', { beat, clamped: b, playing });
     this.player.seek(b, playing);
     if (!playing) {
       // 暂停/停止态也更新一帧高亮位置。
@@ -471,14 +463,14 @@ export class PracticeApp {
   /** score-sheet 当前行底部变化通知(行切换/切档/seek 时触发)。 */
   private onLineLayout(lineBottomY: number): void {
     if (this.destroyed) return;
-    this.log('onLineLayout', { lineBottomY: Math.round(lineBottomY) });
-    this.updateBounds('onLineLayout');
+    void lineBottomY;
+    this.updateBounds();
   }
 
   /** 谱面滚动时重算方块区(当前行屏幕底随滚动连续变化,实时跟随)。 */
   private updateTopYFromScroll(): void {
     if (this.destroyed) return;
-    this.updateBounds('scroll');
+    this.updateBounds();
   }
 
   /** 实时算「当前行底」在 overlay 内的 y(屏幕坐标,含滚动偏移)。
@@ -494,11 +486,10 @@ export class PracticeApp {
   }
 
   /** 重算方块区位置/尺寸 + waterfall bounds。 */
-  private updateBounds(reason: string = ''): void {
+  private updateBounds(): void {
     if (this.destroyed) return;
     const kbEl = this.keyboard.el;
     if (!kbEl || !this.fallWrap) return;
-    const scrollEl = this.scoreSheet.el.querySelector('.score-sheet-scroll');
     const kbRect = kbEl.getBoundingClientRect();
     const overlayRect = this.fallWrap.parentElement!.getBoundingClientRect();
     const kbTopInOverlay = Math.max(0, kbRect.top - overlayRect.top);
@@ -508,7 +499,6 @@ export class PracticeApp {
     this.fallWrap.style.top = top + 'px';
     this.fallWrap.style.height = height + 'px';
     this.waterfall.setBounds({ topY: 0, bottomY: height });
-    this.log('updateBounds', { reason, scrollTop: Math.round(scrollEl?.scrollTop ?? -1), lineBottom: Math.round(lineBottom), kbTopInOverlay: Math.round(kbTopInOverlay), top: Math.round(top), height: Math.round(height) });
   }
 
   // ── 工具 ──
