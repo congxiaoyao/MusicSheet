@@ -15,6 +15,9 @@
   --kb-hand-L: #ea580c;
   --kb-hand-R-soft: rgba(37, 99, 235, 0.14);
   --kb-hand-L-soft: rgba(234, 88, 12, 0.14);
+  /* 高亮环:用同手色系(蓝/橙),不用 accent 紫色,避免三色混搭显脏 */
+  --kb-ring-R: rgba(37, 99, 235, 0.5);
+  --kb-ring-L: rgba(234, 88, 12, 0.5);
 
   position: relative;
   width: 100%;
@@ -82,27 +85,31 @@
 .kb-key-b .kb-klabel { font-size: 7px; color: #cbd5e1; font-weight: 600; }
 .kb-key-b .kb-ksolfege { font-size: 7px; color: #cbd5e1; }
 
-/* 中央 C 标记 */
+/* 中央 C 标记:中性灰小点,低调标识不抢戏(不用 accent 紫) */
 .kb-key-w.kb-center-c::before {
   content: '';
   position: absolute;
-  top: 2px; left: 50%;
+  top: 3px; left: 50%;
   transform: translateX(-50%);
-  width: 6px; height: 6px;
+  width: 5px; height: 5px;
   border-radius: 50%;
-  background: var(--accent, #4f46e5);
-  opacity: 0.4;
+  background: var(--muted, #8b919c);
+  opacity: 0.35;
 }
 
-/* ── 高亮:右手蓝/左手橙(与方块颜色一致,文档 §5.2) ── */
-.kb-key-w.glow-R { background: linear-gradient(180deg, #93c5fd, var(--kb-hand-R-soft)); }
-.kb-key-w.glow-L { background: linear-gradient(180deg, #fdba74, var(--kb-hand-L-soft)); }
+/* ── 高亮:右手蓝/左手橙(与方块颜色一致,文档 §5.2) ──
+ * 渐变用纯同手色(顶亮底淡),外环用同手色系(不用 accent 紫环),整体单色系干净。
+ * 顶部加一条同色实色边模拟"被按下"的光带,比环+渐变更清晰。 */
+.kb-key-w.glow-R { background: linear-gradient(180deg, #bfdbfe 0%, #93c5fd 40%, var(--kb-hand-R-soft) 100%); }
+.kb-key-w.glow-L { background: linear-gradient(180deg, #fed7aa 0%, #fdba74 40%, var(--kb-hand-L-soft) 100%); }
 .kb-key-w.glow-R, .kb-key-w.glow-L {
-  box-shadow: inset 0 -3px 0 rgba(0, 0, 0, 0.08), 0 0 0 2px var(--accent-ring, rgba(79, 70, 229, 0.16));
+  box-shadow: inset 0 -3px 0 rgba(0, 0, 0, 0.06);
 }
+.kb-key-w.glow-R { border-top: 3px solid var(--kb-hand-R); }
+.kb-key-w.glow-L { border-top: 3px solid var(--kb-hand-L); }
 .kb-key-b.glow-R { background: linear-gradient(180deg, #1d4ed8, var(--kb-hand-R)); }
 .kb-key-b.glow-L { background: linear-gradient(180deg, #c2410c, var(--kb-hand-L)); }
-.kb-key-b.glow-R, .kb-key-b.glow-L { box-shadow: 0 0 0 2px var(--accent-ring, rgba(79, 70, 229, 0.16)); }
+.kb-key-b.glow-R, .kb-key-b.glow-L { box-shadow: inset 0 -3px 0 rgba(0, 0, 0, 0.3); }
 /* 高亮键文字色:白键高亮底色浅(浅蓝/浅橙),文字用深墨色(清晰且与蓝橙底都协调);
  * 黑键高亮底色深,文字保持白色(继承默认)。 */
 .kb-key-w.glow-R .kb-kname, .kb-key-w.glow-L .kb-kname,

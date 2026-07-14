@@ -1,18 +1,18 @@
 /* Metronome 脉冲样式。
  * hit/dot 元素本身由外部(PracticeApp / PracticeControls)创建定位，这里只定义 .pulse 闪态。
- * 视觉收敛:脉冲统一用 accent 色(与方块蓝/橙、键盘高亮同调),不再变红,
- *          只靠亮度/线宽变化做节拍提示,避免红紫混搭显脏。 */
+ * 原则:脉冲只做"提亮+放大",不用彩色发光(去紫去红),与判定线/方块的深色系协调。 */
 
-/* 判定线脉冲:提亮 + 加粗 + 轻微发光(同色系,不变红)。基础样式由 PracticeApp 布局定。 */
+/* 判定线脉冲:从淡灰(0.28)提亮到实色深墨 + 加粗到 2px + 极淡同色发光。
+ * 节拍点感:平时是淡参考线,每拍"咬"一下变实。基础样式由 PracticeApp 布局定。 */
 .pr-hit.pulse {
-  opacity: 1;
+  opacity: 0.85;
   height: 2px;
-  box-shadow: 0 0 8px 0 rgba(79, 70, 229, 0.45);
+  box-shadow: 0 0 6px 0 rgba(31, 36, 48, 0.25);
 }
 
-/* 顶栏节拍器指示点脉冲:accent 高亮 + 轻微放大(不再变红)。 */
+/* 顶栏节拍器指示点脉冲:用深墨色高亮 + 明显放大(7px→11px),像节拍灯"咬"一下。
+ * 平时灰点,每拍变深放大,比发光更清晰可读。 */
 .pr-metro .dot.pulse {
-  background: var(--accent, #4f46e5);
-  box-shadow: 0 0 6px 1px rgba(79, 70, 229, 0.5);
-  transform: scale(1.25);
+  background: #1f2430;
+  transform: scale(1.6);
 }
