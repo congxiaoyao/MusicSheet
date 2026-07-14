@@ -80,8 +80,6 @@ const BLOCK_H_FACTOR = 1.0;
 const BLOCK_H_MIN = 20;
 /** 可见窗上界:未来多少拍内可见。原型 5,缩到 3.5(方块长,预告窗缩短避免顶出)。 */
 const VIS_DIST_MAX = 3.5;
-/** 命中窗:|beat 差| < 0.15 → active(原型 L809)。 */
-const HIT_WINDOW = 0.15;
 
 // ── parseFallNotes:从乐谱解析方块音符(文档 §4.2) ────────
 
@@ -219,8 +217,12 @@ export function buildWaterfall(initial: WaterfallInitial, cb: WaterfallCallbacks
         bEl.style.left = midiToX(dispMidi, range, whiteW) + 'px';
         bEl.style.height = bh + 'px';
         bEl.style.top = yTop + 'px';
-        // 命中:接近判定线加 active(方块自己判断,不依赖键盘,文档 §4.4)。
-        const active = Math.abs(dist) < HIT_WINDOW;
+        // 命中(active):与键盘高亮完全同源 —— 音正在响期间(dist<=0 且未超过时值)标 active,
+        // 即 [n.beat, n.beat+duration) 区间,与键盘点亮的 [startBeat, startBeat+dur) 逐帧一致。
+        // 旧实现用 |dist|<HIT_WINDOW(对称 ±0.15 拍),在到达前 0.15 拍(约 90ms/5-6 帧)就先亮,
+        // 而键盘要等 dist<=0 才亮 → 视觉上"方块亮了键还没亮/方块还没落到键顶就亮"。
+        // 改为同源区间:① 到达瞬间与键盘同帧触发;② 暂停态 seek 到音中段也正确标 active(键盘亮=方块亮)。
+        const active = dist <= 0 && dist > -n.duration;
         bEl.classList.toggle('active', active);
       }
     },
