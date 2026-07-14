@@ -20,6 +20,7 @@ import { Score, ScoreMeta, MeasureData, rangeToPiece, pieceBackToScore, emptyMea
 import { listPieces, createPiece as apiCreatePiece, getPiece as apiGetPiece, updateMeta as apiUpdateMeta, putMeasure, deletePiece as apiDeletePiece, exportPiece as apiExportScore, MeasureFlusher } from '../core/storage';
 import { buildPromptModal, PromptModalHandle } from './prompt-modal';
 import { buildLibrary, LibraryHandle } from './library';
+import { PracticeApp, loadPracticeSettings, savePracticeSettings } from '../practice/practice-app';
 import { buildEditorBar, EditorBarHandle } from './editor-bar';
 
 interface HoverState { midi: number; x: number; }
@@ -107,22 +108,31 @@ export class App {
   private editRangeEl: HTMLElement | null = null;
   /** 退格/清空按钮组(编辑模式可见,预览模式隐藏)。 */
   private editActionsEl: HTMLElement | null = null;
+  /** hover 试听音效开关按钮(编辑模式可见,预览模式隐藏 —— 该开关只给编辑卡片用)。 */
+  private hoverSoundBtn: HTMLElement | null = null;
   /** 预览模式的 五线谱/简谱/两者 radio(挂在 edit-toolbar 内,仅预览可见)。 */
   private previewRadioEl: HTMLElement | null = null;
   /** 通用自定义弹窗(新建起名等),替代原生 prompt。 */
   private promptModal: PromptModalHandle = buildPromptModal();
-  /** 当前视图层级:library=曲谱库首屏;editor=编辑器(二级页)。 */
-  private appView: 'library' | 'editor' = 'library';
+  /** 当前视图层级:library=曲谱库首屏;editor=编辑器(二级页);practice=练琴页(三级页)。 */
+  private appView: 'library' | 'editor' | 'practice' = 'library';
   /** 库视图宿主(一级页)。 */
   private libraryHost: HTMLElement | null = null;
   /** 编辑器宿主(包住现有全部编辑器 DOM,二级页)。 */
   private editorHost: HTMLElement | null = null;
+  /** 练琴页宿主(三级页,初始隐藏)。 */
+  private practiceHost: HTMLElement | null = null;
+  /** 练琴页 controller(进入时创建,返回时销毁)。 */
+  private practiceApp: PracticeApp | null = null;
   /** 库句柄。 */
   private library: LibraryHandle | null = null;
   private playbackCard!: HTMLElement;
   private hover: HoverState | null = null;
   /** hover 试听音效开关(默认关)。 */
   private hoverSound = false;
+  /** 预览模式自动连播开关(默认关):播完当前小节范围后自动滚动并连播后续小节,直到曲终。
+   *  仅预览模式有意义(放音卡设置面板的「连播」节,非预览隐藏)。localStorage 持久化。 */
+  private autoPlayThrough = false;
   /** 预览模式的显示选项(五线谱/简谱/两者) */
   private previewMode: 'staff' | 'jianpu' | 'both' = 'both';
   /** 预览模式的 DOM 宿主(只读双谱表) */
@@ -140,6 +150,8 @@ export class App {
     this.viewMode = this.tool.viewMode;
     /** hover 试听音效开关(默认关)。localStorage 持久化。 */
     this.hoverSound = localStorage.getItem('hoverSound') === '1';
+    /** 预览模式自动连播开关(localStorage 持久化)。 */
+    this.autoPlayThrough = localStorage.getItem('autoPlayThrough') === '1';
     this.fingering = loadFingering();
     this.show = loadShow();
     this.player = new Player({
@@ -163,6 +175,11 @@ export class App {
         this.render();
       },
       onEnd: () => {
+        // 自动连播(仅预览模式):当前窗口播完 → 推进到下一窗口从头续播,直到曲终。
+        // player.finish 先触发 onStateChange('stopped') 再 onEnd,此刻 playState 已是 stopped。
+        if (this.viewMode === 'preview' && this.autoPlayThrough && this.score && this.tryAdvanceAutoPlayWindow()) {
+          return;   // 已推进并续播下一窗口,onStateChange('playing') 会接管 UI
+        }
         this.playingIndex = -1;
         this.currentBeat = 0;
         this.updatePlayheadAndHighlight();
@@ -415,6 +432,9 @@ export class App {
     this.appView = 'editor';
     if (this.libraryHost) this.libraryHost.hidden = true;
     if (this.editorHost) this.editorHost.hidden = false;
+    // 编辑器与库共用窗口滚动条:库可能滚动到中段(列表长),进入编辑器需回到顶部,
+    // 否则编辑器继承了库的滚动位置,顶栏(appbar)/工具盘被滚出视口。
+    window.scrollTo(0, 0);
     // applyScore 的 render 在库视图下早退(此时编辑器隐藏),切到编辑器后补一次,
     // 让卡片五线谱/简谱真正填充。卡片宽度依赖可见后的 clientWidth,故必须切显后再渲染。
     this.rebuildCards();
@@ -429,6 +449,8 @@ export class App {
 
   /** 切回曲谱库(一级页):flush 编辑改动 + 停播放 + 刷新库(更新时间/顺序) + 显示库。 */
   private async switchToLibrary(): Promise<void> {
+    // 记录刚编辑过的曲谱 id(供刷新库时重拉该曲缩略图;applyScore 后可能已切走,故在 flush 前取)。
+    const editedId = this.score?.meta.id ?? null;
     if (this.flusher) await this.flusher.flush();
     this.player.stop();
     this.playingIndex = -1;
@@ -436,7 +458,10 @@ export class App {
     this.playState = 'stopped';
     this.appView = 'library';
     if (this.editorHost) this.editorHost.hidden = true;
+    if (this.practiceHost) this.practiceHost.hidden = true;
     if (this.libraryHost) this.libraryHost.hidden = false;
+    // 让刚编辑过的曲谱缩略图缓存失效,refresh 时会重拉整曲重画缩略图+进度点。
+    if (editedId && this.library) this.library.invalidate([editedId]);
     // 刷新库:updatedAt 可能因编辑变化,排序需更新;新缩略图按需拉取。
     try {
       const { pieces } = await listPieces();
@@ -445,10 +470,18 @@ export class App {
     } catch { /* 忽略:保留旧列表 */ }
   }
 
-  /** 由 .mscore 文本导入整曲(拖拽共用)。 */
+  /** 由 .mscore 文本导入整曲(拖拽共用)。导入后进入编辑器(库视图下 flash 不可见,
+   *  且 render() 在库视图早退 → 旧实现导入后无任何可见反馈,故必须切到编辑器)。 */
   private async importScoreText(text: string): Promise<void> {
+    let imported: Score;
     try {
-      const imported = deserializeScore(text);
+      imported = deserializeScore(text);
+    } catch (err) {
+      // 解析失败:给用户可见反馈(flash 在库视图不可见,用 toast)。
+      this.showToast('导入失败:文件不是有效的乐谱(' + (err as Error).message + ')');
+      return;
+    }
+    try {
       if (this.flusher) await this.flusher.flush();
       // 建新曲谱(用导入的 meta),再把各小节逐个 PUT。
       const meta = await apiCreatePiece({
@@ -463,10 +496,12 @@ export class App {
         await putMeasure(meta.id, i, imported.measures[i]);
       }
       this.pieces = [meta, ...this.pieces];
+      // loadScoreById + switchToEditor:与新建曲谱一致,导入后直接进入二级编辑页。
       await this.loadScoreById(meta.id);
+      this.switchToEditor();
       this.flash(`已导入整曲(${imported.meta.totalMeasures} 小节)`);
     } catch (err) {
-      this.flash('导入失败:' + (err as Error).message);
+      this.showToast('导入失败:' + (err as Error).message);
     }
   }
 
@@ -493,12 +528,43 @@ export class App {
     this.onMeasureSelectorChange(newStart, newCount);
   }
 
-  /** 打开整曲预览(练琴页)。
-   *  旧「整曲预览弹窗」(full-score.ts + score-preview-modal.ts) 已被 ScoreSheet 组件替代。
-   *  练琴页入口接线是后续 plan 的范围,此处暂留为占位提示。 */
+  /** 打开练琴页(三级页)。
+   *  停编辑器播放 → 直接传 Score 引用(只读)给 PracticeApp → mount → 切视图。
+   *  Score 不重新加载,PracticeApp 只读使用,返回后编辑器的 Score 完好。 */
   private openPreview(): void {
     if (!this.score) { this.flash('无曲谱'); return; }
-    this.flash('练琴页开发中');
+    if (!this.practiceHost) { this.flash('练琴页宿主未就绪'); return; }
+    // 停编辑器播放(练琴页会建自己的 Player)。
+    this.player.stop();
+    this.playState = 'stopped';
+    // 创建练琴页 controller。Score 引用传递,只读。
+    this.practiceApp = new PracticeApp({
+      score: this.score,
+      root: this.practiceHost,
+      savedSettings: loadPracticeSettings(),
+      onRequestBack: () => this.closePractice(),
+    });
+    this.practiceApp.mount();
+    this.switchToPractice();
+  }
+
+  /** 切到练琴页(三级页):隐藏编辑器,显示练琴页。 */
+  private switchToPractice(): void {
+    this.appView = 'practice';
+    if (this.editorHost) this.editorHost.hidden = true;
+    if (this.practiceHost) this.practiceHost.hidden = false;
+  }
+
+  /** 关闭练琴页返回编辑器:存设置 → destroy(停练琴播放+移DOM+dispose Player) → 切回编辑器。
+   *  编辑器恢复:播放已停(进练琴页时停的),视图状态不变,Score 完好。 */
+  private closePractice(): void {
+    if (this.practiceApp) {
+      savePracticeSettings(this.practiceApp.getSettings());
+      this.practiceApp.destroy();
+      this.practiceApp = null;
+    }
+    if (this.practiceHost) this.practiceHost.hidden = true;
+    this.switchToEditor();
   }
 
   private buildDOM(): void {
@@ -516,13 +582,19 @@ export class App {
     this.editorHost.hidden = true;
     this.root.appendChild(this.editorHost);
 
+    // 三级页:练琴页宿主(初始隐藏,进入时由 PracticeApp 填充)。
+    this.practiceHost = document.createElement('div');
+    this.practiceHost.className = 'practice-host';
+    this.practiceHost.hidden = true;
+    this.root.appendChild(this.practiceHost);
+
     // 二级页顶栏(appbar):返回 + 曲名 + 调号拍号徽章(可点改) + 预览。
     this.editorBar = buildEditorBar(
       { title: this.score?.meta.title ?? '未命名', key: this.tool.key, time: this.tool.time },
       {
         onBack: () => void this.switchToLibrary(),
         onRename: (t) => void this.renameInEditor(t),
-        onChangeKey: (k) => this.changeKey(k),
+        onChangeKey: (k) => void this.changeKey(k),
         onChangeTime: (t) => this.changeTime(t),
         onOpenPreview: () => this.openPreview(),
       },
@@ -580,6 +652,7 @@ export class App {
       localStorage.setItem('hoverSound', this.hoverSound ? '1' : '0');
       updateHoverBtn();
     };
+    this.hoverSoundBtn = hoverSoundBtn;
     this.statusEl.appendChild(hoverSoundBtn);
     const statusText = document.createElement('span');
     statusText.className = 'status-text';
@@ -600,6 +673,7 @@ export class App {
       onBpm: (b) => this.changeBpm(b),
       onFingering: (f) => { this.fingering = f; saveFingering(f); this.refreshCard(); },
       onShow: (key, on) => { this.show = { ...this.show, [key]: on }; saveShow(this.show); this.refreshCard(); },
+      onAutoPlayThrough: (on) => { this.autoPlayThrough = on; localStorage.setItem('autoPlayThrough', on ? '1' : '0'); },
     });
     this.editorHost.appendChild(this.playbackCard);
 
@@ -1323,7 +1397,7 @@ export class App {
    *  当前 beat 夹在新 totalBeats 内，删除末音后不会越界。 */
   private syncPlayerAfterEdit(): void {
     if (this.playState === 'stopped') return;
-    this.player.rebuildSchedule(this.piece);
+    this.player.rebuildSchedule(this.playbackPiece());
     // currentBeat 与进度条/播放头对齐新的曲长
     this.currentBeat = this.player.getCurrentBeat();
     (this.playbackCard as any)._setProgress?.(this.currentBeat);
@@ -1429,8 +1503,9 @@ export class App {
     window.addEventListener('keydown', (e) => {
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'SELECT' || tag === 'INPUT' || (e.target as HTMLElement)?.isContentEditable) return;
-      // 预览模式只读:除空格(播放控制)外,禁止所有编辑类快捷键。
-      if (this.viewMode === 'preview' && e.key !== ' ') return;
+      // 预览模式只读:仅允许空格(播放控制)+ 方向键(切换小节范围,只读安全)。
+      // 其余编辑类快捷键(时值/附点/连音/和音/三连/休止/退格)禁止。
+      if (this.viewMode === 'preview' && e.key !== ' ' && e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
       switch (e.key) {
         case '1': this.changeDuration('whole'); break;
         case '2': this.changeDuration('half'); break;
@@ -1550,6 +1625,15 @@ export class App {
     this.render();
   }
 
+  /** 播放用的 Piece 视图。单谱号模式(treble/bass 视图)只含该谱号组(另一组置空),
+   *  双谱(grand)/预览(preview)模式含两组并行。Player.computeSchedule 合并两组调度,
+   *  置空那组自然不发声。这样编辑高音谱(单卡)时只播高音,低音同理;双谱态播双谱。 */
+  private playbackPiece(): Piece {
+    if (this.viewMode === 'treble') return { ...this.piece, bass: [] };
+    if (this.viewMode === 'bass') return { ...this.piece, treble: [] };
+    return this.piece;
+  }
+
   private togglePlay(): void {
     if (this.piece.notes.length === 0) return;       // 空乐谱不播
     const s = this.playState;
@@ -1560,8 +1644,32 @@ export class App {
     } else {
       this.player.setBpm(this.bpm);
       // 停止态:若已 seek 到中段(currentBeat>0),从 seek 处播放;否则从头。
-      this.player.play(this.piece, this.currentBeat);
+      this.player.play(this.playbackPiece(), this.currentBeat);
     }
+  }
+
+  /** 自动连播:当前窗口播完后,推进选框到下一窗口(出界才滚,count 不变)并从头续播。
+   *  由 onEnd 在「预览模式 + autoPlayThrough」时调用。返回 true 表示已推进并续播,false 表示已到曲尾。
+   *  方案2(出界才滚):start 跳到 nextStart(下一窗口起点 = 当前 start + count),count 保持不变。
+   *  rangeToPiece 内部 clamp realCount 处理末尾窗口小节数不足 count 的情况。 */
+  private tryAdvanceAutoPlayWindow(): boolean {
+    if (!this.score) return false;
+    const total = this.score.meta.totalMeasures;
+    const count = this.tool.measureCount;
+    const nextStart = this.currentStartMeasure + count;
+    // 无后续小节(下一窗口起点已超曲尾):到曲尾,停止。
+    if (nextStart >= total) return false;
+    // 推进窗口:start=nextStart,count 不变(末尾不足 count 个时 rangeToPiece 自动收缩 realCount)。
+    this.currentStartMeasure = nextStart;
+    this.rebuildRangePiece();
+    this.refreshMeasureSelector();   // 选框跟随(setSelection 动画,start 跳到 nextStart)
+    this.updateRangeHint();
+    this.currentBeat = 0;
+    this.render();                    // 预览重画新窗口(this.piece 已是新窗口)
+    // 从头续播下一窗口(player.play 触发 onStateChange('playing'),接管 UI)。
+    this.player.setBpm(this.bpm);
+    this.player.play(this.playbackPiece(), 0);
+    return true;
   }
 
   /** ⏮ 回到起点：播放中→从头播；暂停/停止→归零并停在停止态 */
@@ -1622,6 +1730,8 @@ export class App {
       playingIndexBass: playing ? this.player.noteIndexAtBeatStaff(this.currentBeat, 'bass') : -1,
       fingering: this.fingering,
       show: this.show,
+      viewMode: this.viewMode,
+      autoPlayThrough: this.autoPlayThrough,
     };
   }
 
@@ -1704,7 +1814,7 @@ export class App {
     // 挂 MeasureSelector 到第三行宿主。
     const total = this.score?.meta.totalMeasures ?? 0;
     this.msHandle = buildMeasureSelector(
-      { totalMeasures: total, start: this.currentStartMeasure, count: this.tool.measureCount, hasContent: this.measureHasContent() },
+      { totalMeasures: total, start: this.currentStartMeasure, count: this.tool.measureCount, hasContent: this.measureHasContent(), hideAdd: this.viewMode === 'preview' },
       {
         onChange: (start, count) => this.onMeasureSelectorChange(start, count),
         onDeleteMeasure: (idx) => void this.deleteMeasureAt(idx),
@@ -1725,11 +1835,13 @@ export class App {
   }
 
   /** 切换 edit-toolbar 右侧内容:编辑模式显示退格/清空,预览模式显示 五线谱/简谱/两者 radio。
-   *  在 rebuildCards(切模式)和 render(预览态 radio active 同步)后调用。 */
+   *  预览模式的「加一小节」按钮隐藏由 MeasureSelector 的 hideAdd 选项处理(refreshMeasureSelector)。 */
   private syncEditToolbar(): void {
     const isPreview = this.viewMode === 'preview';
     this.editActionsEl?.classList.toggle('hidden', isPreview);
     this.previewRadioEl?.classList.toggle('hidden', !isPreview);
+    // hover 试听开关是编辑卡片的输入辅助,预览模式只读不输入 → 隐藏。
+    this.hoverSoundBtn?.classList.toggle('hidden', isPreview);
   }
 
   /** MeasureSelector onChange:更新编辑区范围视图 + 轻量重渲(保留 MS 实例,不重建工具盘)。
@@ -1790,12 +1902,17 @@ export class App {
       this.refreshMeasureSelector();
       this.updateRangeHint();
       this.render();
+      // 加小节后 track 变宽,加号被推到右侧 → 滚到末尾保持加号可见。
+      this.msHandle?.scrollToEnd();
     } catch (err) {
       this.flash('加小节失败:' + (err as Error).message);
     }
   }
 
-  /** MeasureSelector onDeleteMeasure:删该小节音 + totalMeasures-1 + 落盘 + clamp + MS.refresh。 */
+  /** MeasureSelector onDeleteMeasure:删该小节音 + totalMeasures-1 + 落盘 + clamp + MS.refresh。
+   *  关键:先同步改本地 score + 立即刷新 DOM(触发 ms-leave 退场动画),再做网络落盘。
+   *  旧实现把逐小节 PUT 的 await 循环夹在 splice 和 DOM 刷新之间 → 删靠后的小节时要顺序
+   *  await 十几次网络请求(数百 ms~秒级),期间动画无法启动,表现为点叉号后卡顿。 */
   private async deleteMeasureAt(idx: number): Promise<void> {
     if (this.viewMode === 'preview') return;   // 预览只读
     if (!this.score) return;
@@ -1803,28 +1920,29 @@ export class App {
     const m = this.score.measures[idx];
     const hasContent = m && (m.treble.length > 0 || m.bass.length > 0);
     if (hasContent && !confirm(`删除第 ${idx + 1} 小节(含 ${m.treble.length + m.bass.length} 个音符)?后续小节前移。`)) return;
+    // 1) 同步改本地:splice + totalMeasures-1 + clamp。
+    this.score.measures.splice(idx, 1);
+    const newTotal = this.score.meta.totalMeasures - 1;
+    this.score.meta = { ...this.score.meta, totalMeasures: newTotal };
+    this.pieces = this.pieces.map(p => p.id === this.score!.meta.id ? this.score!.meta : p);
+    this.currentStartMeasure = Math.min(this.currentStartMeasure, Math.max(0, newTotal - this.tool.measureCount));
+    this.tool.measureCount = Math.min(this.tool.measureCount, newTotal);
+    this.tool.measureCount = Math.max(1, this.tool.measureCount);
+    // 2) 立即刷新 DOM(rebuildRangePiece + refreshMeasureSelector 触发书签 ms-leave 退场动画)。
+    //    动画是纯 CSS transition,不被后续网络请求阻塞。
+    this.rebuildRangePiece();
+    this.refreshMeasureSelector();
+    this.updateRangeHint();
+    this.render();
+    // 3) 网络落盘(后台,不阻塞动画):meta 的 totalMeasures + idx 之后前移的小节逐个 PUT。
     try {
-      // 删该小节:splice,然后 totalMeasures-1。各小节内容前移(已 splice)。落盘:删尾 + 后续小节重排需逐个 PUT。
-      this.score.measures.splice(idx, 1);
-      const newTotal = this.score.meta.totalMeasures - 1;
-      const meta = await apiUpdateMeta(this.score.meta.id, { totalMeasures: newTotal });
-      this.score.meta = meta;
-      // 落盘被影响的小节(idx 之后的所有小节内容都前移了)。逐个 PUT(并发乱序,顺序 await)。
+      await apiUpdateMeta(this.score.meta.id, { totalMeasures: newTotal });
       for (let i = idx; i < newTotal; i++) {
-        const mm = this.score.measures[i] || emptyMeasure();
-        await putMeasure(this.score.meta.id, i, { treble: mm.treble, bass: mm.bass });
+        const mm = this.score!.measures[i] || emptyMeasure();
+        await putMeasure(this.score!.meta.id, i, { treble: mm.treble, bass: mm.bass });
       }
-      this.pieces = this.pieces.map(p => p.id === meta.id ? meta : p);
-      // clamp start/count
-      this.currentStartMeasure = Math.min(this.currentStartMeasure, Math.max(0, newTotal - this.tool.measureCount));
-      this.tool.measureCount = Math.min(this.tool.measureCount, newTotal);
-      this.tool.measureCount = Math.max(1, this.tool.measureCount);
-      this.rebuildRangePiece();
-      this.refreshMeasureSelector();
-      this.updateRangeHint();
-      this.render();
     } catch (err) {
-      this.flash('删小节失败:' + (err as Error).message);
+      this.flash('删小节落盘失败:' + (err as Error).message);
     }
   }
 
@@ -1836,6 +1954,7 @@ export class App {
       start: this.currentStartMeasure,
       count: this.tool.measureCount,
       hasContent: this.measureHasContent(),
+      hideAdd: this.viewMode === 'preview',
     });
   }
 
@@ -1852,6 +1971,22 @@ export class App {
     this.statusEl.classList.add('show', 'flash');
     window.clearTimeout(this.flashTimer);
     this.flashTimer = window.setTimeout(() => { this.statusEl.classList.remove('show', 'flash'); this.render(); }, 1600);
+  }
+
+  /** 全局 toast(所有视图可见,浮于最上层)。flash 只在编辑器状态栏可见(库视图隐藏),
+   *  故库视图下的导入失败等关键反馈用 toast,确保用户看到。 */
+  private toastEl: HTMLElement | null = null;
+  private toastTimer: number | undefined;
+  private showToast(msg: string): void {
+    if (!this.toastEl) {
+      this.toastEl = document.createElement('div');
+      this.toastEl.className = 'app-toast';
+      this.root.appendChild(this.toastEl);
+    }
+    this.toastEl.textContent = msg;
+    this.toastEl.classList.add('show');
+    window.clearTimeout(this.toastTimer);
+    this.toastTimer = window.setTimeout(() => { this.toastEl?.classList.remove('show'); }, 3200);
   }
 
   /** 渲染所有卡片 + 刷新状态栏/播放头。遍历 cards 调 renderCard。 */

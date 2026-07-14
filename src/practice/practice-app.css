@@ -1,0 +1,93 @@
+/* PracticeApp 布局:顶栏 + stage(谱面铺满 + 半透明浮层 overlay)。
+ *
+ * 关键设计(需求澄清):方块区是浮在谱面上的半透明层,
+ * 上边界 = 当前高亮乐谱行底部(onLineLayout 动态给),下边界 = 键盘顶。
+ * 方块看起来从当前那行乐谱掉到键盘上,透过去能看到半透明的谱子。
+ * 参考 prototype 的 .pr-overlay(绝对定位覆盖 stage,方块透明)。
+ *
+ * 顶栏样式见 practice-controls.css;键盘/方块/谱面各自的 css 自带。
+ * 这里只定义练琴页的外层骨架。 */
+
+:host,
+.pa-root {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  background: var(--card, #fff);
+  overflow: hidden;
+}
+
+/* 主舞台:谱面铺满 + 浮层叠加 */
+.pa-stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  background: #fcfcfd;
+  overflow: hidden;
+}
+
+/* 谱面区:定宽居中(宽度由 JS 设,可在设置面板调,640~1200)。
+ * 谱面铺满会导致每行小节多、行高大、行数少,既丑又留白多。
+ * 定宽居中让每行 2-3 小节,行数合理,像真正的乐谱。方块/键盘仍满宽。 */
+.pa-score-area {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 1000px;   /* JS 设(PracticeApp.updateScoreWidth),默认 1000 */
+  overflow: hidden;
+}
+
+/* 浮层:绝对定位覆盖整个 stage,透明 + 不挡谱面点击(键盘区单独放行) */
+.pa-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  pointer-events: none;
+}
+
+/* 方块掉落区:浮层内绝对定位,上边界=当前行底(JS 动态设 top),下边界=键盘顶(JS 动态设 height/bottom)。
+ * 透明背景(透出谱子)+ 顶部 mask 渐变(方块从乐谱行底冒出来,过渡自然)+ overflow 裁。 */
+.pa-fall {
+  position: absolute;
+  left: 0;
+  right: 0;
+  /* top 由 JS 设(= lineBottomY 经换算);height 由 JS 设(= 键盘顶 - top) */
+  overflow: hidden;
+  pointer-events: none;
+  /* 顶部 40px 渐变淡出:方块接近上边界时透明度降到 0(从乐谱行底冒出) */
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0px, #000 40px);
+  mask-image: linear-gradient(to bottom, transparent 0px, #000 40px);
+}
+.pa-fall > .wf-fall {
+  position: absolute;
+  inset: 0;
+  /* wf-fall 自带 height:100%,但这里用 inset 撑满 .pa-fall 更可靠 */
+  z-index: 1;
+}
+
+/* 判定线脉冲元素(贴方块区底=键盘顶;Metronome 操作 .pulse) */
+.pr-hit {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: var(--accent, #4f46e5);
+  box-shadow: 0 0 8px 1px rgba(79, 70, 229, 0.35);
+  z-index: 10;
+  pointer-events: none;
+  transition: box-shadow 0.08s, height 0.08s;
+}
+/* .pr-hit.pulse 由 metronome.css 定义 */
+
+/* 键盘:浮层底部,绝对定位贴底,放行点击(键盘需交互) */
+.pa-overlay > .kb-keyboard {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: auto;
+}

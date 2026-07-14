@@ -27,12 +27,19 @@ export function createPiece(): Piece {
 export function totalBeats(piece: Piece): number {
   const notes = piece.notes;
   if (notes.length === 0) return 0;
-  // 末音 endBeat = 末音 startBeat + 其时长(和弦尾音不占时长,endBeat=startBeat)
   const starts = noteStartBeats(piece);
   const lastIdx = notes.length - 1;
   const last = notes[lastIdx];
   const tail = isChordTail(last, lastIdx > 0 ? notes[lastIdx - 1] : null);
-  return tail ? starts[lastIdx] : starts[lastIdx] + durationBeats(last);
+  if (!tail) return starts[lastIdx] + durationBeats(last);
+  // 末音是和弦尾音:和弦占一个时间位(首音时值),下一个待输入位在「首音起点 + 首音时值」。
+  // 之前返回 starts[lastIdx](= 首音起点),忽略了首音时值 → 关闭和音模式后 SMS 选框
+  // 仍停留在和弦首音处,没有移动到和弦之后。和音模式开启时 layout 走 chordAnchorBeat 分支,
+  // 不经过 totalBeats;只有关闭后(无 anchor)才用 totalBeats 算 nextSlot,故此处修正。
+  const cid = last.chordId;
+  let headIdx = lastIdx;
+  while (headIdx > 0 && notes[headIdx - 1].chordId === cid) headIdx--;
+  return starts[headIdx] + durationBeats(notes[headIdx]);
 }
 
 /** 给定一组音符算总拍数(不含和弦尾音)。供 player 分别算 treble/bass 组用。 */

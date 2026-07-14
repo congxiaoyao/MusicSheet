@@ -23,6 +23,8 @@ export interface MeasureSelectorState {
   start: number;
   count: number;
   hasContent?: boolean[];
+  /** 隐藏末尾「加一小节」按钮(预览/只读场景用)。隐藏后 track 也不为其预留宽度。 */
+  hideAdd?: boolean;
 }
 
 export interface MeasureSelectorCallbacks {
@@ -35,6 +37,8 @@ export interface MeasureSelectorHandle {
   el: HTMLElement;
   refresh: (state: MeasureSelectorState) => void;
   setSelection: (start: number, count: number) => void;
+  /** 横向滚到 track 末尾(加号按钮处)。加小节后调用,让加号保持可见。 */
+  scrollToEnd: () => void;
 }
 
 // 尺寸常量(px)。
@@ -290,12 +294,16 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
    *    (从 transition:none 切到 CSS transition 时,先恢复 transition+reflow,下一帧再设值,Chrome 才触发过渡)。 */
   const apply = (selAnimated: boolean, dragOverride?: { edge: 'l' | 'r' | 'move'; pos: number }, setTarget = true) => {
     const { blockX, selX, selW, addX, totalW, gripLX, gripRX } = computeX();
+    // hideAdd:不显示加号按钮,track 也不为其预留宽度(收到最后一个书签右缘)。
+    const hideAdd = !!state.hideAdd;
+    const effTotalW = hideAdd ? addX : totalW;
     if (setTarget) {
-      track.style.width = totalW + 'px';
+      addBtn.classList.toggle('hidden', hideAdd);
+      track.style.width = effTotalW + 'px';
       // host 宽 = min(track 总宽, HOST_WIDTH_CAP):N≤8 全见不滑,N>8 截到上限横滑。
       // wrap.parentElement 是宿主(.sv-measures-host,组件挂载后才有)。
       const host = wrap.parentElement as HTMLElement | null;
-      if (host) host.style.width = Math.min(totalW, HOST_WIDTH_CAP) + 'px';
+      if (host) host.style.width = Math.min(effTotalW, HOST_WIDTH_CAP) + 'px';
       blocks.forEach(b => {
         const inside = b.idx >= state.start && b.idx < state.start + state.count;
         b.el.classList.toggle('inside', inside);
@@ -623,6 +631,7 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
       const totalChanged = s.totalMeasures !== state.totalMeasures;
       state.totalMeasures = s.totalMeasures;
       state.hasContent = s.hasContent ?? state.hasContent;
+      state.hideAdd = s.hideAdd ?? state.hideAdd;
       const cl = clamp(s.start ?? state.start, s.count ?? state.count);
       state.start = cl.s;
       state.count = cl.c;
@@ -637,6 +646,10 @@ export function buildMeasureSelector(initial: MeasureSelectorState, cb: MeasureS
     },
     setSelection: (start: number, count: number) => {
       const cl = clamp(start, count); state.start = cl.s; state.count = cl.c; apply(true);
+    },
+    scrollToEnd: () => {
+      // 滚到 track 末尾(加号按钮处)。用 smooth 行为更自然;下一帧执行确保 apply 已设好 track 宽度。
+      requestAnimationFrame(() => { wrap.scrollTo({ left: wrap.scrollWidth, behavior: 'smooth' }); });
     },
   };
 }

@@ -28,6 +28,10 @@ export interface PlaybackView {
   playingIndexBass: number;
   fingering: Fingering;
   show: ShowFlags;
+  /** 当前编辑器视图模式:连播选项仅预览模式可见。 */
+  viewMode?: 'treble' | 'bass' | 'grand' | 'preview';
+  /** 自动连播开关(预览模式:播完当前范围后自动连播后续小节直到曲终)。 */
+  autoPlayThrough?: boolean;
 }
 
 export interface PlaybackCardCallbacks {
@@ -38,6 +42,8 @@ export interface PlaybackCardCallbacks {
   onBpm: (bpm: number) => void;
   onFingering: (f: Fingering) => void;
   onShow: (key: keyof ShowFlags, on: boolean) => void;
+  /** 连播开关切换(仅预览模式触发)。可选:旧调用方未传则按钮仍可切但不通知。 */
+  onAutoPlayThrough?: (on: boolean) => void;
 }
 
 // ── 常量 ─────────────────────────────────────────────
@@ -161,6 +167,10 @@ export function buildPlaybackCard(
   let settingsPanel: HTMLElement, settingsBtn: HTMLButtonElement;
   let bpmVal: HTMLElement, bpmInput: HTMLInputElement;
   let dragActive = false;
+  /** 连播节的元素(h4 标题 + row),非预览模式整体隐藏。refresh 时按 viewMode 切显隐。 */
+  let autoSectionEls: HTMLElement[] = [];
+  /** 连播开关按钮,refresh 时同步 active 态(状态可能从 App 侧被改)。 */
+  let autoToggleBtn: HTMLButtonElement | null = null;
 
   // ── 设置面板 ──
   function buildSettings(): HTMLElement {
@@ -203,6 +213,9 @@ export function buildPlaybackCard(
     panel.appendChild(fingeRow);
 
     panel.appendChild(h('h4', undefined, '键面标注'));
+    // 键面标注也包进 pb-set-row(与速度/指法同结构),统一 padding/border/间距。
+    // chips 多选可换行:row 用 column 方向让 chips 占整行(pb-set-chips-row 样式)。
+    const labelsRow = h('div', 'pb-set-row pb-set-chips-row');
     const chipsRow = h('div', 'pb-set-chips');
     const chipDefs: { key: keyof ShowFlags; label: string }[] = [
       { key: 'name', label: '音名' }, { key: 'solfege', label: '唱名' }, { key: 'octave', label: '八度' },
@@ -218,7 +231,29 @@ export function buildPlaybackCard(
       });
       chipsRow.appendChild(c);
     }
-    panel.appendChild(chipsRow);
+    labelsRow.appendChild(chipsRow);
+    panel.appendChild(labelsRow);
+
+    // 连播(仅预览模式显示):自动连播后续小节直到曲终。非预览模式由 refresh 隐藏。
+    const autoH4 = h('h4', undefined, '连播');
+    panel.appendChild(autoH4);
+    const autoRow = h('div', 'pb-set-row');
+    const autoLabel = h('span', 'pb-set-label', '自动连播后续小节');
+    const autoToggle = h('button', 'chip toggle', '开'); autoToggle.type = 'button';
+    autoToggle.title = '播完当前小节范围后,自动滚动并连播后续小节,直到整曲结束';
+    autoToggleBtn = autoToggle;
+    if (v.autoPlayThrough) autoToggle.classList.add('active');
+    autoToggle.addEventListener('click', () => {
+      const now = !v.autoPlayThrough;
+      v.autoPlayThrough = now;
+      autoToggle.classList.toggle('active', now);
+      autoToggle.textContent = now ? '开' : '关';
+      cb.onAutoPlayThrough?.(now);
+    });
+    autoToggle.textContent = v.autoPlayThrough ? '开' : '关';
+    autoRow.append(autoLabel, autoToggle);
+    panel.appendChild(autoRow);
+    autoSectionEls = [autoH4, autoRow];
     return panel;
   }
 
@@ -503,6 +538,15 @@ export function buildPlaybackCard(
     redrawTrackTicks();
     // 键盘:音域/show 变化才重建,否则只更新高亮(零闪烁)
     maybeRebuildKeyboard();
+    // 连播节:仅预览模式显示(viewMode 由 App 注入)。非预览整体隐藏。
+    const isPreview = v.viewMode === 'preview';
+    autoSectionEls.forEach(el => el.classList.toggle('hidden', !isPreview));
+    // 连播开关态同步(状态可能从 App 侧被改,如切非预览模式后回预览)。
+    if (autoToggleBtn) {
+      const on = !!v.autoPlayThrough;
+      autoToggleBtn.classList.toggle('active', on);
+      autoToggleBtn.textContent = on ? '开' : '关';
+    }
   }
 
   // 暴露命令式 API（项目约定：挂 DOM 上）

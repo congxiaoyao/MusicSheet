@@ -149,3 +149,6 @@
 }
 .ms-wrap.ms-dragging .ms-add { transition: none; }
 .ms-add:hover { border-color: var(--accent); color: var(--accent); border-style: solid; }
+/* 预览模式只读:隐藏加一小节按钮(不能新建小节)。隐藏后还要收回它在 track 里占的宽度,
+   否则 track 末尾留一段空隙(ADD_W)。通过给 wrap 加 .no-add 时收窄 track 右端。 */
+.ms-add.hidden { display: none; }

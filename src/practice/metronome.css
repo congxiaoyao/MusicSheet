@@ -1,0 +1,15 @@
+/* Metronome 脉冲样式。
+ * hit/dot 元素本身由外部(PracticeApp / PracticeControls)创建定位，这里只定义 .pulse 闪态。
+ * 参考 prototype L133(.dot.pulse) + L242(.pr-hit.pulse)。 */
+
+/* 判定线脉冲:加粗 + 增强发光。基础样式由 PracticeApp 布局定，这里只加闪态。 */
+.pr-hit.pulse {
+  box-shadow: 0 0 16px 3px rgba(239, 68, 68, 0.55);
+  height: 3px;
+}
+
+/* 顶栏节拍器指示点脉冲:红色高亮(原型 L133)。 */
+.pr-metro .dot.pulse {
+  background: #ef4444;
+  box-shadow: 0 0 6px 1px rgba(239, 68, 68, 0.5);
+}

@@ -444,6 +444,16 @@
 .library-host[hidden] { display: none; }
 .editor-host[hidden] { display: none; }
 
+/* 练琴页宿主:撑满视口覆盖编辑器(脱离 .app 的 max-width/padding)。
+ * hidden 时彻底不渲染。 */
+.practice-host {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: var(--card, #fff);
+}
+.practice-host[hidden] { display: none; }
+
 /* 编辑器顶部的"返回曲谱库"入口(最小化,不重构 project-bar) */
 .back-to-library {
   font: inherit;

@@ -1,0 +1,181 @@
+/* PracticeControls 顶栏样式。
+ * 布局参考 prototype 的 .pr-bar(已验证)。CSS 变量带 fallback,独立可用。 */
+
+.pr-bar {
+  flex: none;
+  background: var(--card, #fff);
+  border-bottom: 1px solid var(--line, #e6e8ec);
+  z-index: 40;
+  padding: 12px 24px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  box-sizing: border-box;
+}
+
+/* —— 左:返回 + 曲名 + 播放 + 信息 —— */
+.pr-back {
+  font-size: 17px;
+  color: var(--muted, #8b919c);
+  cursor: pointer;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.14s, color 0.14s;
+  user-select: none;
+}
+.pr-back:hover { background: var(--bg, #f6f7f9); color: var(--ink, #16181d); }
+
+.pr-title { font-size: 16px; font-weight: 650; letter-spacing: -0.01em; white-space: nowrap; color: var(--ink, #16181d); }
+
+.pr-play {
+  width: 34px; height: 34px; border-radius: 50%;
+  border: 1px solid var(--line, #e6e8ec);
+  background: #fff; color: var(--ink-2, #344054);
+  font-size: 13px; cursor: pointer; flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: all 0.14s;
+  padding: 0;
+}
+.pr-play:hover { border-color: var(--accent, #4f46e5); color: var(--accent, #4f46e5); }
+.pr-play:active { transform: scale(0.92); }
+
+.pr-meta { display: flex; align-items: center; gap: 10px; color: var(--muted, #8b919c); font-size: 13px; }
+.pr-meta b { color: var(--ink-2, #344054); font-weight: 600; }
+.pr-meta .sep { color: var(--line, #e6e8ec); }
+
+.pr-spacer { flex: 1; }
+
+/* —— 中/右:练习模式 + 变速 + 设置 —— */
+.pr-ab {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 12px; border-radius: 16px; cursor: pointer;
+  border: 1px solid var(--line, #e6e8ec); background: #fff; color: var(--muted, #8b919c);
+  font-size: 13px; font-weight: 500; transition: all 0.14s; user-select: none;
+}
+.pr-ab:hover { border-color: #cbd5e1; }
+.pr-ab.on {
+  border-color: var(--accent, #4f46e5);
+  background: var(--accent-soft, rgba(79, 70, 229, 0.1));
+  color: var(--accent, #4f46e5); font-weight: 600;
+}
+.pr-ab .ab-marks { display: none; gap: 3px; }
+.pr-ab.on .ab-marks { display: inline-flex; }
+.pr-ab .ab-marks span {
+  font-size: 10px; font-weight: 700; padding: 0 5px; border-radius: 3px;
+  background: var(--accent, #4f46e5); color: #fff; line-height: 1.5;
+}
+
+.pr-hand {
+  display: inline-flex; background: var(--bg, #f6f7f9);
+  border-radius: 7px; padding: 2px; gap: 1px;
+}
+.pr-hand span {
+  font-size: 12px; padding: 4px 10px; cursor: pointer;
+  color: var(--muted, #8b919c); border-radius: 5px; font-weight: 500; white-space: nowrap;
+  transition: all 0.14s; user-select: none;
+}
+.pr-hand span:hover { color: var(--ink, #16181d); }
+.pr-hand span.on {
+  background: #fff; color: var(--accent, #4f46e5); font-weight: 600;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.06);
+}
+
+.pr-metro {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 12px; border-radius: 7px; cursor: pointer;
+  border: 1px solid var(--line, #e6e8ec); background: #fff; color: var(--muted, #8b919c);
+  font-size: 13px; font-weight: 500; transition: all 0.14s; user-select: none;
+}
+.pr-metro:hover { border-color: #cbd5e1; }
+.pr-metro.on {
+  border-color: var(--accent, #4f46e5);
+  background: var(--accent-soft, rgba(79, 70, 229, 0.1));
+  color: var(--accent, #4f46e5); font-weight: 600;
+}
+.pr-metro .dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--line, #e6e8ec); transition: background 0.08s;
+  display: inline-block;
+}
+.pr-metro.on .dot { background: var(--accent, #4f46e5); }
+/* .dot.pulse 由 metronome.css 定义 */
+
+.pr-tempo { display: flex; align-items: center; gap: 8px; }
+.pr-tempo input[type=range] {
+  -webkit-appearance: none; appearance: none;
+  width: 90px; height: 4px; border-radius: 2px;
+  background: var(--line, #e6e8ec); cursor: pointer;
+}
+.pr-tempo input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 14px; height: 14px; border-radius: 50%;
+  background: var(--accent, #4f46e5); cursor: pointer; border: none;
+}
+.pr-tempo input[type=range]::-moz-range-thumb {
+  width: 14px; height: 14px; border-radius: 50%; border: none;
+  background: var(--accent, #4f46e5); cursor: pointer;
+}
+.pr-bpm { font-size: 12px; color: var(--muted, #8b919c); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.pr-bpm b { color: var(--ink, #16181d); font-weight: 650; font-size: 14px; }
+
+.pr-gear {
+  color: var(--muted, #8b919c); cursor: pointer; font-size: 17px;
+  width: 30px; height: 30px; border-radius: 7px;
+  display: inline-flex; align-items: center; justify-content: center;
+  position: relative; transition: background 0.14s, color 0.14s; user-select: none;
+}
+.pr-gear:hover { background: var(--bg, #f6f7f9); color: var(--ink, #16181d); }
+
+/* 设置面板 */
+.pr-settings {
+  position: absolute; top: 44px; right: 14px; z-index: 50;
+  width: 264px; background: #fff;
+  border: 1px solid var(--line, #e6e8ec); border-radius: var(--radius, 12px);
+  box-shadow: 0 8px 28px rgba(16, 24, 40, 0.14), 0 2px 6px rgba(16, 24, 40, 0.06);
+  padding: 4px 16px; display: none;
+}
+.pr-settings.open { display: block; }
+.pr-set-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 11px 0; border-bottom: 1px solid var(--line-2, #eef0f3);
+  font-size: 13px; color: var(--ink-2, #344054);
+}
+.pr-set-row:last-child { border-bottom: none; }
+.pr-set-val { color: var(--muted, #8b919c); font-size: 12px; }
+
+/* 设置面板里的分段控件(比顶栏分段更紧凑) */
+.pr-seg {
+  display: inline-flex; background: var(--bg, #f6f7f9);
+  border-radius: 6px; padding: 2px; gap: 1px;
+}
+.pr-seg span {
+  font-size: 12px; padding: 3px 9px; cursor: pointer;
+  color: var(--muted, #8b919c); border-radius: 4px; font-weight: 500; white-space: nowrap;
+  transition: all 0.14s; user-select: none;
+}
+.pr-seg span:hover { color: var(--ink, #16181d); }
+.pr-seg span.on {
+  background: #fff; color: var(--accent, #4f46e5); font-weight: 600;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.06);
+}
+
+/* 设置面板里的滑块行 */
+.pr-set-slider { display: flex; align-items: center; gap: 8px; }
+.pr-set-slider input[type=range] {
+  -webkit-appearance: none; appearance: none;
+  width: 110px; height: 4px; border-radius: 2px;
+  background: var(--line, #e6e8ec); cursor: pointer;
+}
+.pr-set-slider input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 14px; height: 14px; border-radius: 50%;
+  background: var(--accent, #4f46e5); cursor: pointer; border: none;
+}
+.pr-set-slider input[type=range]::-moz-range-thumb {
+  width: 14px; height: 14px; border-radius: 50%; border: none;
+  background: var(--accent, #4f46e5); cursor: pointer;
+}

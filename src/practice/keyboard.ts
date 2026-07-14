@@ -440,8 +440,12 @@ export function buildKeyboard(initial: KeyboardInitial, cb: KeyboardCallbacks): 
 
   // ── 初始化 ──
   buildKeyboardDOM();
-  // 延迟更新滑块 UI(等布局完成,clientWidth 才准)。
-  requestAnimationFrame(() => updateSliderUI());
+  // 延迟:等布局完成(clientWidth 才准)后,按容器宽重算键数铺满(applyKeyWidth 用 ceil(容器宽/whiteW)),
+  // 并更新滑块 UI。初始 buildKeyboardDOM 用传入 range 建(可能比容器窄/宽),这里校正到铺满。
+  requestAnimationFrame(() => {
+    applyKeyWidth(whiteW);
+    updateSliderUI();
+  });
 
   // resize 时重算滑块 UI(容器宽变了,白键宽 px 变)。
   window.addEventListener('resize', () => {

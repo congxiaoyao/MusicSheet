@@ -52,6 +52,9 @@ export interface LibraryHandle {
   /** meta 列表变化后刷新(保留 view/sort/query/selectedId/搜索框焦点),
    *  并为新曲谱惰性加载缩略图。 */
   refresh: (metas: ScoreMeta[]) => void;
+  /** 让指定曲谱的缩略图缓存失效(下次 refresh 时重新拉取整曲重画缩略图)。
+   *  用于从编辑器返回库时,刷新刚编辑过的曲谱卡片。 */
+  invalidate: (ids: string[]) => void;
 }
 
 // ── 内部状态 ──────────────────────────────────────────────
@@ -361,6 +364,9 @@ export function buildLibrary(initial: ScoreMeta[], cb: LibraryCallbacks): Librar
   /** 进入曲谱:整库淡出上移(不再单卡缩小,避免像删除),动画后回调 onOpen。 */
   function enterScore(id: string, _card: HTMLElement): void {
     state.selectedId = id;
+    // 移走焦点:库隐藏后,卡片若仍持有焦点,其 keydown(Enter/方向键)会在后台继续触发
+    // → 在编辑器里按回车会再次「进入曲子」。blur 掉焦点卡片即可避免。
+    (document.activeElement as HTMLElement | null)?.blur();
     const libRoot = host.querySelector('.lib') as HTMLElement | null;
     libRoot?.classList.add('lib-leaving');
     setTimeout(() => cb.onOpen(id), 240);
@@ -481,10 +487,11 @@ export function buildLibrary(initial: ScoreMeta[], cb: LibraryCallbacks): Librar
     loadMissingThumbs();
   };
 
-  // ── 全局键盘(库视图专属,编辑器激活时不响应)──
+  // ── 全局键盘(库视图专属,编辑器/练琴页激活时不响应)──
   const onKey = (e: KeyboardEvent) => {
-    // 仅当库宿主可见时响应。
-    if (host.hidden) return;
+    // 仅当库宿主实际可见时响应。host 自身可能未设 hidden(App 设的是其父 .library-host 的 hidden 属性),
+    // 故用 offsetParent===null 检测整体可见性(祖先任一 display:none/hidden 属性都会使 offsetParent 为 null)。
+    if (host.offsetParent === null) return;
     const ae = document.activeElement as HTMLElement | null;
     const inField = ae && (ae.tagName === 'INPUT' || ae.tagName === 'SELECT' || ae.tagName === 'TEXTAREA');
     // `/` 聚焦搜索(不在输入框时)
@@ -531,7 +538,17 @@ export function buildLibrary(initial: ScoreMeta[], cb: LibraryCallbacks): Librar
   render();
   loadMissingThumbs();
 
-  return { el: host, refresh };
+  // ── invalidate(指定曲谱缩略图缓存失效)──
+  // 让给定 ids 在下次 refresh 时被 loadMissingThumbs 重新拉取重画。
+  // 用于从编辑器返回库:刚编辑过的曲谱其缓存 Score 已过时,需重拉整曲重画缩略图+进度点。
+  const invalidate = (ids: string[]): void => {
+    for (const id of ids) {
+      state.scores.delete(id);
+      thumbLoaded.delete(id);
+    }
+  };
+
+  return { el: host, refresh, invalidate };
 }
 
 // ── HTML 转义(标题来自用户输入)──

@@ -629,6 +629,7 @@ html, body {
 }
 .hover-sound-toggle:hover { border-color: var(--accent); color: var(--accent); }
 .hover-sound-toggle.active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+.hover-sound-toggle.hidden { display: none; }
 .status.show { color: var(--accent); font-weight: 600; }
 .status.flash { animation: flashPulse 1.6s ease; }
 @keyframes flashPulse { 0% { opacity: 1; } 70% { opacity: 1; } 100% { opacity: 0.6; } }
@@ -898,7 +899,12 @@ html, body {
 .pb-set-row:last-child { border-bottom: none; }
 .pb-set-row > .pb-set-label { font-size: 13px; color: var(--ink-2); font-weight: 500; }
 /* 设置面板里的多选 chip 行 */
-.pb-set-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.pb-set-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+/* 键面标注节:chips 占整行(列方向),与速度/指法节的 row 结构统一,padding/border 一致。 */
+.pb-set-chips-row { flex-direction: column; align-items: flex-start; gap: 6px; }
+/* 设置节(标题+row)整体隐藏:连播节非预览模式用。 */
+.pb-settings h4.hidden, .pb-settings .pb-set-row.hidden { display: none; }
+.pb-settings h4.hidden + .pb-set-row { display: none; }
 
 /* ── 播放行：控制按钮 + 进度条 整合在一条 ── */
 .pb-play-row {
@@ -1219,4 +1225,28 @@ html, body {
   pointer-events: none;
   z-index: 100;
   border-radius: var(--radius);
+}
+
+/* 全局 toast(所有视图可见,浮于最上层):用于库视图下的导入失败等关键反馈,
+   flash 只在编辑器状态栏可见。固定在视口顶部居中。 */
+.app-toast {
+  position: fixed;
+  top: 20px;
+  left: 50%;
+  transform: translate(-50%, -16px);
+  background: var(--pb-ink, #1f2937);
+  color: #fff;
+  padding: 10px 18px;
+  border-radius: 8px;
+  font-size: 13.5px;
+  max-width: min(90vw, 560px);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
+  opacity: 0;
+  pointer-events: none;
+  z-index: 9999;
+  transition: opacity 0.2s, transform 0.2s;
+}
+.app-toast.show {
+  opacity: 1;
+  transform: translate(-50%, 0);
 }

@@ -81,9 +81,24 @@ export function deletePiece(id: string): Promise<{ ok: boolean }> {
   return api('DELETE', '/pieces/' + encodeURIComponent(id));
 }
 
-/** 导出整曲打包文本(.mscore,带 musicsheet-score 头)。 */
+/** 导出整曲打包文本(.mscore,带 musicsheet-score 头)。
+ *  注意:服务端 /export 返回的是 JSON 字符串(application/json),不能用通用 api() ——
+ *  api() 会 JSON.parse 成 Object,调用方拿到 Object 后 new Blob([obj]) 会变成 "[object Object]"。
+ *  故此处直接 fetch 取原始文本,保留 JSON 字符串供下载/导入复用。 */
 export async function exportPiece(id: string): Promise<string> {
-  return api<string>('GET', '/pieces/' + encodeURIComponent(id) + '/export');
+  let res: Response;
+  try {
+    res = await fetch('/api/pieces/' + encodeURIComponent(id) + '/export', { credentials: 'same-origin' });
+  } catch (err) {
+    throw new Error('无法连接存储服务器(请确认 Node 服务已启动):' + (err as Error).message);
+  }
+  const text = await res.text();
+  if (!res.ok) {
+    let msg = `请求失败(${res.status})`;
+    try { const d = JSON.parse(text); if (d && typeof d === 'object' && 'error' in d) msg = String((d as { error: unknown }).error); } catch { /* 非 JSON 错误体 */ }
+    throw new Error(msg);
+  }
+  return text;
 }
 
 /** 整曲打包导入(覆盖既有曲谱,保留 id)。返回新 meta。 */

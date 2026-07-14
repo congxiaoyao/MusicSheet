@@ -346,6 +346,22 @@ export class Player {
     this.setState('stopped');
   }
 
+  /** 释放资源（离开练琴页等不再使用的场景）：停播放 + 关闭 AudioContext。
+   *  与 stop() 区别：stop() 保留 AudioContext 供再次播放；dispose() 彻底关闭不可再用。
+   *  dispose 后该 Player 实例应丢弃，不要再调 play/preview。 */
+  dispose(): void {
+    this.stop();
+    if (this.ctx) {
+      try { void this.ctx.close(); } catch { /* 已关闭 */ }
+      this.ctx = null;
+      this.master = undefined as unknown as GainNode;
+    }
+    this.piece = null;
+    this.schedule = [];
+    this.totalBeats = 0;
+    this.rafId = 0;
+  }
+
   /** 单音预览（鼠标悬停时试听） */
   preview(midi: number): void {
     const ctx = this.ensureCtx();
