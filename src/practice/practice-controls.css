@@ -99,12 +99,11 @@
   color: var(--accent, #4f46e5); font-weight: 600;
 }
 .pr-metro .dot {
-  width: 8px; height: 8px; border-radius: 50%;
-  background: var(--line, #e6e8ec); transition: background 0.1s, transform 0.1s;
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--line, #e6e8ec); transition: background 0.08s, transform 0.08s, box-shadow 0.08s;
   display: inline-block;
 }
-/* 开启时 dot 用深墨色(不用 accent 紫),脉冲时只是放大,颜色不跳变,更稳。 */
-.pr-metro.on .dot { background: #1f2430; }
+.pr-metro.on .dot { background: var(--accent, #4f46e5); }
 /* .dot.pulse 由 metronome.css 定义 */
 
 .pr-tempo { display: flex; align-items: center; gap: 8px; }

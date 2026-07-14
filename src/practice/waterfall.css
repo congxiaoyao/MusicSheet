@@ -63,10 +63,10 @@
   box-shadow: 0 0 0 1px rgba(234, 88, 12, 0.4), inset 0 -2px 0 rgba(0, 0, 0, 0.15);
 }
 
-/* 命中:接近判定线时轻微放大 + 白色描边(不用紫色发光,避免与蓝/橙方块撞色) */
+/* 命中:接近判定线时放大 + 光环(文档 §4.4) */
 .wf-note.active {
-  transform: translateX(-50%) scale(1.03);
-  box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.9);
+  transform: translateX(-50%) scale(1.04);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.85), 0 0 12px rgba(79, 70, 229, 0.5);
   z-index: 5;
 }
 
