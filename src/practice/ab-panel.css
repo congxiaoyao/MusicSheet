@@ -1,21 +1,21 @@
-/* AbPanel —— AB 循环设置面板(小节网格选择器)。
+/* AbPanel —— AB 循环设置面板(小节网格,日历式区间选择)。
  *
- * 结构:.ab-panel(absolute 弹层,挂在顶栏 .pr-ab 内)
- *   └ .ab-head   [AB 循环]            [启用 switch]
- *   └ .ab-body   (switch 关时整体隐藏)
- *      ├ .ab-hint  拖选要循环的小节
- *      ├ .ab-grid  小节格网格(4 列)
- *      └ .ab-foot  [已选 X–Y(共N)]   [整曲循环]
- *   └ .ab-empty  (switch 关时显示的置灰提示)
+ * 选区视觉(连续填充条 + 圆形端点):
+ *   区间内格子连成圆角填充条(accent-soft),首尾格的外端是 accent 实心圆(含 A/B 白字)。
+ *   每格按 .start/.middle/.end/.alone/.before/.after 定位渲染不同样式。
  *
- * 视觉 token 与 .pr-settings / .pr-seg 统一。switch 用 iOS 风格小滑块。 */
+ * 结构:.ab-panel(absolute 弹层)
+ *   .ab-head   [AB 循环]            [启用 switch]
+ *   .ab-body   (switch 关时整体隐藏)
+ *     .ab-hint / .ab-grid / .ab-foot(状态条+整曲循环)/ .ab-interval(间隔滑块)
+ *   .ab-empty  (switch 关时显示的置灰提示) */
 
 .ab-panel {
   position: absolute;
   top: 40px;
   left: 0;
   z-index: 60;
-  width: 280px;
+  width: 300px;
   background: var(--card, #fff);
   border: 1px solid var(--line, #e6e8ec);
   border-radius: var(--radius, 12px);
@@ -46,7 +46,6 @@
   letter-spacing: -0.01em;
 }
 
-/* iOS 风格 switch:36×20 轨道,开色 accent。 */
 .ab-switch {
   position: relative;
   width: 36px;
@@ -72,7 +71,7 @@
 .ab-switch.on { background: var(--accent, #4f46e5); }
 .ab-switch.on::after { transform: translateX(16px); }
 
-/* ── 第 2 层:主体(switch 关时隐藏,显示空提示) ──────────── */
+/* ── 第 2 层:主体(switch 关时隐藏) ──────────────────────── */
 .ab-body { }
 .ab-panel:not(.on) .ab-body { display: none; }
 .ab-panel:not(.on) .ab-empty { display: flex; }
@@ -91,64 +90,109 @@
 .ab-hint {
   font-size: 12px;
   color: var(--muted, #8b919c);
-  margin-bottom: 8px;
+  margin-bottom: 10px;
 }
 
-/* 小节格网格:4 列。 */
+/* ── 小节格网格(4 列,日历式) ────────────────────────────
+ * 渲染分层:
+ *   .ab-cell:格子本身,只负责命中 + 数字。默认浅灰圆角块。
+ *   .ab-fill:填充条 overlay(绝对定位,跨越选中区间首尾格子,含 gap)→ 真正连续的色条,
+ *             不受 grid gap 打断。盖在格子之上、数字之下。
+ *   .ab-anchor:A/B 圆形锚点,骑在填充条两端(左端 A / 右端 B / 单小节居中 AB)。
+ *   .ab-cell.selected:选中格的数字变白(因为压在 accent 填充条上)。
+ *   .ab-fill.preview:拖拽/待定时的半透明预览条。 */
 .ab-grid {
+  position: relative;          /* 填充条/锚点 absolute 定位的上下文 */
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 6px;
 }
 .ab-cell {
+  position: relative;          /* 不设 z-index:避免创建层叠上下文把数字困在 cell 内 */
+  height: 44px;
+  border-radius: 8px;
+  cursor: pointer;
+  user-select: none;
+  background: var(--bg, #f6f7f9);
+  transition: background 0.12s;
+}
+.ab-cell:hover { background: #eef1f5; }
+.ab-num {
   position: relative;
-  height: 34px;
-  border-radius: var(--radius-sm, 8px);
-  border: 1px solid var(--line, #e6e8ec);
-  background: #fff;
+  z-index: 3;                  /* 数字最高,直接在 grid 层叠上下文与 fill-host(1)比,数字赢 */
   display: flex;
   align-items: center;
   justify-content: center;
+  height: 100%;
   font-size: 13px;
   font-weight: 500;
   color: var(--ink-2, #344054);
-  cursor: pointer;
-  user-select: none;
-  transition: background 0.12s, border-color 0.12s, color 0.12s;
   font-variant-numeric: tabular-nums;
+  transition: color 0.12s, font-weight 0.12s;
 }
-.ab-cell:hover {
-  background: var(--accent-soft, #eef2ff);
-  border-color: var(--accent, #4f46e5);
-}
-.ab-cell.selected {
-  background: var(--accent, #4f46e5);
-  border-color: var(--accent, #4f46e5);
-  color: #fff;
-  font-weight: 600;
-}
-/* 拖拽预览中的候选格(尚未松手) */
-.ab-cell.preview {
-  background: var(--accent-soft, #eef2ff);
-  border-color: var(--accent, #4f46e5);
-  color: var(--accent, #4f46e5);
-}
-.ab-cell.selected.preview { /* 已选 + 拖过:保持选中态 */ }
-/* 拖拽中禁用 hover 干扰 */
-.ab-panel.dragging .ab-cell:hover { background: #fff; border-color: var(--line, #e6e8ec); color: var(--ink-2, #344054); }
-.ab-panel.dragging .ab-cell.selected:hover { background: var(--accent, #4f46e5); border-color: var(--accent, #4f46e5); color: #fff; }
+/* 选中格数字变 accent 深紫(压在 accent-soft 浅紫填充上,对比清晰) */
+.ab-cell.selected .ab-num { color: var(--accent, #4f46e5); font-weight: 600; }
 
-/* 首尾格角标 A/B(格内右上小字) */
-.ab-cell .ab-mark {
+/* 填充条容器:绝对定位层(装多段 .ab-fill),铺满 grid,自身无尺寸。z-index 1(格子背景上、数字下)。 */
+.ab-fill-host {
   position: absolute;
-  top: 1px;
-  right: 3px;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+}
+/* 填充段:accent-soft 浅紫(轻盈,符合项目调性),不是实心 accent。
+ * 跨行时首段(A 端)左圆角、末段(B 端)右圆角,中间段方角 → 行内连续。 */
+.ab-fill {
+  position: absolute;
+  background: var(--accent-soft, #eef2ff);
+  pointer-events: none;
+  transition: opacity 0.15s;
+}
+/* 拖拽/点击交互中:旧填充变淡,让预览/待定指示突出可辨。 */
+.ab-grid.interacting .ab-fill-host:not(.preview-host) .ab-fill { opacity: 0.35; }
+/* 预览填充段:accent-soft 填充 + accent 虚线边(预选/未确认的通用视觉语言,清晰不糊)。 */
+.ab-fill.preview {
+  background: var(--accent-soft, #eef2ff);
+  border: 1.5px dashed var(--accent, #4f46e5);
+  box-sizing: border-box;
+}
+
+/* 待定 A 闪烁(两次点击定区间,第一次点的格子) */
+.ab-cell.pending {
+  box-shadow: 0 0 0 2px var(--accent, #4f46e5);
+  animation: abPulse 1s ease-in-out infinite;
+}
+@keyframes abPulse {
+  0%, 100% { box-shadow: 0 0 0 2px var(--accent, #4f46e5), 0 0 0 2px rgba(79, 70, 229, 0.4); }
+  50%      { box-shadow: 0 0 0 2px var(--accent, #4f46e5), 0 0 0 7px rgba(79, 70, 229, 0); }
+}
+
+/* A/B 锚点:实心 accent 圆 + 白字,骑在填充条两端。
+ *   左端 A / 右端 B / 单小节居中 AB。z-index 3(最高)。 */
+.ab-anchor {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--accent, #4f46e5);
+  color: #fff;
   font-size: 9px;
   font-weight: 700;
-  line-height: 1;
-  color: var(--accent, #4f46e5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 3;
+  box-shadow: 0 1px 4px rgba(79, 70, 229, 0.35);
+  border: 2px solid #fff;       /* 白边让锚点从填充条上浮起 */
+  pointer-events: none;         /* 默认(单小节 AB 锚点)不可交互 */
 }
-.ab-cell.selected .ab-mark { color: #fff; }
+/* 带端点标识的 A/B 锚点可拖(改对应端) */
+.ab-anchor[data-end] {
+  pointer-events: auto;
+  cursor: ew-resize;
+}
+.ab-anchor[data-end]:hover { transform: translate(-50%, -50%) scale(1.15); }
 
 /* ── 第 3 层:状态条 + 整曲循环 ──────────────────────────── */
 .ab-foot {
@@ -159,9 +203,7 @@
   font-size: 12px;
   color: var(--muted, #8b919c);
 }
-.ab-foot .ab-range {
-  font-variant-numeric: tabular-nums;
-}
+.ab-foot .ab-range { font-variant-numeric: tabular-nums; }
 .ab-foot .ab-range b { color: var(--ink-2, #344054); font-weight: 600; }
 .ab-all {
   font-size: 12px;
@@ -175,3 +217,36 @@
   user-select: none;
 }
 .ab-all:hover { border-color: var(--accent, #4f46e5); color: var(--accent, #4f46e5); }
+
+/* ── 间隔滑块 ─────────────────────────────────────────── */
+.ab-interval {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line-2, #eef0f3);
+  font-size: 12px;
+}
+.ab-interval-label { color: var(--muted, #8b919c); flex: none; }
+.ab-interval input[type=range] {
+  -webkit-appearance: none; appearance: none;
+  flex: 1; height: 4px; border-radius: 2px;
+  background: var(--line, #e6e8ec); cursor: pointer;
+}
+.ab-interval input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 14px; height: 14px; border-radius: 50%;
+  background: var(--accent, #4f46e5); cursor: pointer; border: none;
+}
+.ab-interval input[type=range]::-moz-range-thumb {
+  width: 14px; height: 14px; border-radius: 50%; border: none;
+  background: var(--accent, #4f46e5); cursor: pointer;
+}
+.ab-interval-val {
+  color: var(--ink-2, #344054); font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  flex: none;                     /* 固定宽度,不参与 flex 拉伸 */
+  width: 34px;                    /* 够容纳"8拍"(2 汉字 + 字重),固定不随文字变化 */
+  text-align: right;
+}

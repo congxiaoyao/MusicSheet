@@ -37,6 +37,8 @@ export interface PracticeControlsInitial {
   totalMeasures: number;
   /** AB 选区(null=未启用/无定义)。 */
   abSelection: AbSelection | null;
+  /** AB 重播间隔(毫秒,0~3000)。 */
+  abIntervalBeats: number;
   // 设置面板初始值
   mode: ScoreMode;
   labels: KeyLabels;
@@ -56,6 +58,8 @@ export interface PracticeControlsCallbacks {
   onAbToggle: (on: boolean) => void;
   /** AB 选区变化(面板拖选/单击/整曲循环)。 */
   onAbSelectionChange: (sel: AbSelection) => void;
+  /** AB 间隔变化(面板滑块)。 */
+  onAbIntervalChange: (beats: number) => void;
   onSpeed: (speed: number) => void;
   // 设置面板
   onMode: (m: ScoreMode) => void;
@@ -129,35 +133,36 @@ export function buildPracticeControls(
   const abBtn = document.createElement('div');
   abBtn.className = 'pr-ab-btn';
   abBtn.title = 'AB 循环';
-  abBtn.innerHTML = `<span>AB 循环</span><span class="ab-marks"><span>A</span><span>B</span></span>`;
+  abBtn.innerHTML = `<span class="ab-dot"></span><span>AB 循环</span>`;
   ab.appendChild(abBtn);
 
   const abPanel: AbPanelHandle = buildAbPanel(
-    { totalMeasures: initial.totalMeasures, on: initial.abOn, selection: initial.abSelection },
+    { totalMeasures: initial.totalMeasures, on: initial.abOn, selection: initial.abSelection, intervalBeats: initial.abIntervalBeats },
     {
       onToggleLoop: (on) => {
         ab.classList.toggle('on', on);
         cb.onAbToggle(on);
       },
       onSelectionChange: (sel) => cb.onAbSelectionChange(sel),
+      onIntervalChange: (beats) => cb.onAbIntervalChange(beats),
       onOpenChange: () => {},
     },
   );
   ab.appendChild(abPanel.el);
 
   let abPanelOpen = false;
+  const setPanelOpen = (open: boolean) => {
+    abPanelOpen = open;
+    abPanel.setOpen(open);   // 走 handle:setOpen 内部 toggle class + 首次打开重算填充
+  };
   abBtn.addEventListener('click', (e) => {
     e.stopPropagation();
-    abPanelOpen = !abPanelOpen;
-    abPanel.el.classList.toggle('open', abPanelOpen);
+    setPanelOpen(!abPanelOpen);
   });
   // 点外部关闭面板(同 .pr-settings 的外部关闭逻辑)。
   document.addEventListener('click', (e) => {
     if (!abPanelOpen) return;
-    if (!ab.contains(e.target as Node)) {
-      abPanelOpen = false;
-      abPanel.el.classList.remove('open');
-    }
+    if (!ab.contains(e.target as Node)) setPanelOpen(false);
   });
   el.appendChild(ab);
 

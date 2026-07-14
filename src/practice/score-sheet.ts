@@ -834,13 +834,13 @@ export function buildScoreSheet(
   // AB 选区缓存(setAbRange 设;render 后需重应用,因 innerHTML 重建丢失 .active + 标记)。
   let abSelection: { startMeasure: number; endMeasure: number } | null = null;
 
-  /** 造一个 AB 边界标记:小圆点 + 字母,贴在 (x, y)(行五线顶 staffTopY)。
-   *  标记画在五线之上(y 上方),不遮挡谱面;圆点直径 ~5ss,字母在圆点上方。
-   *  A 在小节起始线右侧,B 在小节终止线左侧(向选区内偏,避免出界)。 */
+  /** 造一个 AB 边界标记:实心 accent 圆 + 白边 + 白字,贴在 (x, y)(行五线顶 staffTopY)。
+   *  样式与 ab-panel 面板锚点统一(accent 实心 + 白边)。阴影由 CSS filter(drop-shadow)加,
+   *  让标记从谱面上浮起。A 在小节起始线右侧,B 在小节终止线左侧。 */
   const makeAbMark = (label: 'A' | 'B', x: number, y: number): SVGElement => {
     const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
     g.setAttribute('class', 'ss-ab-mark ' + (label === 'A' ? 'is-a' : 'is-b'));
-    const r = 6.5;                // 圆点半径
+    const r = 7.5;                // 圆点半径(SVG 坐标;屏幕大小随谱面缩放)
     const dx = label === 'A' ? r : -r;   // A 向右(选区内)偏,B 向左(选区内)偏
     const cx = x + dx;
     const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
@@ -848,6 +848,8 @@ export function buildScoreSheet(
     dot.setAttribute('cy', (y - r).toFixed(1));
     dot.setAttribute('r', r.toFixed(1));
     dot.setAttribute('fill', '#4f46e5');
+    dot.setAttribute('stroke', '#fff');       // 白边,与面板锚点统一
+    dot.setAttribute('stroke-width', '1.8');
     g.appendChild(dot);
     const t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
     t.setAttribute('x', cx.toFixed(1));
