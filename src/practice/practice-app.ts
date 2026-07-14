@@ -157,6 +157,8 @@ export class PracticeApp {
   // 资源句柄(destroy 用)
   private boundResize: () => void;
   private boundScroll: () => void;
+  /** Space 播放/暂停的全局 keydown(练琴页专属;mount 注册 destroy 卸载)。 */
+  private boundKeyDown!: (e: KeyboardEvent) => void;
   private hitEl: HTMLElement;
   private fallWrap!: HTMLElement;
   private destroyed = false;
@@ -345,6 +347,23 @@ export class PracticeApp {
       // AB 视觉初始刷新(记忆恢复的选区 → 谱面遮罩 + A/B 标记)。
       this.updateAbVisual();
     });
+
+    // ── Space 播放/暂停(练琴页专属 keydown)──
+    // 与库页面(library.ts onKey)同款:用 offsetParent===null 做可见性守卫——
+    // 返回编辑器后 practiceHost 设 hidden,本监听自动失效,不污染编辑器。
+    // 反复进退练琴页,故 mount 注册 / destroy 卸载配对,避免多实例堆积。
+    this.boundKeyDown = (e: KeyboardEvent) => {
+      if (this.destroyed) return;
+      if (this.root.offsetParent === null) return;   // 练琴页不可见时(已返回编辑器)不响应
+      // 输入框聚焦时不劫持 Space(虽然练琴页目前无输入框,留防御)。
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' || (e.target as HTMLElement)?.isContentEditable) return;
+      if (e.key === ' ' || e.code === 'Space') {
+        e.preventDefault();
+        this.onTogglePlay();
+      }
+    };
+    window.addEventListener('keydown', this.boundKeyDown);
   }
 
   // ── onTick 分发(文档 §2.3) ──
@@ -407,7 +426,11 @@ export class PracticeApp {
   private onHand(h: HandFilter): void {
     this.handFilter = h;
     this.waterfall.setHandFilter(h);
-    // 键盘高亮过滤由 computeActiveMidis 的 handFilter 处理(下一帧生效)。
+    // 暂停/停止态下 onTick 不再跑,键盘高亮和方块不会自动刷新 —— 另一只手的键会残留高亮、
+    // 旧手方块仍显示。用当前 beat 主动刷一帧:重绘方块(handFilter 过滤)+ 重算键盘高亮。
+    // 播放态下这一帧会被下一帧 onTick 覆盖,无副作用。
+    this.waterfall.onTick(this.currentBeat);
+    this.keyboard.setActiveMidis(computeActiveMidis(this.currentBeat, this.staffs, this.handFilter));
   }
 
   private onMetro(on: boolean): void {
@@ -614,6 +637,7 @@ export class PracticeApp {
     this.destroyed = true;
     this.player.dispose();
     window.removeEventListener('resize', this.boundResize);
+    window.removeEventListener('keydown', this.boundKeyDown);
     const scrollEl = this.scoreSheet.el.querySelector('.score-sheet-scroll');
     if (scrollEl) scrollEl.removeEventListener('scroll', this.boundScroll);
     this.root.innerHTML = '';

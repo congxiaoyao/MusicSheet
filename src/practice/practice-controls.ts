@@ -13,6 +13,18 @@
 import './practice-controls.css';
 import { buildAbPanel, AbSelection, AbPanelHandle } from './ab-panel';
 
+// ── 图标(内联 SVG,stroke=currentColor,与库页面/editor-bar 同款,严禁 emoji)──
+const ICON = {
+  // 返回(左箭头)
+  back: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>',
+  // 播放(三角)
+  play: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>',
+  // 暂停(双竖条)
+  pause: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>',
+  // 设置(齿轮)
+  gear: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
+};
+
 export type HandFilter = 'both' | 'R' | 'L';
 export type ScoreMode = 'staff' | 'jianpu' | 'both';
 export type KeyLabels = 'name' | 'solfege' | 'octave' | 'none';
@@ -88,7 +100,7 @@ export function buildPracticeControls(
   // ── 左:返回 ──
   const back = document.createElement('span');
   back.className = 'pr-back';
-  back.textContent = '←';
+  back.innerHTML = ICON.back;
   back.title = '返回编辑器';
   back.addEventListener('click', () => cb.onBack());
   el.appendChild(back);
@@ -103,7 +115,7 @@ export function buildPracticeControls(
   const play = document.createElement('button');
   play.className = 'pr-play';
   play.type = 'button';
-  play.textContent = '▶';
+  play.innerHTML = ICON.play;
   play.title = '播放 / 暂停';
   play.addEventListener('click', () => cb.onTogglePlay());
   el.appendChild(play);
@@ -221,7 +233,7 @@ export function buildPracticeControls(
   const gearWrap = document.createElement('span');
   gearWrap.className = 'pr-gear';
   gearWrap.title = '设置';
-  gearWrap.textContent = '⚙';
+  gearWrap.innerHTML = ICON.gear;
   const settings = document.createElement('div');
   settings.className = 'pr-settings';
   gearWrap.appendChild(settings);
@@ -277,7 +289,7 @@ export function buildPracticeControls(
     el,
     dotEl: dot,
     setState(state) {
-      play.textContent = state === 'stopped' ? '▶' : '⏸';
+      play.innerHTML = state === 'stopped' ? ICON.play : ICON.pause;
       play.title = state === 'playing' ? '暂停' : (state === 'paused' ? '继续' : '播放');
     },
     setBpm(bpm) {

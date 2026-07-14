@@ -139,6 +139,15 @@
   to { opacity: 1; transform: translateY(0); }
 }
 
+/* 练琴页入场动画(从编辑器切到练琴页时;练琴页是 fixed 覆盖式全屏,用轻微上滑+缩放更自然) */
+.practice-enter {
+  animation: practiceEnter 0.22s var(--ease-out-cubic, cubic-bezier(0.33,1,0.68,1));
+}
+@keyframes practiceEnter {
+  from { opacity: 0; transform: translateY(12px) scale(0.99); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
 /* 编辑卡片顶部工具条:左侧范围提示(常驻) + 右侧编辑动作(退格/清空) 或 预览 radio。
    预览模式下退格/清空隐藏,改显示 五线谱/简谱/两者 radio(由 syncEditToolbar 切换)。 */
 .edit-toolbar {

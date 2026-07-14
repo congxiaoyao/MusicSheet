@@ -70,7 +70,10 @@
   z-index: 5;
 }
 
-/* 判定线:区域底(键盘上沿),2px 强调线 + 节拍脉冲(可选) */
+/* 判定线:区域底(键盘上沿)。
+ * 组件自带判定线,在练琴页里由 PracticeApp 再叠一条 .pr-hit(带节拍器脉冲)覆盖,
+ * 故此处在练琴页场景下隐藏(.pa-fall 内的 .wf-hit 不可见),避免两条线重叠显脏。
+ * 组件单独使用时(测试页)仍显示。 */
 .wf-hit {
   position: absolute;
   left: 0; right: 0;
@@ -81,6 +84,8 @@
   z-index: 4;
   transition: box-shadow 0.08s, height 0.08s;
 }
+/* 练琴页:.pr-hit 是主判定线(有脉冲),.wf-hit 隐藏避免重叠 */
+.pa-fall .wf-hit { display: none; }
 .wf-hit.pulse {
   height: 3px;
   box-shadow: 0 0 10px var(--accent, #4f46e5);

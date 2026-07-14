@@ -100,7 +100,7 @@
 }
 .pr-metro .dot {
   width: 7px; height: 7px; border-radius: 50%;
-  background: var(--line, #e6e8ec); transition: background 0.08s;
+  background: var(--line, #e6e8ec); transition: background 0.08s, transform 0.08s, box-shadow 0.08s;
   display: inline-block;
 }
 .pr-metro.on .dot { background: var(--accent, #4f46e5); }
