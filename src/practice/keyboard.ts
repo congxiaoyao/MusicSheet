@@ -282,15 +282,23 @@ export function buildKeyboard(initial: KeyboardInitial, cb: KeyboardCallbacks): 
     }
   }
 
-  // ── 浮空调整卡片(桥接容器 + JS 控制,文档 §3.3) ──
-  // 迁移自 practice-prototype.html setupResizer(L770-781) + DOM(L519-538)。
+  // ── 键盘布局卡片:明确按钮触发，和琴键上沿的节拍反馈完全解耦 ──
   const bridge = h('div', 'kb-resizer-bridge');
-  const zone = h('div', 'kb-resizer-zone');
+  const trigger = h('button', 'kb-resizer-trigger');
+  trigger.type = 'button';
+  trigger.title = '调整键宽和键盘高度';
+  trigger.setAttribute('aria-label', '打开键盘布局设置');
+  trigger.setAttribute('aria-expanded', 'false');
+  trigger.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h10M18 7h2M4 17h3M11 17h9"/><circle cx="16" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg><span>键盘</span>';
   const card = h('div', 'kb-resizer-card');
-  // 卡片内:左键宽滑块 + 右高度图标
+  const cardHead = h('div', 'kb-resizer-head');
+  cardHead.innerHTML = '<div><strong>键盘布局</strong><span>调整显示密度与高度</span></div>';
+  card.appendChild(cardHead);
+  const cardBody = h('div', 'kb-resizer-body');
+  // 卡片内:左键宽滑块 + 右高度拖柄
   const keywidthBox = h('div', 'kb-resizer-keywidth');
   const kwLabel = h('span', 'kb-resizer-label');
-  kwLabel.innerHTML = '键宽 <b>0</b>';
+  kwLabel.innerHTML = '<span>键宽</span><b>0</b>';
   const track = h('div', 'kb-resizer-track');
   const fill = h('div', 'kb-resizer-fill');
   const thumb = h('div', 'kb-resizer-thumb');
@@ -304,31 +312,46 @@ export function buildKeyboard(initial: KeyboardInitial, cb: KeyboardCallbacks): 
   const chevDown = h('div', 'kb-h-chev-down');
   heightBox.append(chevUp, gripLabel, chevDown);
 
-  card.append(keywidthBox, heightBox);
-  bridge.append(zone, card);
+  cardBody.append(keywidthBox, heightBox);
+  card.appendChild(cardBody);
+  bridge.append(card, trigger);
   el.appendChild(bridge);
 
-  // 显隐逻辑(JS 控制,不用 CSS :hover —— 文档反复试错验证过的结论)。
+  // 点击打开，离开整块按钮/卡片后延迟收起；不再依赖不可见 hover 热区。
   let hideTimer: ReturnType<typeof setTimeout> | null = null;
+  let dragKeyW = false;
+  let dragHeight = false;
   const show = () => {
     if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
     card.classList.add('open');
-    bridge.style.pointerEvents = 'auto';
+    bridge.classList.add('open');
+    trigger.setAttribute('aria-expanded', 'true');
+  };
+  const hide = () => {
+    card.classList.remove('open');
+    bridge.classList.remove('open');
+    trigger.setAttribute('aria-expanded', 'false');
   };
   const hideLater = () => {
     hideTimer = setTimeout(() => {
-      card.classList.remove('open');
-      bridge.style.pointerEvents = 'none';
-    }, 150);
+      if (!dragKeyW && !dragHeight) hide();
+    }, 360);
   };
-  zone.addEventListener('mouseenter', show);
-  bridge.addEventListener('mouseenter', show);   // 鼠标在 bridge 内(含卡片)时保持
+  trigger.addEventListener('click', (e) => {
+    e.stopPropagation();
+    card.classList.contains('open') ? hide() : show();
+  });
+  trigger.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { hide(); trigger.blur(); }
+  });
+  bridge.addEventListener('mouseenter', () => {
+    if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
+  });
   bridge.addEventListener('mouseleave', hideLater);
 
   // ── 键宽滑块拖动(左右拖改键宽 px,键数 ceil 补满) ──
   // 文档 §3.3:用户拖滑块控制每个白键宽(连续值,精确 px),键数 = ceil(容器宽/白键宽) 补满。
   // 键细了键就多了,键盘总宽 = 键数×白键宽,超出容器部分由 .kb-keys overflow 裁掉。
-  let dragKeyW = false;
   const onKeyWDown = (e: MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -403,7 +426,6 @@ export function buildKeyboard(initial: KeyboardInitial, cb: KeyboardCallbacks): 
   }
 
   // ── 高度图标拖动(上下拖改键盘高度,底边固定顶边移) ──
-  let dragHeight = false;
   let heightStartY = 0;
   let heightStartH = 0;
   const onHeightDown = (e: MouseEvent) => {

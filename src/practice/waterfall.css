@@ -35,15 +35,15 @@
 .wf-note {
   position: absolute;
   box-sizing: border-box;
-  border-radius: 3px 3px 0 0;
+  border-radius: 6px 6px 2px 2px;
   display: flex;
   align-items: flex-end;
   justify-content: center;
   padding-bottom: 3px;
   font-size: 9px;
-  font-weight: 600;
+  font-weight: 700;
   color: #fff;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  text-shadow: 0 1px 1px rgba(34, 40, 51, 0.24);
   pointer-events: none;
   /* 位置(top/left/width/height)每帧由 JS 设,不要 transition(否则位置滞后跟手);
    * 只给 opacity 加过渡 —— 方块出现/消失时平滑淡入淡出,不生硬。 */
@@ -54,20 +54,25 @@
 
 /* 右手蓝 */
 .wf-note.R {
-  background: linear-gradient(180deg, #60a5fa, #2563eb);
-  box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.4), inset 0 -2px 0 rgba(0, 0, 0, 0.15);
+  background: linear-gradient(180deg, var(--practice-right-light, #8eace1) 0%, var(--practice-right, #4f78c9) 65%, var(--practice-right-strong, #315b9d) 100%);
+  box-shadow: 0 4px 11px rgba(49, 91, 157, 0.18), inset 0 1px 0 rgba(255,255,255,.24), inset 0 -2px 0 rgba(49, 91, 157, .18);
 }
 /* 左手橙 */
 .wf-note.L {
-  background: linear-gradient(180deg, #fb923c, #ea580c);
-  box-shadow: 0 0 0 1px rgba(234, 88, 12, 0.4), inset 0 -2px 0 rgba(0, 0, 0, 0.15);
+  background: linear-gradient(180deg, var(--practice-left-light, #e7a084) 0%, var(--practice-left, #d37a58) 65%, var(--practice-left-strong, #a95538) 100%);
+  box-shadow: 0 4px 11px rgba(169, 85, 56, 0.17), inset 0 1px 0 rgba(255,255,255,.24), inset 0 -2px 0 rgba(169, 85, 56, .18);
 }
 
 /* 命中:接近判定线时放大 + 光环(文档 §4.4) */
 .wf-note.active {
   transform: translateX(-50%) scale(1.04);
-  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.85), 0 0 12px rgba(79, 70, 229, 0.5);
   z-index: 5;
+}
+.wf-note.R.active {
+  box-shadow: 0 0 0 2px rgba(255,255,255,.88), 0 0 0 4px rgba(79, 120, 201, .2), 0 7px 18px rgba(49, 91, 157, .25);
+}
+.wf-note.L.active {
+  box-shadow: 0 0 0 2px rgba(255,255,255,.88), 0 0 0 4px rgba(211, 122, 88, .2), 0 7px 18px rgba(169, 85, 56, .23);
 }
 
 /* 判定线:区域底(键盘上沿)。
@@ -79,7 +84,7 @@
   left: 0; right: 0;
   bottom: 0;
   height: 2px;
-  background: var(--accent, #4f46e5);
+  background: var(--accent, #4f78c9);
   opacity: 0.7;
   z-index: 4;
   transition: box-shadow 0.08s, height 0.08s;
@@ -88,5 +93,5 @@
 .pa-fall .wf-hit { display: none; }
 .wf-hit.pulse {
   height: 3px;
-  box-shadow: 0 0 10px var(--accent, #4f46e5);
+  box-shadow: 0 0 10px var(--accent, #4f78c9);
 }

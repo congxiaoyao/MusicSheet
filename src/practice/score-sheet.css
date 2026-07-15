@@ -16,7 +16,7 @@
   width: 100%;
   height: 100%;
   overflow: hidden;
-  background: #f8fafc;
+  background: linear-gradient(180deg, #fbfcfe 0%, #f8fafc 65%, #f6f8fb 100%);
 }
 
 /* 滚动容器:提词器式。隐藏滚动条(谱面是主角,不显滚动条干扰)。
@@ -39,11 +39,13 @@
  * padding-bottom 用 100vh 保证末行后留足整屏空间,末行能滚到顶部清晰带位置。 */
 .score-sheet-sheet {
   position: relative;       /* 播放头 absolute 定位的参照(否则相对 .score-sheet) */
-  padding: 0 24px 100vh 24px;   /* padding-top 由 JS 设 */
+  padding: 0 0 100vh;       /* padding-top 由 JS 设；横向留白已纳入可缩放 SVG viewBox */
   box-sizing: border-box;
 }
 .score-sheet-sheet svg {
   display: block;
+  width: 100%;
+  height: auto;
   margin: 0 auto;
   user-select: none;        /* 谱面是只读展示,禁选防止"露馅"(SVG text 默认可被光标选中) */
   -webkit-user-select: none;
@@ -58,10 +60,10 @@
   opacity: 1;
 }
 .score-sheet-sheet .ss-system.past {
-  opacity: 0.55;
+  opacity: 0.48;
 }
 .score-sheet-sheet .ss-system.future {
-  opacity: 0.35;
+  opacity: 0.28;
 }
 
 /* 当前行微微强调(可选:底部光带,标识"正在演奏")。 */
@@ -100,16 +102,18 @@
  * 高亮 = 变色(主色调),复用编辑器同款 class 语义(.playing)。 */
 .score-sheet-sheet .note-elem.playing,
 .score-sheet-sheet .jp-elem.playing {
-  fill: #2563eb;            /* 蓝色高亮(与瀑布流右手色系呼应,可后续统一) */
-  color: #2563eb;
+  fill: var(--practice-brand, #4f78c9);
+  color: var(--practice-brand, #4f78c9);
 }
 
 /* ── 播放头(竖条盖当前音符,参考编辑器 pb-playhead)───────── */
 .ss-playhead {
   position: absolute;
-  background: rgba(37, 99, 235, 0.18);
-  border-left: 2px solid #2563eb;
-  border-right: 2px solid #2563eb;
+  background: rgba(79, 120, 201, .13);
+  border: 1.5px solid var(--practice-brand, #4f78c9);
+  border-radius: 7px;
+  box-shadow: 0 0 0 1px rgba(255,255,255,.7), 0 0 12px rgba(79, 120, 201, .12);
+  overflow: visible;
   pointer-events: none;
   z-index: 3;
   box-sizing: border-box;

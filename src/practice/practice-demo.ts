@@ -337,7 +337,7 @@ function main() {
   fallRange.min = '120'; fallRange.max = '600'; fallRange.step = '10';
   fallRange.value = fallH == null ? '400' : String(fallH);
   fallRange.style.width = '120px';
-  fallRange.style.accentColor = '#2563eb';
+  fallRange.style.accentColor = '#4f78c9';
   // 自动/手动 切换按钮
   const fallAutoBtn = document.createElement('button');
   fallAutoBtn.textContent = '自动';

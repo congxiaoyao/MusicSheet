@@ -10,6 +10,25 @@
 
 :host,
 .pa-root {
+  /* 练琴页独立色彩语义:系统/右手用低饱和蓝,左手用陶土橙,主操作用深色。 */
+  --practice-brand: #4f78c9;
+  --practice-brand-strong: #315b9d;
+  --practice-brand-soft: #eef3fb;
+  --practice-brand-ring: rgba(79, 120, 201, 0.2);
+  --practice-right: #4f78c9;
+  --practice-right-strong: #315b9d;
+  --practice-right-light: #8eace1;
+  --practice-right-soft: rgba(79, 120, 201, 0.16);
+  --practice-left: #d37a58;
+  --practice-left-strong: #a95538;
+  --practice-left-light: #e7a084;
+  --practice-left-soft: rgba(211, 122, 88, 0.17);
+  --practice-action: #252b36;
+  /* 收口局部组件仍在使用的通用 accent 变量,避免残留紫色。 */
+  --accent: var(--practice-brand);
+  --accent-2: #678bcf;
+  --accent-soft: var(--practice-brand-soft);
+  --accent-ring: var(--practice-brand-ring);
   display: flex;
   flex-direction: column;
   width: 100%;
@@ -23,8 +42,18 @@
   position: relative;
   flex: 1;
   min-height: 0;
-  background: #fcfcfd;
+  background:
+    radial-gradient(circle at 50% -15%, rgba(99, 102, 241, 0.055), transparent 38%),
+    linear-gradient(180deg, #f5f7fb 0%, #f8f9fc 48%, #eef1f6 100%);
   overflow: hidden;
+}
+.pa-stage::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+  box-shadow: inset 0 18px 36px rgba(71, 79, 96, 0.025);
 }
 
 /* 谱面区:定宽居中(宽度由 JS 设,可在设置面板调,640~1200)。
@@ -38,6 +67,10 @@
   transform: translateX(-50%);
   width: 1000px;   /* JS 设(PracticeApp.updateScoreWidth),默认 1000 */
   overflow: hidden;
+  background: #fbfcfe;
+  border-left: 1px solid rgba(220, 225, 234, 0.7);
+  border-right: 1px solid rgba(220, 225, 234, 0.7);
+  box-shadow: 0 18px 70px rgba(24, 32, 48, 0.07);
 }
 
 /* 浮层:绝对定位覆盖整个 stage,透明 + 不挡谱面点击(键盘区单独放行) */
@@ -57,6 +90,13 @@
   /* top 由 JS 设(= lineBottomY 经换算);height 由 JS 设(= 键盘顶 - top) */
   overflow: hidden;
   pointer-events: none;
+  background: linear-gradient(
+    to bottom,
+    rgba(248, 250, 253, 0) 0%,
+    rgba(248, 250, 253, 0.08) 38%,
+    rgba(244, 247, 251, 0.58) 78%,
+    rgba(239, 243, 249, 0.92) 100%
+  );
   /* 顶部 40px 渐变淡出:方块接近上边界时透明度降到 0(从乐谱行底冒出) */
   -webkit-mask-image: linear-gradient(to bottom, transparent 0px, #000 40px);
   mask-image: linear-gradient(to bottom, transparent 0px, #000 40px);
@@ -68,19 +108,21 @@
   z-index: 1;
 }
 
-/* 判定线脉冲元素(贴方块区底=键盘顶;Metronome 操作 .pulse) */
+/* 节拍器光带是键盘的直接子元素，并落在 6px 键床压边内，不参与 overlay 坐标换算。 */
 .pr-hit {
   position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 1px;
-  background: var(--accent, #4f46e5);
-  opacity: 0.5;
-  box-shadow: 0 0 4px 0 rgba(79, 70, 229, 0.18);
+  left: 2.5%;
+  right: 2.5%;
+  top: 0;
+  bottom: auto;
+  height: var(--kb-rail-height, 6px);
+  border-radius: 0 0 4px 4px;
+  background: linear-gradient(90deg, transparent 0%, rgba(79, 120, 201, .12) 12%, rgba(79, 120, 201, .34) 50%, rgba(79, 120, 201, .12) 88%, transparent 100%);
+  opacity: 0;
+  box-shadow: none;
   z-index: 10;
   pointer-events: none;
-  transition: box-shadow 0.1s, height 0.1s, opacity 0.1s;
+  transition: box-shadow 0.11s ease-out, opacity 0.11s ease-out;
 }
 /* .pr-hit.pulse 由 metronome.css 定义 */
 

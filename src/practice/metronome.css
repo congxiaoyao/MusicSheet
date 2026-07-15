@@ -3,16 +3,17 @@
  * 视觉收敛:脉冲统一用 accent 色(与方块蓝/橙、键盘高亮同调),不再变红,
  *          只靠亮度/线宽变化做节拍提示,避免红紫混搭显脏。 */
 
-/* 判定线脉冲:提亮 + 加粗 + 轻微发光(同色系,不变红)。基础样式由 PracticeApp 布局定。 */
+/* 节拍脉冲只点亮键床压边，形成短促的面光，不再叠一条悬空硬线。 */
 .pr-hit.pulse {
-  opacity: 1;
-  height: 2px;
-  box-shadow: 0 0 8px 0 rgba(79, 70, 229, 0.45);
+  opacity: .92;
+  height: var(--kb-rail-height, 6px);
+  box-shadow: 0 -2px 10px rgba(79, 120, 201, .09), inset 0 0 5px rgba(79, 120, 201, .18);
 }
 
-/* 顶栏节拍器指示点脉冲:accent 高亮 + 轻微放大(不再变红)。 */
+/* 顶栏节拍器图标脉冲:图标轻摆并亮起，语义比闪烁圆点更明确。 */
 .pr-metro .dot.pulse {
-  background: var(--accent, #4f46e5);
-  box-shadow: 0 0 6px 1px rgba(79, 70, 229, 0.5);
-  transform: scale(1.25);
+  color: var(--accent, #4f78c9);
+  background: rgba(79, 120, 201, .12);
+  box-shadow: 0 0 0 3px rgba(79, 120, 201, .08);
+  transform: rotate(-5deg) scale(1.06);
 }

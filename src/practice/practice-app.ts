@@ -335,11 +335,11 @@ export class PracticeApp {
     overlay.className = 'pa-overlay';
     this.fallWrap = document.createElement('div');
     this.fallWrap.className = 'pa-fall';
-    // waterfall 先(底层),判定线后(顶层,盖在方块之上做脉冲指示)。
+    // waterfall 保留在带顶部淡出遮罩的容器内；判定线直接挂到键盘，始终使用同一坐标系。
     this.fallWrap.appendChild(this.waterfall.el);
-    this.fallWrap.appendChild(this.hitEl);
     overlay.appendChild(this.fallWrap);
     overlay.appendChild(this.keyboard.el);
+    this.keyboard.el.appendChild(this.hitEl);
     stage.appendChild(overlay);
 
     this.root.innerHTML = '';

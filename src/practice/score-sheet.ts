@@ -295,7 +295,7 @@ function isFirstSystem(sysIndex: number): boolean {
  *  故:让墨迹高 = 目标跨度 → font-size ≈ targetH;
  *      墨迹中心对准跨度中心 → baseline = 中心 + fs/2;
  *      x 用 text-anchor=middle 居中(advance 小,居中即可)。 */
-function renderBrace(topY: number, botY: number, layout: Layout): string {
+function renderBrace(topY: number, botY: number, layout: Layout): { svg: string; minX: number } {
   const ss = layout.staffSpace;
   const targetH = botY - topY;
   // 字号 = 目标高度(实测墨迹高≈font-size)。留少量富余避免顶底贴边。
@@ -307,8 +307,14 @@ function renderBrace(topY: number, botY: number, layout: Layout): string {
   // brace 到起始线(staffLeftX)的间距约 1 staff space(Dorico/Sibelius 惯例 0.5-1ss,取 1ss 避免挤)。
   const braceHalfW = (0.084 * fs) / 2;
   const x = layout.staffLeftX - braceHalfW - ss * 1.0;
+  // Bravura brace 的可见墨迹宽约等于 advance(0.084×fs)，text-anchor=middle 后左右各半。
+  // 把墨迹真实左界向上传递给整曲 viewBox，避免依赖 overflow + CSS padding 掩盖负坐标。
+  const minX = x - braceHalfW;
   // data-top/data-bot 暴露期望跨度(诊断用:像素扫描对比实际墨迹 vs 期望 y)
-  return `<text class="ss-brace" data-top="${topY.toFixed(1)}" data-bot="${botY.toFixed(1)}" x="${x.toFixed(1)}" y="${baselineY.toFixed(1)}" font-family="Bravura" font-size="${fs.toFixed(1)}" text-anchor="middle" fill="#1f2430">${G.brace}</text>`;
+  return {
+    svg: `<text class="ss-brace" data-top="${topY.toFixed(1)}" data-bot="${botY.toFixed(1)}" x="${x.toFixed(1)}" y="${baselineY.toFixed(1)}" font-family="Bravura" font-size="${fs.toFixed(1)}" text-anchor="middle" fill="#1f2430">${G.brace}</text>`,
+    minX,
+  };
 }
 
 // ── renderDigitBand:both 档的「五线下数字助记带」 ─────────────
@@ -453,6 +459,10 @@ interface RenderedSystem {
   /** 行内 treble/bass Piece(供 onTick 反查当前 beat 落在哪个音符) */
   treblePiece: Piece;
   bassPiece: Piece;
+  /** 可见横向边界：brace 墨迹左界到末端小节线，供整曲 viewBox 统一收边。 */
+  minVisibleX: number;
+  maxVisibleX: number;
+  staffSpace: number;
 }
 
 /** 渲染一行 system(大谱表,三档 mode 可切):treble 组 + bass 组 + 连谱号 + 起始/连接竖线。
@@ -693,7 +703,7 @@ function renderSystem(
     systemLines += `<g class="ss-ab-dim-layer">${abDim}</g>`;
   }
 
-  const svg = trebleGroup + bassGroup + systemLines + brace;
+  const svg = trebleGroup + bassGroup + systemLines + brace.svg;
   // 行高 = system 内可见内容底(bass translate 后的实际底)。
   //   trebleGroup translate(-tTop)把 treble 可见顶拉到 y=0;bass translate 到 bassTranslateY,
   //   其可见底 bBot(相对 bass 自身坐标)→ system 内实际底 = bassTranslateY + bBot。
@@ -713,6 +723,9 @@ function renderSystem(
     bassLayout,
     treblePiece,
     bassPiece,
+    minVisibleX: brace.minX,
+    maxVisibleX: trebleLayout.contentRight,
+    staffSpace: trebleLayout.staffSpace,
   };
 }
 
@@ -721,6 +734,8 @@ function renderSystem(
 /** 渲染整个乐谱(多行 system 垂直堆叠)。返回 SVG 字符串 + 各行几何(供 onTick 用)。 */
 interface ScoreRender {
   svg: string;
+  /** SVG viewBox 的 x 起点。大括号负坐标被正式纳入 viewBox。 */
+  viewBoxX: number;
   width: number;
   height: number;
   systems: SystemGeom[];
@@ -759,7 +774,14 @@ export function renderScore(score: Score, width: number, mode: ScoreMode, preset
     const ideal = sys.idealWidths ?? [preset.minBarW];   // planSystems 已算好,直接用
     return renderSystem(score, sys, i, systems.length, width, ideal, mode);
   });
-  const totalWidth = Math.max(width, ...rendered.map(r => r.width));
+  // 横向边界按“真实可见墨迹”建模：左边取 brace 墨迹左界，右边取终止小节线。
+  // 外侧留白用 staffSpace 比例，随谱面缩放，不再使用固定 CSS 像素。
+  const minVisibleX = Math.min(...rendered.map(r => r.minVisibleX));
+  const maxVisibleX = Math.max(...rendered.map(r => r.maxVisibleX));
+  const outerPad = Math.max(...rendered.map(r => r.staffSpace)) * 5.0;
+  const viewBoxX = minVisibleX - outerPad;
+  const viewBoxRight = maxVisibleX + outerPad;
+  const totalWidth = Math.max(1, viewBoxRight - viewBoxX);
   const bpb = beatsPerBar(score.meta.time);
   let cumY = 0;
   const groups: string[] = [];
@@ -786,8 +808,8 @@ export function renderScore(score: Score, width: number, mode: ScoreMode, preset
     cumY += r.height + SYSTEM_GAP;
   }
   const totalHeight = Math.max(0, cumY - SYSTEM_GAP) + 16;
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${totalWidth}" height="${totalHeight.toFixed(2)}" viewBox="0 0 ${totalWidth} ${totalHeight.toFixed(2)}" overflow="visible">${groups.join('')}</svg>`;
-  return { svg, width: totalWidth, height: totalHeight, systems: geom };
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${totalWidth.toFixed(2)}" height="${totalHeight.toFixed(2)}" viewBox="${viewBoxX.toFixed(2)} 0 ${totalWidth.toFixed(2)} ${totalHeight.toFixed(2)}">${groups.join('')}</svg>`;
+  return { svg, viewBoxX, width: totalWidth, height: totalHeight, systems: geom };
 }
 
 // ── 工厂:buildScoreSheet ───────────────────────────────────
@@ -823,6 +845,8 @@ export function buildScoreSheet(
   // 当前行五线谱顶线距 scrollEl 视口顶的留白(谱号+连梁完整显示空间)。
   // 声明在 render 前(render 动态算 padding-top 要用)。
   const CURRENT_TOP_PAD = 90;
+  // 播放头越过上下五线边界，圆角端点才不会像被裁在谱线内。
+  const PLAYHEAD_END_PAD = 7;
 
   // 最近一次渲染几何(供 onTick 用)。
   let renderCache: ScoreRender | null = null;
@@ -840,22 +864,25 @@ export function buildScoreSheet(
   const makeAbMark = (label: 'A' | 'B', x: number, y: number): SVGElement => {
     const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
     g.setAttribute('class', 'ss-ab-mark ' + (label === 'A' ? 'is-a' : 'is-b'));
-    const r = 7.5;                // 圆点半径(SVG 坐标;屏幕大小随谱面缩放)
-    const dx = label === 'A' ? r : -r;   // A 向右(选区内)偏,B 向左(选区内)偏
+    const r = 9.5;                // 圆点半径(SVG 坐标;屏幕大小随谱面缩放)
+    const markerGap = 8;          // 与播放头顶部及阴影保持独立间隙
+    const dx = label === 'A' ? r + 2 : -r - 2;   // A/B 均向选区内侧偏移
     const cx = x + dx;
+    // 播放头会越过五线顶部 PLAYHEAD_END_PAD；标记整体再上移，避免两者相交。
+    const cy = y - PLAYHEAD_END_PAD - markerGap - r;
     const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
     dot.setAttribute('cx', cx.toFixed(1));
-    dot.setAttribute('cy', (y - r).toFixed(1));
+    dot.setAttribute('cy', cy.toFixed(1));
     dot.setAttribute('r', r.toFixed(1));
-    dot.setAttribute('fill', '#4f46e5');
+    dot.setAttribute('fill', 'var(--accent, #4f78c9)');
     dot.setAttribute('stroke', '#fff');       // 白边,与面板锚点统一
     dot.setAttribute('stroke-width', '1.8');
     g.appendChild(dot);
     const t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
     t.setAttribute('x', cx.toFixed(1));
-    t.setAttribute('y', (y - r + 3).toFixed(1));   // 圆心附近(baseline 微调让字母居中)
+    t.setAttribute('y', (cy + 3.7).toFixed(1));   // 圆心附近(baseline 微调让字母居中)
     t.setAttribute('text-anchor', 'middle');
-    t.setAttribute('font-size', '9');
+    t.setAttribute('font-size', '11');
     t.setAttribute('font-weight', '700');
     t.setAttribute('fill', '#fff');
     t.textContent = label;
@@ -920,7 +947,8 @@ export function buildScoreSheet(
     const svgEl = sheetEl.querySelector('svg');
     if (svgEl) {
       svgEl.setAttribute('width', '100%');
-      svgEl.setAttribute('height', 'auto');   // height auto:按 viewBox 比例自适应,scaleX=scaleY
+      svgEl.removeAttribute('height');
+      svgEl.style.height = 'auto';   // 交给 viewBox 比例控制，避免无效的 height="auto" SVG 属性
       svgEl.removeAttribute('preserveAspectRatio');
     }
     // 动态 padding-top:让首行(sys0,scrollTop=0 无法上移)五线顶线天然落在清晰带。
@@ -935,7 +963,7 @@ export function buildScoreSheet(
       const staffTopInSys = sys0.staffTopY - sys0.yTop;   // sys0 五线顶线在 SVG 内的 y(恒定 ~60)
       const applyPad = () => {
         if (!renderCache) return;
-        const svgPxWidth = sheetEl.clientWidth - 48;   // content box 宽(减左右 padding 各 24)
+        const svgPxWidth = sheetEl.clientWidth;
         if (svgPxWidth <= 0) { requestAnimationFrame(applyPad); return; }  // 还没布局,等下一帧
         const scale = renderCache.width > 0 ? svgPxWidth / renderCache.width : 1;
         const padTop = Math.max(0, CURRENT_TOP_PAD - staffTopInSys * scale);
@@ -969,7 +997,7 @@ export function buildScoreSheet(
     if (e.clientX < svgRect.left || e.clientX > svgRect.right || e.clientY < svgRect.top || e.clientY > svgRect.bottom) return;
     const scale = renderCache.width > 0 ? svgRect.width / renderCache.width : 1;
     // SVG 内坐标(与 layout 同基准)。
-    const svgX = (e.clientX - svgRect.left) / scale;
+    const svgX = renderCache.viewBoxX + (e.clientX - svgRect.left) / scale;
     const svgY = (e.clientY - svgRect.top) / scale;
     // 找点击 y 落在哪个 system。
     let sysIdx = -1;
@@ -1158,10 +1186,10 @@ export function buildScoreSheet(
     const x0 = bestX0 >= 0 ? bestX0 : tLay.contentLeft;
     // 横向:符头宽(盖住符头 2×noteHeadHalf)→ 像素,加 SVG 在 sheet 内的左偏移。
     const wPx = tLay.noteHeadHalf * 2 * scale;
-    const leftPx = svgLeftInSheet + x0 * scale - wPx / 2;
+    const leftPx = svgLeftInSheet + (x0 - renderCache.viewBoxX) * scale - wPx / 2;
     // 纵向:覆盖五线谱顶线到低音谱表底线(实际音乐范围),不含加线留白。
-    const topPx = svgTopInSheet + sys.staffTopY * scale;
-    const heightPx = (sys.staffBotY - sys.staffTopY) * scale;
+    const topPx = svgTopInSheet + sys.staffTopY * scale - PLAYHEAD_END_PAD;
+    const heightPx = (sys.staffBotY - sys.staffTopY) * scale + PLAYHEAD_END_PAD * 2;
     playheadEl.style.display = '';
     playheadEl.style.width = wPx.toFixed(1) + 'px';
     playheadEl.style.top = topPx.toFixed(1) + 'px';
@@ -1185,7 +1213,7 @@ export function buildScoreSheet(
     requestAnimationFrame(() => {
       if (!renderCache) return;
       // scale = SVG 实际宽 / viewBox 宽(同 render 算 padding-top 用的口径)。
-      const svgPxWidth = sheetEl.clientWidth - 48;
+      const svgPxWidth = sheetEl.clientWidth;
       const scale = renderCache.width > 0 ? svgPxWidth / renderCache.width : 1;
       // SVG 在 sheetEl 内的固定顶部偏移 = paddingTop(JS 动态设),不含滚动偏移。
       const paddingTop = parseFloat(getComputedStyle(sheetEl).paddingTop) || 0;

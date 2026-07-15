@@ -68,7 +68,7 @@
   box-shadow: 0 1px 2px rgba(16, 24, 40, 0.2);
   transition: transform 0.2s ease;
 }
-.ab-switch.on { background: var(--accent, #4f46e5); }
+.ab-switch.on { background: var(--accent, #4f78c9); }
 .ab-switch.on::after { transform: translateX(16px); }
 
 /* ── 第 2 层:主体(switch 关时隐藏) ──────────────────────── */
@@ -131,7 +131,7 @@
   transition: color 0.12s, font-weight 0.12s;
 }
 /* 选中格数字变 accent 深紫(压在 accent-soft 浅紫填充上,对比清晰) */
-.ab-cell.selected .ab-num { color: var(--accent, #4f46e5); font-weight: 600; }
+.ab-cell.selected .ab-num { color: var(--accent, #4f78c9); font-weight: 600; }
 
 /* 填充条容器:绝对定位层(装多段 .ab-fill),铺满 grid,自身无尺寸。z-index 1(格子背景上、数字下)。 */
 .ab-fill-host {
@@ -144,7 +144,7 @@
  * 跨行时首段(A 端)左圆角、末段(B 端)右圆角,中间段方角 → 行内连续。 */
 .ab-fill {
   position: absolute;
-  background: var(--accent-soft, #eef2ff);
+  background: var(--accent-soft, #eef3fb);
   pointer-events: none;
   transition: opacity 0.15s;
 }
@@ -152,19 +152,19 @@
 .ab-grid.interacting .ab-fill-host:not(.preview-host) .ab-fill { opacity: 0.35; }
 /* 预览填充段:accent-soft 填充 + accent 虚线边(预选/未确认的通用视觉语言,清晰不糊)。 */
 .ab-fill.preview {
-  background: var(--accent-soft, #eef2ff);
-  border: 1.5px dashed var(--accent, #4f46e5);
+  background: var(--accent-soft, #eef3fb);
+  border: 1.5px dashed var(--accent, #4f78c9);
   box-sizing: border-box;
 }
 
 /* 待定 A 闪烁(两次点击定区间,第一次点的格子) */
 .ab-cell.pending {
-  box-shadow: 0 0 0 2px var(--accent, #4f46e5);
+  box-shadow: 0 0 0 2px var(--accent, #4f78c9);
   animation: abPulse 1s ease-in-out infinite;
 }
 @keyframes abPulse {
-  0%, 100% { box-shadow: 0 0 0 2px var(--accent, #4f46e5), 0 0 0 2px rgba(79, 70, 229, 0.4); }
-  50%      { box-shadow: 0 0 0 2px var(--accent, #4f46e5), 0 0 0 7px rgba(79, 70, 229, 0); }
+  0%, 100% { box-shadow: 0 0 0 2px var(--accent, #4f78c9), 0 0 0 2px rgba(79, 120, 201, 0.32); }
+  50%      { box-shadow: 0 0 0 2px var(--accent, #4f78c9), 0 0 0 7px rgba(79, 120, 201, 0); }
 }
 
 /* A/B 锚点:实心 accent 圆 + 白字,骑在填充条两端。
@@ -175,7 +175,7 @@
   width: 20px;
   height: 20px;
   border-radius: 50%;
-  background: var(--accent, #4f46e5);
+  background: var(--accent, #4f78c9);
   color: #fff;
   font-size: 9px;
   font-weight: 700;
@@ -183,7 +183,7 @@
   align-items: center;
   justify-content: center;
   z-index: 3;
-  box-shadow: 0 1px 4px rgba(79, 70, 229, 0.35);
+  box-shadow: 0 1px 4px rgba(79, 120, 201, 0.28);
   border: 2px solid #fff;       /* 白边让锚点从填充条上浮起 */
   pointer-events: none;         /* 默认(单小节 AB 锚点)不可交互 */
 }
@@ -216,7 +216,7 @@
   transition: all 0.12s;
   user-select: none;
 }
-.ab-all:hover { border-color: var(--accent, #4f46e5); color: var(--accent, #4f46e5); }
+.ab-all:hover { border-color: var(--accent, #4f78c9); color: var(--accent, #4f78c9); }
 
 /* ── 间隔滑块 ─────────────────────────────────────────── */
 .ab-interval {
@@ -237,11 +237,11 @@
 .ab-interval input[type=range]::-webkit-slider-thumb {
   -webkit-appearance: none; appearance: none;
   width: 14px; height: 14px; border-radius: 50%;
-  background: var(--accent, #4f46e5); cursor: pointer; border: none;
+  background: var(--accent, #4f78c9); cursor: pointer; border: none;
 }
 .ab-interval input[type=range]::-moz-range-thumb {
   width: 14px; height: 14px; border-radius: 50%; border: none;
-  background: var(--accent, #4f46e5); cursor: pointer;
+  background: var(--accent, #4f78c9); cursor: pointer;
 }
 .ab-interval-val {
   color: var(--ink-2, #344054); font-weight: 600;
