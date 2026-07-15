@@ -955,8 +955,11 @@ export function buildScoreSheet(
   };
   render();
 
-  // 点击谱面任意位置 → onSeek(beat 粒度)。事件委托在 scrollEl(render 会重建 SVG 内部,
-  // 绑在 SVG 上会丢失)。点哪跳哪:小节内按 x 比例线性反算拍位,可命中半拍/连音等位置。
+  // 点击谱面任意位置 → onSeek。事件委托在 scrollEl(render 会重建 SVG 内部,绑在 SVG 上会丢失)。
+  // 点哪跳哪:用符头真实位置(noteX)+ 小节起点做吸附候选,找离点击 x 最近的锚点 seek。
+  //   旧实现按"小节内 x 均匀反算拍位"假设符头均匀分布,但 positionInBar 的自适应偏移让符头
+  //   非均匀(往左挤),导致点视觉拍位 seek 到错误的拍。改用真实 noteX 吸附:点符头精准命中、
+  //   点空白处跳到最近的音/小节起点。
   scrollEl.addEventListener('click', (e: MouseEvent) => {
     if (!renderCache || !callbacks.onSeek) return;
     const svgEl = sheetEl.querySelector('svg');
@@ -976,24 +979,35 @@ export function buildScoreSheet(
     }
     if (sysIdx < 0) return;
     const sys = renderCache.systems[sysIdx];
-    // 行内小节:x 落在 barLines 的哪个区间 [barLines[k], barLines[k+1])。
-    const bl = sys.trebleLayout.barLines;
-    let m = 0;
-    for (let k = 0; k < bl.length - 1; k++) {
-      if (svgX >= bl[k] && svgX < bl[k + 1]) { m = k; break; }
-      if (k === bl.length - 2) m = k;   // 末尾兜底
-    }
-    // 小节内按 x 比例线性反算拍位(与 layout.positionInBar 的拍位→x 映射互逆),
-    // 再吸附到最近整数拍(拍粒度)——点哪一小节的哪一拍就跳到那一拍,不落在半拍/小数拍上。
-    // positionInBar:x = bl[m] + beatInMeas/bpb × barW + NOTE_INK_HALF(符头半宽偏移,
-    //   让符头离开小节线)。反算时先减去该偏移,再按比例求拍位,点击符头中心即命中其起始拍。
     const bpb = beatsPerBar(sys.treblePiece.time);
-    const barW = bl[m + 1] - bl[m];
-    const xAtBeat0 = svgX - NOTE_INK_HALF;
-    const ratio = barW > 0 ? Math.max(0, Math.min(1, (xAtBeat0 - bl[m]) / barW)) : 0;
-    const beatInMeas = Math.round(ratio * bpb);   // 吸附到最近整数拍(0..bpb)
-    const absBeat = (sys.plan.startMeasure + m) * bpb + beatInMeas;
-    callbacks.onSeek(absBeat);
+    // 收集该 system 内所有可 seek 锚点 (x, absBeat):
+    //   ① 每个小节起点(barLine 位置 → 小节首拍)
+    //   ② 每个音符起始位置(treble/bass 的 noteX → 其 startBeat)
+    // 用 noteX(符头真实位置)而非均匀反算,保证点符头精准命中。
+    const anchors: { x: number; beat: number }[] = [];
+    const bl = sys.trebleLayout.barLines;
+    for (let k = 0; k < bl.length; k++) {
+      anchors.push({ x: bl[k], beat: (sys.plan.startMeasure + k) * bpb });
+    }
+    const addNotes = (lay: Layout, piece: Piece) => {
+      const starts = noteStartBeats(piece);
+      const notes = piece.notes;   // 该 system 范围的活跃组音符(treble/bass 由 piece.notes 指向)
+      for (let i = 0; i < lay.noteX.length && i < notes.length; i++) {
+        if (notes[i].midi === null) continue;   // 休止符无符头,跳过
+        // starts 是该 system piece 范围内的局部 beat(从0),sys.beatStart 是 system 起始整曲绝对 beat。
+        anchors.push({ x: lay.noteX[i], beat: sys.beatStart + starts[i] });
+      }
+    };
+    addNotes(sys.trebleLayout, sys.treblePiece);
+    addNotes(sys.bassLayout, sys.bassPiece);
+    // 找离 svgX 最近的锚点。
+    let best = anchors[0];
+    let bestDist = Infinity;
+    for (const a of anchors) {
+      const d = Math.abs(a.x - svgX);
+      if (d < bestDist) { bestDist = d; best = a; }
+    }
+    if (best) callbacks.onSeek(best.beat);
   });
 
   /** beat → 所在 system 索引(整曲绝对 beat 落在哪行)。末行兜底。 */
