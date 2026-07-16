@@ -20,9 +20,9 @@
   border: 1px solid var(--line, #e6e8ec);
   border-radius: var(--radius, 12px);
   box-shadow: 0 8px 28px rgba(16, 24, 40, 0.14), 0 2px 6px rgba(16, 24, 40, 0.06);
-  /* 左右 padding 22px:容纳 A/B 锚点向格子外溢出(~10px)+ 余量,锚点不被 grid overflow 裁。
-   * 所有控件(hint/grid/foot/interval)都在此 padding 内,统一内缩保持相互对齐。 */
-  padding: 14px 22px 12px;
+  /* padding 14px 16px:面板四周留白。锚点溢出空间由 grid 内部 padding(12px)提供,
+   * hint/foot/interval 也加 12px padding 与格子区对齐。 */
+  padding: 14px 16px 12px;
   box-sizing: border-box;
   display: none;
   animation: abDropIn 0.14s ease;
@@ -93,6 +93,7 @@
   font-size: 12px;
   color: var(--muted, #8b919c);
   margin-bottom: 10px;
+  padding: 0 12px;            /* 与 grid 的 padding 对齐(格子区缩进 12px,锚点溢出空间) */
 }
 
 /* ── 小节格网格(4 列,日历式) ────────────────────────────
@@ -103,10 +104,11 @@
  *   .ab-anchor:A/B 圆形锚点,骑在填充条两端(左端 A / 右端 B / 单小节居中 AB)。
  *   .ab-cell.selected:选中格的数字变白(因为压在 accent 填充条上)。
  *   .ab-fill.preview:拖拽/待定时的半透明预览条。 */
-/* 网格滚动容器:限高 + overflow-y:auto。grid 本身 overflow:visible(默认),A/B 锚点半圆
- * 向格子外溢出时不被裁(溢出在面板 padding 22px 内)。fillHost/锚点在 grid 内,随滚动移动。 */
+/* 网格滚动容器:限高 + overflow-y:auto(会隐式裁 x)。不加 padding。
+ * 锚点溢出空间由 grid 的 padding(0 12px)提供:格子区在 grid 内缩进 12px,
+ * 锚点 left=格子 offsetLeft(含 padding),左半圆落在 grid padding 内不被裁。 */
 .ab-grid-scroll {
-  max-height: 300px;           /* 每行 44+6gap≈50px,限制约 6 行可见 */
+  max-height: 300px;
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-width: thin;
@@ -120,6 +122,11 @@
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 6px;
+  /* 左右 padding 12px = 锚点半径余量。格子区(offsetLeft 从 12 开始)在 padding 内,
+   * 锚点 left=格子边缘坐标,左/右半圆落在 padding 区域 → 不被 overflow 裁。
+   * hint/foot 等控件也需对应缩进 12px 保持与格子左右对齐(见各自规则)。 */
+  padding: 0 12px;
+  box-sizing: border-box;
 }
 .ab-cell {
   position: relative;          /* 不设 z-index:避免创建层叠上下文把数字困在 cell 内 */
@@ -217,6 +224,7 @@
   align-items: center;
   justify-content: space-between;
   margin-top: 12px;
+  padding: 0 12px;            /* 与 grid padding 对齐 */
   font-size: 12px;
   color: var(--muted, #8b919c);
 }
@@ -241,7 +249,7 @@
   align-items: center;
   gap: 8px;
   margin-top: 10px;
-  padding-top: 10px;
+  padding: 10px 12px 0;        /* 顶 padding + 左右 12 对齐 grid padding */
   border-top: 1px solid var(--line-2, #eef0f3);
   font-size: 12px;
 }

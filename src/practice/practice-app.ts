@@ -701,6 +701,11 @@ export class PracticeApp {
     this.fallWrap.style.top = top + 'px';
     this.fallWrap.style.height = height + 'px';
     this.waterfall.setBounds({ topY: 0, bottomY: height });
+    // setBounds 改了判定线位置(bottomY),但方块内部 y(onTick 算的)不会自动跟着调。
+    // 重跑一次 onTick 让方块位置匹配新判定线 —— 否则滚动/换行时方块区高度变了,
+    // 方块却停在旧位置(暂停态手动滚谱面尤其明显:判定线动了方块没动,视觉错位)。
+    // 播放态下 player 每帧也调 onTick,这里多一帧无害(同一 beat 幂等)。
+    this.waterfall.onTick(this.currentBeat);
   }
 
   // ── 工具 ──
