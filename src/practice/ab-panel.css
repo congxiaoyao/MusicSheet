@@ -106,7 +106,18 @@
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 6px;
+  /* 小节数多时限制网格高度,内部滚动(absolute 的 fillHost/anchor 相对 grid 定位,
+   * grid 滚动时它们一起滚),避免面板顶到键盘。每行 44px+6gap≈50px,限制约 6 行可见。 */
+  max-height: 300px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line, #e6e8ec) transparent;
+  padding-right: 2px;          /* 滚动条留隙,避免压到末列格子 */
 }
+.ab-grid::-webkit-scrollbar { width: 6px; }
+.ab-grid::-webkit-scrollbar-thumb { background: var(--line, #e6e8ec); border-radius: 3px; }
+.ab-grid::-webkit-scrollbar-track { background: transparent; }
 .ab-cell {
   position: relative;          /* 不设 z-index:避免创建层叠上下文把数字困在 cell 内 */
   height: 44px;
@@ -172,8 +183,8 @@
 .ab-anchor {
   position: absolute;
   transform: translate(-50%, -50%);
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
   border-radius: 50%;
   background: var(--accent, #4f78c9);
   color: #fff;
@@ -186,13 +197,26 @@
   box-shadow: 0 1px 4px rgba(79, 120, 201, 0.28);
   border: 2px solid #fff;       /* 白边让锚点从填充条上浮起 */
   pointer-events: none;         /* 默认(单小节 AB 锚点)不可交互 */
+  transition: transform 0.12s, box-shadow 0.12s;
 }
-/* 带端点标识的 A/B 锚点可拖(改对应端) */
+/* 带端点标识的 A/B 锚点可拖(改对应端):稍大热区 + 明显的 cursor + 双向箭头暗示可调 */
 .ab-anchor[data-end] {
   pointer-events: auto;
   cursor: ew-resize;
+  /* 向外扩热区(透明),触屏更易点中,不改变视觉大小 */
+  box-shadow: 0 1px 4px rgba(79, 120, 201, 0.28), 0 0 0 6px rgba(79, 120, 201, 0);
+}
+.ab-anchor[data-end]::after {
+  content: '';
+  position: absolute;
+  inset: -6px;                  /* 扩大可点击范围(透明),触屏友好 */
 }
 .ab-anchor[data-end]:hover { transform: translate(-50%, -50%) scale(1.15); }
+/* 拖拽进行中(grid.interacting):可拖端点放大 + 强阴影 + 光环,明确提示"在调端点" */
+.ab-grid.interacting .ab-anchor[data-end] {
+  transform: translate(-50%, -50%) scale(1.18);
+  box-shadow: 0 2px 8px rgba(79, 120, 201, 0.4), 0 0 0 5px rgba(79, 120, 201, 0.18);
+}
 
 /* ── 第 3 层:状态条 + 整曲循环 ──────────────────────────── */
 .ab-foot {
