@@ -66,6 +66,54 @@ export function buildAbPanel(initial: AbPanelInitial, cb: AbPanelCallbacks): AbP
    *  (endpoint='a'|'b' 拖哪端,fixedEnd=另一端固定,anchorEl=被拖锚点 DOM,拖拽中跟着指针移)。 */
   let drag: { mode: 'range'; start: number } | { mode: 'endpoint'; endpoint: 'a' | 'b'; fixedEnd: number; anchorEl: HTMLElement } | null = null;
   let dragging = false;
+  /** 拖拽到网格边缘时的自动滚动。lastY = 最近一次 pointermove 的 clientY(滚动循环据此判定方向)。 */
+  let autoScrollRaf = 0;
+  let lastMoveX = 0;
+  let lastMoveY = 0;
+  const AUTO_SCROLL_EDGE = 36;   // 距网格视口顶/底多少 px 内触发自动滚动
+  const AUTO_SCROLL_SPEED = 7;   // 每帧滚动 px
+
+  /** 启动/更新自动滚动循环(拖拽中调用)。指针在网格顶/底边缘内则持续滚动,
+   *  滚动后重算当前格并更新预览(指针不动也要刷新,因为格子随滚动移位了)。 */
+  const runAutoScroll = () => {
+    if (autoScrollRaf) return;   // 已在跑
+    const tick = () => {
+      if (!drag) { autoScrollRaf = 0; return; }
+      const gr = grid.getBoundingClientRect();
+      const distTop = lastMoveY - gr.top;
+      const distBottom = gr.bottom - lastMoveY;
+      let delta = 0;
+      if (distTop < AUTO_SCROLL_EDGE && distTop > -AUTO_SCROLL_EDGE * 2) {
+        delta = -AUTO_SCROLL_SPEED * (1 - Math.max(0, distTop) / AUTO_SCROLL_EDGE);
+      } else if (distBottom < AUTO_SCROLL_EDGE && distBottom > -AUTO_SCROLL_EDGE * 2) {
+        delta = AUTO_SCROLL_SPEED * (1 - Math.max(0, distBottom) / AUTO_SCROLL_EDGE);
+      }
+      if (delta !== 0) {
+        grid.scrollTop += delta;
+        // 滚动后重算当前格 + 更新预览(格子屏幕位置变了)
+        const cur = cellAtPoint(lastMoveX, lastMoveY);
+        if (cur >= 0) {
+          if (drag.mode === 'endpoint') {
+            clearPreview();
+            applyPreview(drag.fixedEnd, cur);
+            const c = cellEls[cur];
+            drag.anchorEl.style.left = (drag.endpoint === 'a' ? c.offsetLeft : c.offsetLeft + c.offsetWidth) + 'px';
+            drag.anchorEl.style.top = (c.offsetTop + c.offsetHeight / 2) + 'px';
+          } else if (dragging) {
+            clearPreview();
+            applyPreview(drag.start, cur);
+          }
+        }
+        autoScrollRaf = requestAnimationFrame(tick);
+      } else {
+        autoScrollRaf = 0;   // 不在边缘,停
+      }
+    };
+    autoScrollRaf = requestAnimationFrame(tick);
+  };
+  const stopAutoScroll = () => {
+    if (autoScrollRaf) { cancelAnimationFrame(autoScrollRaf); autoScrollRaf = 0; }
+  };
 
   // ── 第 1 层:标题 + switch ──
   const head = document.createElement('div');
@@ -332,6 +380,8 @@ export function buildAbPanel(initial: AbPanelInitial, cb: AbPanelCallbacks): AbP
 
   const onPointerMove = (e: PointerEvent) => {
     if (!drag) return;
+    lastMoveX = e.clientX; lastMoveY = e.clientY;   // 记录指针供 autoScroll 用
+    runAutoScroll();   // 指针在网格边缘则启动自动滚动
     if (drag.mode === 'endpoint') {
       // 端点拖拽:固定 fixedEnd,当前指针格作为拖动端,实时预览 + 锚点跟着指针移。
       const cur = cellAtPoint(e.clientX, e.clientY);
@@ -367,6 +417,7 @@ export function buildAbPanel(initial: AbPanelInitial, cb: AbPanelCallbacks): AbP
     if (!drag) return;
     const d = drag;
     drag = null;
+    stopAutoScroll();
     grid.classList.remove('interacting');
     if (d.mode === 'endpoint') {
       // 端点拖拽提交:fixedEnd + 当前格,自动排序。
