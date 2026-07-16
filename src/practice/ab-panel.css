@@ -153,7 +153,7 @@
 /* 填充条容器:绝对定位层(装多段 .ab-fill),铺满 grid,自身无尺寸。z-index 1(格子背景上、数字下)。 */
 .ab-fill-host {
   position: absolute;
-  inset: 0;
+  top: 0; right: 0; bottom: 0; left: 0;
   pointer-events: none;
   z-index: 1;
 }
@@ -205,7 +205,7 @@
 .ab-anchor[data-end]::after {
   content: '';
   position: absolute;
-  inset: -6px;                  /* 扩大可点击范围(透明),触屏友好 */
+  top: -6px; right: -6px; bottom: -6px; left: -6px;   /* 扩大可点击范围(透明),触屏友好 */
 }
 .ab-anchor[data-end]:hover { transform: translate(-50%, -50%) scale(1.15); }
 /* 拖拽进行中(grid.interacting):可拖端点放大 + 强阴影 + 光环,明确提示"在调端点" */

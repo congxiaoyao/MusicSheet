@@ -50,7 +50,7 @@
 .pa-stage::before {
   content: '';
   position: absolute;
-  inset: 0;
+  top: 0; right: 0; bottom: 0; left: 0;
   pointer-events: none;
   z-index: 1;
   box-shadow: inset 0 18px 36px rgba(71, 79, 96, 0.025);
@@ -76,7 +76,7 @@
 /* 浮层:绝对定位覆盖整个 stage,透明 + 不挡谱面点击(键盘区单独放行) */
 .pa-overlay {
   position: absolute;
-  inset: 0;
+  top: 0; right: 0; bottom: 0; left: 0;
   z-index: 20;
   pointer-events: none;
 }
@@ -103,7 +103,7 @@
 }
 .pa-fall > .wf-fall {
   position: absolute;
-  inset: 0;
+  top: 0; right: 0; bottom: 0; left: 0;
   /* wf-fall 自带 height:100%,但这里用 inset 撑满 .pa-fall 更可靠 */
   z-index: 1;
 }

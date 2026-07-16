@@ -165,9 +165,14 @@ export function buildWaterfall(initial: WaterfallInitial, cb: WaterfallCallbacks
     return NAMES[((midi % 12) + 12) % 12] + (Math.floor(midi / 12) - 1);
   }
 
-  /** 判定线 y(相对 wf-fall 容器顶):= bottomY(键盘上沿)。bottomY=0 时用容器高度。 */
+  /** 判定线 y(相对 wf-fall 容器顶):= bottomY(键盘上沿)。bottomY=0 时用容器高度。
+   *  缓存容器高度,只在 setBounds 后首次读取(避免每帧读 clientHeight 触发布局)。 */
+  let cachedFallHeight = 0;
   function hitLineY(): number {
-    return bottomY > 0 ? bottomY : el.clientHeight;
+    if (bottomY > 0) return bottomY;
+    if (cachedFallHeight > 0) return cachedFallHeight;
+    cachedFallHeight = el.clientHeight;
+    return cachedFallHeight;
   }
 
   return {
@@ -180,7 +185,7 @@ export function buildWaterfall(initial: WaterfallInitial, cb: WaterfallCallbacks
         if (!bEl) continue;
         // 左右手过滤。
         if (handFilter !== 'both' && n.hand !== handFilter) {
-          bEl.style.opacity = '0';
+          if (bEl.style.opacity !== '0') bEl.style.opacity = '0';
           continue;
         }
         const dist = n.beat - beat;   // 未来为正,过去为负
@@ -192,7 +197,7 @@ export function buildWaterfall(initial: WaterfallInitial, cb: WaterfallCallbacks
         const visBelow = dist > -Math.max(n.duration, 0.5);   // 至少露 0.5 拍(短音也要看见)
         const vis = dist < VIS_DIST_MAX && visBelow;
         if (!vis) {
-          bEl.style.opacity = '0';
+          if (bEl.style.opacity !== '0') bEl.style.opacity = '0';
           bEl.classList.remove('active');
           continue;
         }
@@ -206,24 +211,33 @@ export function buildWaterfall(initial: WaterfallInitial, cb: WaterfallCallbacks
           const pastRatio = n.duration > 0 ? -dist / n.duration : 1;
           opacity = Math.max(0, 1 - pastRatio);
         }
-        bEl.style.opacity = String(opacity);
-        // 指法映射:cfixed(移调)时把真实 midi 经 highlightMidi 映射到 C 调白键位置。
-        // 与键盘高亮同套映射(各自 import highlightMidi,不互相通信)。
-        const mapped = highlightMidi({ midi: n.midi, duration: 'quarter', dotted: false, accidental: null } as Note, key, fingering);
-        const dispMidi = mapped ?? n.midi;   // 映射失败(休止等)用原值(不会发生,休止已跳过)
-        // 宽度 = 对应键宽(px),left = 键中心(px,居中)。与键盘同套纯函数坐标系。
-        bEl.style.width = noteWidth(dispMidi, range, whiteW) + 'px';
-        // left = 键中心,相对 inner 左缘(inner 与键盘 inner 同款居中,左缘天然对齐)。
-        bEl.style.left = midiToX(dispMidi, range, whiteW) + 'px';
-        bEl.style.height = bh + 'px';
-        bEl.style.top = yTop + 'px';
+        bEl.style.opacity = opacity.toFixed(3);
+        // ── 性能优化:列位置(left/width)和高度(height)每音稳定,只在首次设; ──
+        // 每帧只更新 transform.translateY(垂直掉落)+ opacity,均走 GPU 合成层,不触发 layout。
+        // 原先每帧写 top/left/width/height 触发主线程强制布局,是卡顿主因。
+        // 用 dataset 标记是否已设过列几何;handFilter/midi 不变则跳过。
+        if (bEl.dataset.colset !== '1') {
+          const mapped = highlightMidi({ midi: n.midi, duration: 'quarter', dotted: false, accidental: null } as Note, key, fingering);
+          const dispMidi = mapped ?? n.midi;   // 映射失败(休止等)用原值(不会发生,休止已跳过)
+          // 宽度 = 对应键宽(px),left = 锺中心(px,居中)。与键盘同套纯函数坐标系。
+          bEl.style.width = noteWidth(dispMidi, range, whiteW) + 'px';
+          // left 改为 baseX,叠加进 transform(避免每帧重写触发 layout 的 left)。
+          bEl.style.left = midiToX(dispMidi, range, whiteW) + 'px';
+          bEl.style.height = bh + 'px';
+          bEl.dataset.colset = '1';
+        }
         // 命中(active):与键盘高亮完全同源 —— 音正在响期间(dist<=0 且未超过时值)标 active,
         // 即 [n.beat, n.beat+duration) 区间,与键盘点亮的 [startBeat, startBeat+dur) 逐帧一致。
-        // 旧实现用 |dist|<HIT_WINDOW(对称 ±0.15 拍),在到达前 0.15 拍(约 90ms/5-6 帧)就先亮,
-        // 而键盘要等 dist<=0 才亮 → 视觉上"方块亮了键还没亮/方块还没落到键顶就亮"。
-        // 改为同源区间:① 到达瞬间与键盘同帧触发;② 暂停态 seek 到音中段也正确标 active(键盘亮=方块亮)。
         const active = dist <= 0 && dist > -n.duration;
-        bEl.classList.toggle('active', active);
+        // transform 同时承载水平居中(-50%)、垂直掉落(translateY)、命中缩放(scale)。
+        // 必须内联设:CSS 的 .active transform 会被内联覆盖,故 scale 也并入此表达式。
+        bEl.style.transform =
+          'translateX(-50%) translateY(' + yTop.toFixed(1) + 'px)' + (active ? ' scale(1.04)' : '');
+        if (active) {
+          if (!bEl.classList.contains('active')) bEl.classList.add('active');
+        } else {
+          if (bEl.classList.contains('active')) bEl.classList.remove('active');
+        }
       }
     },
     setNotes(newNotes: FallNote[]) {
@@ -235,7 +249,8 @@ export function buildWaterfall(initial: WaterfallInitial, cb: WaterfallCallbacks
       whiteW = info.whiteW;
       // inner 宽度 = 键盘总宽(白键数×whiteW),与键盘 inner 同宽,两者各自被父容器居中 → 左缘对齐。
       innerEl.style.width = (whiteKeys(range).length * whiteW) + 'px';
-      // 横轴在下次 onTick 重算,无需重建 DOM。
+      // 横轴在下次 onTick 重算,无需重建 DOM。但键宽变了 → 方块的 width/left 缓存失效,重置 colset。
+      for (const b of blockEls) delete b.dataset.colset;
     },
     setFingering(f: Fingering) {
       fingering = f;
@@ -248,6 +263,7 @@ export function buildWaterfall(initial: WaterfallInitial, cb: WaterfallCallbacks
     setBounds(info: { topY: number; bottomY: number }) {
       topY = info.topY;
       bottomY = info.bottomY;
+      cachedFallHeight = 0;   // bottomY 变化,失效缓存
       // 判定线贴 bottomY(键盘上沿)。bottomY 相对容器顶,判定线用绝对定位。
       hitEl.style.bottom = 'auto';
       hitEl.style.top = bottomY + 'px';

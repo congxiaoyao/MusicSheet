@@ -244,7 +244,7 @@ html, body {
 /* ── 整曲预览弹窗 ── */
 .fs-modal-overlay {
   position: fixed;
-  inset: 0;
+  top: 0; right: 0; bottom: 0; left: 0;
   background: rgba(15, 23, 42, 0);
   display: flex;
   align-items: flex-start;
@@ -596,7 +596,7 @@ html, body {
 /* 播放头覆盖层:覆盖整个 svgHost(含 padding),内部 .pb-playhead 按百分比定位 */
 .playhead-layer {
   position: absolute;
-  inset: 0;            /* 覆盖 svgHost padding box */
+  top: 0; right: 0; bottom: 0; left: 0;            /* 覆盖 svgHost padding box */
   pointer-events: none;
   overflow: hidden;
 }
@@ -1214,7 +1214,7 @@ html, body {
 .app.drag-over::after {
   content: '松开导入乐谱（.msheet）';
   position: absolute;
-  inset: 0;
+  top: 0; right: 0; bottom: 0; left: 0;
   display: flex;
   align-items: center;
   justify-content: center;

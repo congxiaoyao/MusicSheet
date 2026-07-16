@@ -200,7 +200,7 @@
 .sc-thumb.empty::after {
   content: '空曲谱';
   position: absolute;
-  inset: 0;
+  top: 0; right: 0; bottom: 0; left: 0;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -211,7 +211,7 @@
 .sc-thumb.loading::after {
   content: '加载中…';
   position: absolute;
-  inset: 0;
+  top: 0; right: 0; bottom: 0; left: 0;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -448,7 +448,7 @@
  * hidden 时彻底不渲染。 */
 .practice-host {
   position: fixed;
-  inset: 0;
+  top: 0; right: 0; bottom: 0; left: 0;
   z-index: 100;
   background: var(--card, #fff);
 }

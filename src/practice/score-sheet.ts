@@ -72,6 +72,8 @@ export interface ScoreSheetHandle {
    *  用纯几何(sys.yTop+sys.height)×scale + SVG 屏幕偏移,不用 getBBox(text 虚高)。
    *  返回 null 表示无当前行/未渲染。 */
   currentLineBottomScreenY(): number | null;
+  /** 失效内部几何缓存(scale/svg 偏移)。滚动/resize/重渲染后调用,避免播放头/行底位置算错。 */
+  invalidateGeometry(): void;
   /** 设置 AB 选区(sel=null 隐藏遮罩与标记)。
    *  选区外小节加 .active(CSS 仅 .current 行显示压暗);A/B 标记画在首末小节边界。 */
   setAbRange(sel: { startMeasure: number; endMeasure: number } | null): void;
@@ -861,6 +863,31 @@ export function buildScoreSheet(
   // AB 选区缓存(setAbRange 设;render 后需重应用,因 innerHTML 重建丢失 .active + 标记)。
   let abSelection: { startMeasure: number; endMeasure: number } | null = null;
 
+  // ── 几何缓存(性能优化)──
+  // updatePlayhead / currentLineBottomScreenY 原先每帧调 getBoundingClientRect(svgEl/sheetEl),
+  // 在数千节点的 SVG 上触发强制同步布局,是 layout thrashing 的主因。
+  // 这些几何值只在谱面尺寸变化时才改 → 缓存,scale 不变时直接复用。
+  // 失效时机:render 后 / resize / 滚动不影响(我们要的是 svg 在 sheet 内的相对位置 + scale)。
+  type Geo = { scale: number; svgLeftInSheet: number; svgTopInSheet: number; svgTop: number };
+  let geoCache: Geo | null = null;
+  const invalidateGeo = (): void => { geoCache = null; };
+  /** 读取(必要时计算)svg/sheet 的几何。布局稳定时整曲播放期间只算一次。 */
+  const getGeo = (): Geo | null => {
+    if (geoCache) return geoCache;
+    const svgEl = sheetEl.querySelector('svg');
+    if (!svgEl || !renderCache) return null;
+    const svgRect = svgEl.getBoundingClientRect();
+    const sheetRect = sheetEl.getBoundingClientRect();
+    const scale = renderCache.width > 0 ? svgRect.width / renderCache.width : 1;
+    geoCache = {
+      scale,
+      svgLeftInSheet: svgRect.left - sheetRect.left,
+      svgTopInSheet: svgRect.top - sheetRect.top,
+      svgTop: svgRect.top,
+    };
+    return geoCache;
+  };
+
   /** 造一个 AB 边界标记:实心 accent 圆 + 白边 + 白字,贴在 (x, y)(行五线顶 staffTopY)。
    *  样式与 ab-panel 面板锚点统一(accent 实心 + 白边)。阴影由 CSS filter(drop-shadow)加,
    *  让标记从谱面上浮起。A 在小节起始线右侧,B 在小节终止线左侧。 */
@@ -946,6 +973,7 @@ export function buildScoreSheet(
   const render = () => {
     const width = Math.min(1200, Math.max(640, el.clientWidth || 940));
     renderCache = renderScore(score, width, mode, density);
+    invalidateGeo();   // 重渲染后 SVG 重建,几何缓存失效
     sheetEl.innerHTML = renderCache.svg;
     const svgEl = sheetEl.querySelector('svg');
     if (svgEl) {
@@ -1167,13 +1195,11 @@ export function buildScoreSheet(
     if (!renderCache) return;
     const sys = renderCache.systems[sysIdx];
     if (!sys) { playheadEl.style.display = 'none'; return; }
-    const svgEl = sheetEl.querySelector('svg');
-    if (!svgEl) return;
-    const svgRect = svgEl.getBoundingClientRect();
-    const sheetRect = sheetEl.getBoundingClientRect();
-    const scale = renderCache.width > 0 ? svgRect.width / renderCache.width : 1;
-    const svgLeftInSheet = svgRect.left - sheetRect.left;
-    const svgTopInSheet = svgRect.top - sheetRect.top;
+    const geo = getGeo();
+    if (!geo) return;
+    const scale = geo.scale;
+    const svgLeftInSheet = geo.svgLeftInSheet;
+    const svgTopInSheet = geo.svgTopInSheet;
     const tLay = sys.trebleLayout;
     const bLay = sys.bassLayout;
     // 合并 onset:遍历两组所有音符的 startBeat,找"最近一个 ≤ beatInLine"的 onset。
@@ -1312,13 +1338,15 @@ export function buildScoreSheet(
       if (!renderCache) return null;
       if (lastSysIdx < 0 || lastSysIdx >= renderCache.systems.length) return null;
       const sys = renderCache.systems[lastSysIdx];
-      const svgEl = sheetEl.querySelector('svg');
-      if (!svgEl) return null;
-      const svgRect = svgEl.getBoundingClientRect();
-      const scale = renderCache.width > 0 ? svgRect.width / renderCache.width : 1;
+      const geo = getGeo();
+      if (!geo) return null;
       // 当前行底部 SVG 内 y = sys.yTop + sys.height → 屏幕 y。
-      return svgRect.top + (sys.yTop + sys.height) * scale;
+      // svgTop 来自缓存,但滚动时调用方(updateBounds→scroll 监听)会先 invalidateGeo(),
+      // 保证滚动期间 svgTop 实时更新;无滚动时复用缓存避免每帧 gBCR。
+      return geo.svgTop + (sys.yTop + sys.height) * geo.scale;
     },
+    /** 失效几何缓存(滚动/resize/重渲染后调用,让下次 getGeo 重算)。 */
+    invalidateGeometry() { invalidateGeo(); },
     setAbRange(sel) {
       abSelection = sel;
       applyAbVisual();
