@@ -20,12 +20,12 @@
   border: 1px solid var(--line, #e6e8ec);
   border-radius: var(--radius, 12px);
   box-shadow: 0 8px 28px rgba(16, 24, 40, 0.14), 0 2px 6px rgba(16, 24, 40, 0.06);
-  /* padding 14px 16px:面板四周留白。锚点溢出空间由 grid 内部 padding(12px)提供,
-   * hint/foot/interval 也加 12px padding 与格子区对齐。 */
-  padding: 14px 16px 12px;
+  /* 不加 padding:所有子元素顶到卡片边缘,最大化内部空间。元素间距由各自 margin 控制,
+   * 内容左右留白由各自 padding 控制。这样 gridScroll 可顶满卡片宽度,锚点溢出空间充足。 */
   box-sizing: border-box;
   display: none;
   animation: abDropIn 0.14s ease;
+  overflow: hidden;            /* 圆角裁切子元素(顶边的 gridScroll 等) */
 }
 .ab-panel.open { display: block; }
 
@@ -39,7 +39,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 12px;
+  padding: 14px 16px 12px;    /* 顶到卡片边,用 padding 留内容留白 */
 }
 .ab-head .ab-title {
   font-size: 13px;
@@ -83,6 +83,7 @@
   align-items: center;
   justify-content: center;
   min-height: 92px;
+  padding: 0 16px 14px;        /* 顶到卡片边,内容留白 */
   font-size: 12px;
   color: var(--muted, #8b919c);
   text-align: center;
@@ -92,8 +93,7 @@
 .ab-hint {
   font-size: 12px;
   color: var(--muted, #8b919c);
-  margin-bottom: 10px;
-  padding: 0 12px;            /* 与 grid 的 padding 对齐(格子区缩进 12px,锚点溢出空间) */
+  padding: 0 16px 10px;       /* 内容左右留白 + 下方间距 */
 }
 
 /* ── 小节格网格(4 列,日历式) ────────────────────────────
@@ -122,10 +122,9 @@
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 6px;
-  /* 左右 padding 12px = 锚点半径余量。格子区(offsetLeft 从 12 开始)在 padding 内,
-   * 锚点 left=格子边缘坐标,左/右半圆落在 padding 区域 → 不被 overflow 裁。
-   * hint/foot 等控件也需对应缩进 12px 保持与格子左右对齐(见各自规则)。 */
-  padding: 0 12px;
+  /* 左右 padding 16px:与其他控件(head/hint/foot/interval)的内容留白一致(都对齐到 +16),
+   * 同时给 A/B 锚点半圆溢出留空间(锚点 left=格子边缘,半圆落在 padding 内不被裁)。 */
+  padding: 0 16px;
   box-sizing: border-box;
 }
 .ab-cell {
@@ -223,8 +222,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-top: 12px;
-  padding: 0 12px;            /* 与 grid padding 对齐 */
+  padding: 12px 16px 0;       /* 顶到卡片边,内容留白 + 上方间距 */
   font-size: 12px;
   color: var(--muted, #8b919c);
 }
@@ -248,8 +246,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-top: 10px;
-  padding: 10px 12px 0;        /* 顶 padding + 左右 12 对齐 grid padding */
+  padding: 10px 16px 12px;     /* 顶到卡片边,内容留白 + 下方收尾间距 */
   border-top: 1px solid var(--line-2, #eef0f3);
   font-size: 12px;
 }
