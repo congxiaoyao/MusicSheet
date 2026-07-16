@@ -108,15 +108,14 @@
   gap: 6px;
   /* 小节数多时限制网格高度,内部滚动(absolute 的 fillHost/anchor 相对 grid 定位,
    * grid 滚动时它们一起滚),避免面板顶到键盘。每行 44px+6gap≈50px,限制约 6 行可见。
-   * 左右 padding 给 A/B 锚点留空间(锚点向格子外偏 ~10px,overflow 会裁掉),
-   * 上下 padding 同理(首/末行锚点垂直不溢出,但留对称呼吸感)。 */
+   * 不加左右 padding:锚点放在格子内缘(不向格外溢出),避免与面板其他控件左右不对齐。 */
   max-height: 300px;
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
   overscroll-behavior: contain;
   scrollbar-width: thin;
   scrollbar-color: var(--line, #e6e8ec) transparent;
-  padding: 2px 12px;
-  box-sizing: border-box;
+  padding-right: 2px;          /* 滚动条留隙 */
 }
 .ab-grid::-webkit-scrollbar { width: 6px; }
 .ab-grid::-webkit-scrollbar-thumb { background: var(--line, #e6e8ec); border-radius: 3px; }

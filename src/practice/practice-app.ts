@@ -536,6 +536,8 @@ export class PracticeApp {
     this.clearAbPauseTimer();
     this.applyAbSelection(sel);
     saveAbState(this.score.meta.id, { selection: this.abSelection, on: this.abOn, intervalBeats: this.abIntervalBeats });
+    // 同步面板显示(面板发起时是幂等的;外部/记忆恢复设置时确保面板跟上)。
+    this.controls.setAbState({ on: this.abOn, selection: this.abSelection });
     if (this.abOn && this.abSelection) {
       const a = this.abSelection.startMeasure * this.bpb;
       this.player.seek(a, this.player.isPlaying());

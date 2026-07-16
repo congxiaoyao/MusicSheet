@@ -55,6 +55,9 @@ export interface AbPanelHandle {
 
 /** 判定单次 down→up 是否算"拖动"(位移阈值,px)。超过按拖选,否则按点击。 */
 const DRAG_THRESHOLD = 4;
+/** A/B 锚点半径(px,与 CSS .ab-anchor width:20px 对应)。锚点中心放在格子内缘此距离处,
+ *  让锚点整个落在格内,不向格子外溢出(避免被 grid overflow 裁切,也无需 padding)。 */
+const ANCHOR_R = 10;
 
 export function buildAbPanel(initial: AbPanelInitial, cb: AbPanelCallbacks): AbPanelHandle {
   const el = document.createElement('div');
@@ -308,9 +311,11 @@ export function buildAbPanel(initial: AbPanelInitial, cb: AbPanelCallbacks): AbP
         a.style.top = (c.offsetTop + c.offsetHeight / 2) + 'px';
         grid.appendChild(a);
       } else {
+        // A/B 锚点中心放在格子内缘(A 贴首段左缘内侧、B 贴末段右缘内侧),
+        // 不向格子外溢出 → 不需 grid padding,不与面板其他控件错位。
         const firstSeg = segs[0], lastSeg = segs[segs.length - 1];
-        mkAnchor('A', 'a', firstSeg.left, firstSeg.top + firstSeg.height / 2);
-        mkAnchor('B', 'b', lastSeg.left + lastSeg.width, lastSeg.top + lastSeg.height / 2);
+        mkAnchor('A', 'a', firstSeg.left + ANCHOR_R, firstSeg.top + firstSeg.height / 2);
+        mkAnchor('B', 'b', lastSeg.left + lastSeg.width - ANCHOR_R, lastSeg.top + lastSeg.height / 2);
       }
       // 状态文字
       const count = sel.endMeasure - sel.startMeasure + 1;
@@ -354,22 +359,26 @@ export function buildAbPanel(initial: AbPanelInitial, cb: AbPanelCallbacks): AbP
   };
 
   /** 更新被拖端点锚点的位置 + 标签(端点拖拽中调用)。
-   *  交叉(cur 越过 fixedEnd)时两个锚点标签翻转:被拖锚点变另一端,固定锚点变被拖端原标签。
-   *  始终保持"左 A 右 B"。松手 applySelection 按 min/max 重渲染归位。 */
+   *  交叉(cur 越过 fixedEnd)时两个锚点的标签 + 位置都翻转:被拖锚点移到 cur 对应内缘并变标签,
+   *  固定锚点在 fixedEnd 格子翻转到对应内缘。始终保持"左 A 右 B"。
+   *  锚点中心放格子内缘(不溢出)。松手 applySelection 按 min/max 归位。 */
   const updateDraggingAnchor = (cur: number) => {
     if (!drag || drag.mode !== 'endpoint') return;
     const crossed = drag.endpoint === 'a' ? cur > drag.fixedEnd : cur < drag.fixedEnd;
-    // 被拖锚点当前应显示的端标签
+    // 被拖锚点:标签 + 位置(贴 cur 格子对应内缘)
     const dragEnd = crossed ? (drag.endpoint === 'a' ? 'b' : 'a') : drag.endpoint;
     drag.anchorEl.dataset.end = dragEnd;
     drag.anchorEl.textContent = dragEnd.toUpperCase();
-    const c = cellEls[cur];
-    drag.anchorEl.style.left = (dragEnd === 'a' ? c.offsetLeft : c.offsetLeft + c.offsetWidth) + 'px';
-    drag.anchorEl.style.top = (c.offsetTop + c.offsetHeight / 2) + 'px';
-    // 固定端锚点:交叉时翻转为被拖端原标签,否则恢复其原标签
-    const fixedEnd = crossed ? drag.endpoint : (drag.endpoint === 'a' ? 'b' : 'a');
-    drag.fixedAnchorEl.dataset.end = fixedEnd;
-    drag.fixedAnchorEl.textContent = fixedEnd.toUpperCase();
+    const cCur = cellEls[cur];
+    drag.anchorEl.style.left = (dragEnd === 'a' ? cCur.offsetLeft + ANCHOR_R : cCur.offsetLeft + cCur.offsetWidth - ANCHOR_R) + 'px';
+    drag.anchorEl.style.top = (cCur.offsetTop + cCur.offsetHeight / 2) + 'px';
+    // 固定锚点:标签翻转 + 位置贴 fixedEnd 格子对应内缘(交叉时内缘侧也变)
+    const fixedLabel = crossed ? drag.endpoint : (drag.endpoint === 'a' ? 'b' : 'a');
+    drag.fixedAnchorEl.dataset.end = fixedLabel;
+    drag.fixedAnchorEl.textContent = fixedLabel.toUpperCase();
+    const cFix = cellEls[drag.fixedEnd];
+    drag.fixedAnchorEl.style.left = (fixedLabel === 'a' ? cFix.offsetLeft + ANCHOR_R : cFix.offsetLeft + cFix.offsetWidth - ANCHOR_R) + 'px';
+    drag.fixedAnchorEl.style.top = (cFix.offsetTop + cFix.offsetHeight / 2) + 'px';
   };
 
   const onPointerDown = (e: PointerEvent) => {
