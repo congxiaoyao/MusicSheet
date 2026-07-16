@@ -68,7 +68,7 @@ export function buildAbPanel(initial: AbPanelInitial, cb: AbPanelCallbacks): AbP
    *  lastCell=最后一次有效预览格)。 */
   let drag:
     | { mode: 'range'; start: number; lastCell: number }
-    | { mode: 'endpoint'; endpoint: 'a' | 'b'; fixedEnd: number; anchorEl: HTMLElement; fixedAnchorEl: HTMLElement; lastCell: number }
+    | { mode: 'endpoint'; endpoint: 'a' | 'b'; fixedEnd: number; origEnd: number; anchorEl: HTMLElement; fixedAnchorEl: HTMLElement; lastCell: number }
     | null = null;
   let dragging = false;
   /** 拖拽到网格边缘时的自动滚动。lastY = 最近一次 pointermove 的 clientY(滚动循环据此判定方向)。 */
@@ -393,9 +393,10 @@ export function buildAbPanel(initial: AbPanelInitial, cb: AbPanelCallbacks): AbP
       e.stopPropagation();
       const end = anchorEl.dataset.end as 'a' | 'b';
       const fixedEnd = end === 'a' ? selection.endMeasure : selection.startMeasure;
+      const origEnd = end === 'a' ? selection.startMeasure : selection.endMeasure;   // 被拖端原位置(未拖动判定用)
       // 记录两个锚点(被拖的 + 固定端的),交叉时翻转标签用。
       const fixedAnchorEl = grid.querySelector(`.ab-anchor[data-end="${end === 'a' ? 'b' : 'a'}"]`) as HTMLElement;
-      drag = { mode: 'endpoint', endpoint: end, fixedEnd, anchorEl, fixedAnchorEl, lastCell: fixedEnd };
+      drag = { mode: 'endpoint', endpoint: end, fixedEnd, origEnd, anchorEl, fixedAnchorEl, lastCell: origEnd };
       dragging = true;   // 端点拖拽无"点击"语义,直接进入拖拽
       grid.classList.add('interacting');
       return;
@@ -453,6 +454,11 @@ export function buildAbPanel(initial: AbPanelInitial, cb: AbPanelCallbacks): AbP
       const cur = cellAtPoint(e.clientX, e.clientY);
       const movingEnd = cur >= 0 ? cur : d.lastCell;
       clearPreview();
+      // 纯点击锚点(没拖动,movingEnd===origEnd):保持原选区不变,不改任何东西。
+      if (movingEnd === d.origEnd) {
+        applySelection(selection);
+        return;
+      }
       const lo = Math.min(d.fixedEnd, movingEnd), hi = Math.max(d.fixedEnd, movingEnd);
       const sel: AbSelection = { startMeasure: lo, endMeasure: hi };
       applySelection(sel);
