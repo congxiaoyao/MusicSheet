@@ -111,12 +111,9 @@
   max-height: 300px;
   overflow-y: auto;
   overscroll-behavior: contain;
-  scrollbar-width: thin;
-  scrollbar-color: var(--line, #e6e8ec) transparent;
+  scrollbar-width: none;       /* Firefox:隐藏滚动条 */
 }
-.ab-grid-scroll::-webkit-scrollbar { width: 6px; }
-.ab-grid-scroll::-webkit-scrollbar-thumb { background: var(--line, #e6e8ec); border-radius: 3px; }
-.ab-grid-scroll::-webkit-scrollbar-track { background: transparent; }
+.ab-grid-scroll::-webkit-scrollbar { display: none; }   /* Chrome/Safari:隐藏 */
 .ab-grid {
   position: relative;          /* 填充条/锚点 absolute 定位的上下文 */
   display: grid;
