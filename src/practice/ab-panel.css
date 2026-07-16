@@ -20,7 +20,9 @@
   border: 1px solid var(--line, #e6e8ec);
   border-radius: var(--radius, 12px);
   box-shadow: 0 8px 28px rgba(16, 24, 40, 0.14), 0 2px 6px rgba(16, 24, 40, 0.06);
-  padding: 14px 16px 12px;
+  /* 左右 padding 22px:容纳 A/B 锚点向格子外溢出(~10px)+ 余量,锚点不被 grid overflow 裁。
+   * 所有控件(hint/grid/foot/interval)都在此 padding 内,统一内缩保持相互对齐。 */
+  padding: 14px 22px 12px;
   box-sizing: border-box;
   display: none;
   animation: abDropIn 0.14s ease;
@@ -101,25 +103,24 @@
  *   .ab-anchor:A/B 圆形锚点,骑在填充条两端(左端 A / 右端 B / 单小节居中 AB)。
  *   .ab-cell.selected:选中格的数字变白(因为压在 accent 填充条上)。
  *   .ab-fill.preview:拖拽/待定时的半透明预览条。 */
+/* 网格滚动容器:限高 + overflow-y:auto。grid 本身 overflow:visible(默认),A/B 锚点半圆
+ * 向格子外溢出时不被裁(溢出在面板 padding 22px 内)。fillHost/锚点在 grid 内,随滚动移动。 */
+.ab-grid-scroll {
+  max-height: 300px;           /* 每行 44+6gap≈50px,限制约 6 行可见 */
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line, #e6e8ec) transparent;
+}
+.ab-grid-scroll::-webkit-scrollbar { width: 6px; }
+.ab-grid-scroll::-webkit-scrollbar-thumb { background: var(--line, #e6e8ec); border-radius: 3px; }
+.ab-grid-scroll::-webkit-scrollbar-track { background: transparent; }
 .ab-grid {
   position: relative;          /* 填充条/锚点 absolute 定位的上下文 */
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 6px;
-  /* 小节数多时限制网格高度,内部滚动(absolute 的 fillHost/anchor 相对 grid 定位,
-   * grid 滚动时它们一起滚),避免面板顶到键盘。每行 44px+6gap≈50px,限制约 6 行可见。
-   * 不加左右 padding:锚点放在格子内缘(不向格外溢出),避免与面板其他控件左右不对齐。 */
-  max-height: 300px;
-  overflow-y: auto;
-  overflow-x: hidden;
-  overscroll-behavior: contain;
-  scrollbar-width: thin;
-  scrollbar-color: var(--line, #e6e8ec) transparent;
-  padding-right: 2px;          /* 滚动条留隙 */
 }
-.ab-grid::-webkit-scrollbar { width: 6px; }
-.ab-grid::-webkit-scrollbar-thumb { background: var(--line, #e6e8ec); border-radius: 3px; }
-.ab-grid::-webkit-scrollbar-track { background: transparent; }
 .ab-cell {
   position: relative;          /* 不设 z-index:避免创建层叠上下文把数字困在 cell 内 */
   height: 44px;
