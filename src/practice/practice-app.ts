@@ -170,8 +170,6 @@ export class PracticeApp {
   private fallWrap!: HTMLElement;
   /** 上一帧的方块区行底(overlay 内 y),用于检测换行突跳(实时值突增)时沿用,实现平滑跟随。 */
   private lastFrameLineBottom: number | null = null;
-  /** 监听键盘/overlay 尺寸变化(mount 后布局漂移、宽度/高度调整),变了就 updateBounds。 */
-  private boundsObserver!: ResizeObserver;
   private destroyed = false;
   /** (已废弃,保留 mount 注释引用) */
   /** 调试日志收集器(见 docs/调试日志收集器.md)。 */
@@ -314,16 +312,6 @@ export class PracticeApp {
     this.boundResize = () => this.updateBounds();
     window.addEventListener('resize', this.boundResize);
 
-    // ── 键盘/方块区尺寸变化监听(ResizeObserver)──
-    // mount 后键盘 height、谱面宽度等会延迟漂移(实测 kbTopInO 在 mount 后 200ms 内漂移 7px),
-    // 但第一行不滚动 → 无 scroll 事件 → 不触发 updateBounds → 方块区底停在早期错位值,
-    // 整个第一行保持方块区底与键盘顶错位。ResizeObserver 监听尺寸变化,变了就重算,
-    // 覆盖 mount 后漂移 / 谱面宽度调整 / 键盘高度调整等(window resize 捕获不到这些)。
-    // keyboard 在 constructor 已创建,observe 它;overlay(fallWrap.parentElement)在 mount 才创建,
-    // 故在 mount 里补 observe(这里 fallWrap 还未赋值,不能访问 .parentElement)。
-    this.boundsObserver = new ResizeObserver(() => this.updateBounds());
-    this.boundsObserver.observe(this.keyboard.el);
-
     // ── 谱面滚动监听(换行时方块区上边界跟随谱面平滑滚动) ──
     // score-sheet 换行走 scrollEl.scrollTo({behavior:'smooth'}),滚动期间当前行底连续变化。
     // 监听 scroll 事件实时算当前可见行底 → 设方块区 top,使方块区上边界与谱面滚动天然同步,
@@ -355,8 +343,6 @@ export class PracticeApp {
     overlay.appendChild(this.keyboard.el);
     this.keyboard.el.appendChild(this.hitEl);
     stage.appendChild(overlay);
-    // overlay(stage)已创建,补 observe(构造时 fallWrap 还没赋值,observe 不了它)。
-    this.boundsObserver.observe(overlay);
 
     this.root.innerHTML = '';
     // root 作为 flex column 容器撑满父(practiceHost fixed inset:0 / harness #root 100vh):
@@ -367,16 +353,14 @@ export class PracticeApp {
 
     // 布局完成后:先 onTick(0) 触发 score-sheet 首行 onLineLayout(更新 currentLineBottomY),
     // 再 updateBounds(按真实行底设方块区位置),避免方块区先在 top=0 闪一帧。
+    // 注:入场动画必须是纯 opacity(无 transform),否则 getBoundingClientRect 返回位移中坐标,
+    // updateBounds 读到动画中间态键盘顶 → 方块区错位(见 .practice-enter 注释)。
     requestAnimationFrame(() => {
       this.scoreSheet.onTick(0);
       this.updateBounds();
       // AB 视觉初始刷新(记忆恢复的选区 → 谱面遮罩 + A/B 标记)。
       this.updateAbVisual();
     });
-    // 布局延迟漂移兜底:键盘顶位置在 mount 后 ~200ms 内会漂移(谱面/键盘延迟布局),
-    // 单次 rAF 不够(那时还没稳定)→ 方块区底停在早期错位值,初始未播放态可见错位。
-    // 播放后 onTick 每帧 updateBounds 会修正,但进页到按播放之间需兜底:延迟再刷几次。
-    setTimeout(() => { if (!this.destroyed) this.updateBounds(); }, 250);
 
     // ── Space 播放/暂停(练琴页专属 keydown)──
     // 可见性守卫用 root.hidden:返回编辑器时 App 给 practiceHost 设 hidden 属性
@@ -418,10 +402,6 @@ export class PracticeApp {
    *  避免当帧冻结在 B、下一帧才恢复的跳变。 */
   private dispatchFrame(beat: number): void {
     this.currentBeat = beat;
-    // 每帧重算方块区位置:键盘顶位置可能因布局漂移(mount 后谱面/键盘延迟布局)而变化,
-    // 但第一行不滚动 → 无 scroll 事件 → 不触发 updateBounds → 方块区底与键盘顶错位。
-    // onTick 每帧都跑,顺带 updateBounds 捕获位置漂移(ResizeObserver 只监听尺寸不监听位置,不够)。
-    this.updateBounds();
     this.scoreSheet.onTick(beat);
     this.waterfall.onTick(beat);
     const active = computeActiveMidis(beat, this.staffs, this.handFilter);
@@ -759,7 +739,6 @@ export class PracticeApp {
     this.clearAbPauseTimer();
     this.player.dispose();
     window.removeEventListener('resize', this.boundResize);
-    this.boundsObserver?.disconnect();
     window.removeEventListener('keydown', this.boundKeyDown);
     const scrollEl = this.scoreSheet.el.querySelector('.score-sheet-scroll');
     if (scrollEl) scrollEl.removeEventListener('scroll', this.boundScroll);

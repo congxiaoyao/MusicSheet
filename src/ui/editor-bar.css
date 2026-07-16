@@ -139,13 +139,16 @@
   to { opacity: 1; transform: translateY(0); }
 }
 
-/* 练琴页入场动画(从编辑器切到练琴页时;练琴页是 fixed 覆盖式全屏,用轻微上滑+缩放更自然) */
+/* 练琴页入场动画(从编辑器切到练琴页时)。
+ * 只用 opacity fade,不用 transform —— transform 会让 getBoundingClientRect 返回位移中的
+ * 坐标,mount 时 updateBounds 读到动画中间态的键盘顶,动画结束后归位但 updateBounds 不重跑
+ * → 方块区底与键盘顶错位(整个第一行保持,直到换行)。纯 opacity 不影响布局坐标。 */
 .practice-enter {
   animation: practiceEnter 0.22s var(--ease-out-cubic, cubic-bezier(0.33,1,0.68,1));
 }
 @keyframes practiceEnter {
-  from { opacity: 0; transform: translateY(12px) scale(0.99); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 /* 编辑卡片顶部工具条:左侧范围提示(常驻) + 右侧编辑动作(退格/清空) 或 预览 radio。
