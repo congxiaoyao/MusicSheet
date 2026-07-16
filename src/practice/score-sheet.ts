@@ -45,8 +45,11 @@ export interface ScoreSheetInitial {
 
   /** 当前行底部位置变化时通知(供瀑布流组件算方块区上边界);点击谱面跳转。 */
 export interface ScoreSheetCallbacks {
-  /** 当前行底部位置变化时通知。瀑布流组件据此算方块区上边界。 */
-  onLineLayout?: (info: { lineBottomY: number; linePx: number }) => void;
+  /** 当前行底部位置变化时通知。瀑布流组件据此算方块区上边界。
+   *  lineBottomOverlayY:换行 smooth scroll 【完成后】行底在 overlay 内的 y(= 固定 lineBottomY - targetScrollTop)。
+   *    换行瞬间 currentLineBottomScreenY 返回的是新行当前(未滚动)屏幕 y(在视口下方,值很大),
+   *    会让方块区塌陷;改用此目标值,换行瞬间方块区直接到正确新位置,不等 smooth scroll 完成。 */
+  onLineLayout?: (info: { lineBottomY: number; lineBottomOverlayY: number; linePx: number }) => void;
   /** 点击谱面任意位置 → 跳转到该处的 beat(拍粒度:小节内按 x 比例线性反算拍位,
    *  点哪跳哪,可命中半拍/连音等非音符起点)。beat 为整曲绝对 beat。 */
   onSeek?: (beat: number) => void;
@@ -1093,22 +1096,30 @@ export function buildScoreSheet(
    *
    *  换算:用 SVG 在 scrollEl 内容坐标内的真实位置 + scale 把 staffTopY(SVG 内 y) 转成 scrollTop。
    *  scale 用 svgRect 高度 / viewBox 高(height:auto 下 scaleX=scaleY)。 */
-  const scrollToSystem = (sysIdx: number) => {
-    if (!renderCache) return;
+  /** 算"把 sysIdx 行五线顶线滚到视口 CURRENT_TOP_PAD 处"所需的目标 scrollTop。
+   *  返回 { targetTop, scale }(需 rAF 后调用,保证几何已 reflow)。供 scrollToSystem 与
+   *  notifyLineLayout 共用——后者据此算"滚动完成后行底的 overlay y",换行时直接给方块区
+   *  正确的目标位置,避免用未完成的 smooth scroll 中间态屏幕坐标导致方块区塌陷。 */
+  const computeScrollTarget = (sysIdx: number): { targetTop: number; scale: number } | null => {
+    if (!renderCache) return null;
     const sys = renderCache.systems[sysIdx];
-    if (!sys) return;
+    if (!sys) return null;
+    const svgEl = sheetEl.querySelector('svg');
+    if (!svgEl) return null;
+    const svgRect = svgEl.getBoundingClientRect();
+    const scale = renderCache.height > 0 ? svgRect.height / renderCache.height : 1;
+    const svgTopInContent = svgRect.top - scrollEl.getBoundingClientRect().top + scrollEl.scrollTop;
+    const targetTop = Math.max(0, svgTopInContent + sys.staffTopY * scale - CURRENT_TOP_PAD);
+    return { targetTop, scale };
+  };
+
+  const scrollToSystem = (sysIdx: number) => {
     // 用 rAF 延迟读取几何:render()/setScore/setMode/setDensity 刚 innerHTML 重建 SVG,
     // 浏览器尚未 reflow,getBoundingClientRect 拿到旧布局 → scrollTop 算错(宽度变化后定位偏)。
     // 推迟到下一帧(已 reflow)再读 svgRect,所有调用路径(onTick/seek/重渲染恢复)统一正确。
     requestAnimationFrame(() => {
-      if (!renderCache) return;   // rAF 回调时可能已 destroy/重渲染
-      const svgEl = sheetEl.querySelector('svg');
-      if (!svgEl) return;
-      const svgRect = svgEl.getBoundingClientRect();
-      const scale = renderCache.height > 0 ? svgRect.height / renderCache.height : 1;
-      const svgTopInContent = svgRect.top - scrollEl.getBoundingClientRect().top + scrollEl.scrollTop;
-      const targetTop = svgTopInContent + sys.staffTopY * scale - CURRENT_TOP_PAD;
-      scrollEl.scrollTo({ top: Math.max(0, targetTop), behavior: 'smooth' });
+      const t = computeScrollTarget(sysIdx);
+      if (t) scrollEl.scrollTo({ top: t.targetTop, behavior: 'smooth' });
     });
   };
 
@@ -1218,7 +1229,12 @@ export function buildScoreSheet(
       // SVG 在 sheetEl 内的固定顶部偏移 = paddingTop(JS 动态设),不含滚动偏移。
       const paddingTop = parseFloat(getComputedStyle(sheetEl).paddingTop) || 0;
       const lineBottomY = paddingTop + (sys.yTop + sys.height) * scale;
-      cb({ lineBottomY, linePx: sys.height * scale });
+      // 滚动完成后行底在 overlay 内的 y = 固定 lineBottomY - 目标 scrollTop。
+      // overlay 顶 = scrollEl 视口顶(都贴 stage 顶),故 overlay 内 y = 视口内 y = 内容 y - scrollTop。
+      // 换行瞬间用此目标值(而非未完成 smooth scroll 的中间态屏幕 y),方块区直接到正确新位置。
+      const t = computeScrollTarget(sysIdx);
+      const lineBottomOverlayY = t ? Math.max(0, lineBottomY - t.targetTop) : lineBottomY;
+      cb({ lineBottomY, lineBottomOverlayY, linePx: sys.height * scale });
     });
   };
 

@@ -168,6 +168,8 @@ export class PracticeApp {
   private boundKeyDown!: (e: KeyboardEvent) => void;
   private hitEl: HTMLElement;
   private fallWrap!: HTMLElement;
+  /** 上一帧的方块区行底(overlay 内 y),用于检测换行突跳(实时值突增)时沿用,实现平滑跟随。 */
+  private lastFrameLineBottom: number | null = null;
   private destroyed = false;
   /** (已废弃,保留 mount 注释引用) */
   /** 调试日志收集器(见 docs/调试日志收集器.md)。 */
@@ -223,7 +225,7 @@ export class PracticeApp {
     this.scoreSheet = buildScoreSheet(
       { score: this.score, mode: this.settings.mode ?? DEFAULT_MODE, density: 'compact' },
       {
-        onLineLayout: (info) => this.onLineLayout(info.lineBottomY),
+        onLineLayout: (info) => this.onLineLayout(info),
         onSeek: (beat) => this.onSeekBeat(beat),
       },
     );
@@ -647,9 +649,9 @@ export class PracticeApp {
   // ── bounds 坐标换算(关键协调) ──
 
   /** score-sheet 当前行底部变化通知(行切换/切档/seek 时触发)。 */
-  private onLineLayout(lineBottomY: number): void {
+  private onLineLayout(info: { lineBottomY: number; lineBottomOverlayY: number; linePx: number }): void {
     if (this.destroyed) return;
-    void lineBottomY;
+    void info;   // 方块区用实时屏幕行底(updateBounds 内随 smooth scroll 连续变化),无需存目标值
     this.updateBounds();
   }
 
@@ -679,7 +681,19 @@ export class PracticeApp {
     const kbRect = kbEl.getBoundingClientRect();
     const overlayRect = this.fallWrap.parentElement!.getBoundingClientRect();
     const kbTopInOverlay = Math.max(0, kbRect.top - overlayRect.top);
-    const lineBottom = this.currentLineBottomInOverlay();
+    // 用实时屏幕行底(随 smooth scroll 连续变化),让方块区跟着谱面平滑滚动,而非瞬切。
+    // 但换行起点那一帧 currentLineBottomScreenY 会突跳(新行还在视口下方,y 突增一个行高),
+    // 导致方块区塌陷。检测突跳(本帧实时值比上一帧【实时值】大很多 ≈ 一个行高)时,把本帧
+    // 也钳到上一帧实时值,抵消突跳;之后让实时值自然跑(随 scroll 连续减小,平滑过渡到新行底)。
+    // 注意:lastFrameLineBottom 记的是【实时值】(用于检测突跳),钳制只影响本帧用的 lineBottom,
+    // 不污染记录 —— 否则会被钳制值污染导致永远钳制(方块区钉死不动)。
+    const rawLineBottom = this.currentLineBottomInOverlay();
+    const jumpThreshold = (kbRect.height || 140) * 1.5;   // 突跳阈值 ≈ 1.5 倍键盘高(约一个行高)
+    let lineBottom = rawLineBottom;
+    if (this.lastFrameLineBottom != null && rawLineBottom > this.lastFrameLineBottom + jumpThreshold) {
+      lineBottom = this.lastFrameLineBottom;   // 突跳帧:钳到上一帧实时值,抵消突跳
+    }
+    this.lastFrameLineBottom = rawLineBottom;   // 始终记录实时值(不污染)
     const top = Math.max(0, Math.min(lineBottom, kbTopInOverlay - 20));
     const height = Math.max(0, kbTopInOverlay - top);
     this.fallWrap.style.top = top + 'px';
