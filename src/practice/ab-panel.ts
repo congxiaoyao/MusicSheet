@@ -63,8 +63,8 @@ export function buildAbPanel(initial: AbPanelInitial, cb: AbPanelCallbacks): AbP
   let selection: AbSelection | null = initial.selection;
   let pendingA: number | null = null;   // 两次点击定区间:第一次点的格子(待定 B)
   /** 拖拽状态。mode='range' 从空拖出新范围(start=起点);mode='endpoint' 拖已有选区的端点
-   *  (endpoint='a'|'b' 拖哪端,fixedEnd=另一端固定)。 */
-  let drag: { mode: 'range'; start: number } | { mode: 'endpoint'; endpoint: 'a' | 'b'; fixedEnd: number } | null = null;
+   *  (endpoint='a'|'b' 拖哪端,fixedEnd=另一端固定,anchorEl=被拖锚点 DOM,拖拽中跟着指针移)。 */
+  let drag: { mode: 'range'; start: number } | { mode: 'endpoint'; endpoint: 'a' | 'b'; fixedEnd: number; anchorEl: HTMLElement } | null = null;
   let dragging = false;
 
   // ── 第 1 层:标题 + switch ──
@@ -312,7 +312,7 @@ export function buildAbPanel(initial: AbPanelInitial, cb: AbPanelCallbacks): AbP
       e.stopPropagation();
       const end = anchorEl.dataset.end as 'a' | 'b';
       const fixedEnd = end === 'a' ? selection.endMeasure : selection.startMeasure;
-      drag = { mode: 'endpoint', endpoint: end, fixedEnd };
+      drag = { mode: 'endpoint', endpoint: end, fixedEnd, anchorEl };
       dragging = true;   // 端点拖拽无"点击"语义,直接进入拖拽
       pendingA = null;
       grid.classList.add('interacting');
@@ -333,11 +333,18 @@ export function buildAbPanel(initial: AbPanelInitial, cb: AbPanelCallbacks): AbP
   const onPointerMove = (e: PointerEvent) => {
     if (!drag) return;
     if (drag.mode === 'endpoint') {
-      // 端点拖拽:固定 fixedEnd,当前指针格作为拖动端,实时预览。
+      // 端点拖拽:固定 fixedEnd,当前指针格作为拖动端,实时预览 + 锚点跟着指针移。
       const cur = cellAtPoint(e.clientX, e.clientY);
       if (cur >= 0) {
         clearPreview();
         applyPreview(drag.fixedEnd, cur);
+        // 被拖锚点跟着指针格移动(A 锚点贴格子左缘、B 锚点贴右缘,垂直居中),
+        // 让用户清楚"在拖这个端点"。松手时 applySelection 会重渲染到最终位置。
+        const c = cellEls[cur];
+        const x = drag.endpoint === 'a' ? c.offsetLeft : c.offsetLeft + c.offsetWidth;
+        const y = c.offsetTop + c.offsetHeight / 2;
+        drag.anchorEl.style.left = x + 'px';
+        drag.anchorEl.style.top = y + 'px';
       }
       return;
     }
