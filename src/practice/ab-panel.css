@@ -222,7 +222,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 16px 0;       /* 顶到卡片边,内容留白 + 上方间距 */
+  padding: 12px 16px;         /* 顶到卡片边,上下间距让按钮不贴网格/分割线 */
   font-size: 12px;
   color: var(--muted, #8b919c);
 }
@@ -243,12 +243,22 @@
 
 /* ── 间隔滑块 ─────────────────────────────────────────── */
 .ab-interval {
+  position: relative;          /* 伪元素分割线的定位上下文 */
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 16px 12px;     /* 顶到卡片边,内容留白 + 下方收尾间距 */
-  border-top: 1px solid var(--line-2, #eef0f3);
+  padding: 12px 16px 14px;     /* 顶到卡片边,内容留白 + 上下间距 */
   font-size: 12px;
+}
+/* 分割线:伪元素,左右缩进 16 与内容对齐(不顶到卡片边)。贴 interval 顶部。 */
+.ab-interval::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 16px;
+  right: 16px;
+  height: 1px;
+  background: var(--line-2, #eef0f3);
 }
 .ab-interval-label { color: var(--muted, #8b919c); flex: none; }
 .ab-interval input[type=range] {
