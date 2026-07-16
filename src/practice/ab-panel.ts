@@ -9,10 +9,11 @@
 //   选区不是"各自高亮",而是连续圆角填充条 + 两端圆形 A/B 锚点。
 //   每格按 position(before/in-start/in-middle/in-end/alone)渲染不同样式。
 //
-// 手势(三种,即时生效):
-//   - 拖拽:按下起点格→拖到终点格→松开,选连续范围。
-//   - 两次点击定区间:第一次点设 A 并进入"待定 B"态(该格闪烁);第二次点设 B(自动排序)。
-//       点同格=确认单小节自循环。
+// 手势(即时生效):
+//   - 拖拽:按下起点格→拖到终点格→松开,选连续范围。松手不在格子上(间距/网格外)
+//       时用最后一次有效预览格,不退化为单选起点。
+//   - 点击单格(无拖动位移):单小节自循环(A=B=该小节)。
+//   - 拖 A/B 锚点:微调对应端(固定另一端);拖过另一端自动交换 A/B 标签。
 //   - [整曲循环]:selection = 0..total-1。
 //
 // 组件模式:命令式工厂 + Handle(同 practice-controls),不调 App 方法,只通过 callbacks 报事件。
@@ -61,10 +62,14 @@ export function buildAbPanel(initial: AbPanelInitial, cb: AbPanelCallbacks): AbP
 
   const total = Math.max(1, initial.totalMeasures);
   let selection: AbSelection | null = initial.selection;
-  let pendingA: number | null = null;   // 两次点击定区间:第一次点的格子(待定 B)
-  /** 拖拽状态。mode='range' 从空拖出新范围(start=起点);mode='endpoint' 拖已有选区的端点
-   *  (endpoint='a'|'b' 拖哪端,fixedEnd=另一端固定,anchorEl=被拖锚点 DOM,拖拽中跟着指针移)。 */
-  let drag: { mode: 'range'; start: number } | { mode: 'endpoint'; endpoint: 'a' | 'b'; fixedEnd: number; anchorEl: HTMLElement } | null = null;
+  /** 拖拽状态。mode='range' 从空拖出新范围(start=起点,lastCell=最后一次有效预览格,
+   *  松手不在格子上时用它);mode='endpoint' 拖已有选区的端点(endpoint='a'|'b' 拖哪端,
+   *  fixedEnd=另一端固定,anchorEl=被拖锚点,fixedAnchorEl=固定端锚点,交叉时翻转两者标签,
+   *  lastCell=最后一次有效预览格)。 */
+  let drag:
+    | { mode: 'range'; start: number; lastCell: number }
+    | { mode: 'endpoint'; endpoint: 'a' | 'b'; fixedEnd: number; anchorEl: HTMLElement; fixedAnchorEl: HTMLElement; lastCell: number }
+    | null = null;
   let dragging = false;
   /** 拖拽到网格边缘时的自动滚动。lastY = 最近一次 pointermove 的 clientY(滚动循环据此判定方向)。 */
   let autoScrollRaf = 0;
@@ -93,12 +98,11 @@ export function buildAbPanel(initial: AbPanelInitial, cb: AbPanelCallbacks): AbP
         // 滚动后重算当前格 + 更新预览(格子屏幕位置变了)
         const cur = cellAtPoint(lastMoveX, lastMoveY);
         if (cur >= 0) {
+          drag.lastCell = cur;
           if (drag.mode === 'endpoint') {
             clearPreview();
             applyPreview(drag.fixedEnd, cur);
-            const c = cellEls[cur];
-            drag.anchorEl.style.left = (drag.endpoint === 'a' ? c.offsetLeft : c.offsetLeft + c.offsetWidth) + 'px';
-            drag.anchorEl.style.top = (c.offsetTop + c.offsetHeight / 2) + 'px';
+            updateDraggingAnchor(cur);
           } else if (dragging) {
             clearPreview();
             applyPreview(drag.start, cur);
@@ -145,7 +149,7 @@ export function buildAbPanel(initial: AbPanelInitial, cb: AbPanelCallbacks): AbP
 
   const hint = document.createElement('div');
   hint.className = 'ab-hint';
-  hint.textContent = '点击或拖选循环小节';
+  hint.textContent = '拖选循环小节,点单小节自循环';
   body.appendChild(hint);
 
   const grid = document.createElement('div');
@@ -163,7 +167,6 @@ export function buildAbPanel(initial: AbPanelInitial, cb: AbPanelCallbacks): AbP
   allBtn.textContent = '整曲循环';
   allBtn.addEventListener('click', (e) => {
     e.stopPropagation();
-    pendingA = null;
     const sel: AbSelection = { startMeasure: 0, endMeasure: total - 1 };
     applySelection(sel);
     cb.onSelectionChange(sel);
@@ -275,11 +278,10 @@ export function buildAbPanel(initial: AbPanelInitial, cb: AbPanelCallbacks): AbP
     selection = sel;
     // 清旧锚点
     grid.querySelectorAll('.ab-anchor').forEach(a => a.remove());
-    // 格子状态:选中区内加 .selected(数字变白),待定 A 加 .pending
+    // 格子状态:选中区内加 .selected(数字变白)
     cellEls.forEach((c, i) => {
       const inside = sel != null && i >= sel.startMeasure && i <= sel.endMeasure;
       c.classList.toggle('selected', inside);
-      c.classList.toggle('pending', pendingA != null && i === pendingA);
     });
     // 填充段 + 锚点
     if (sel) {
@@ -351,6 +353,25 @@ export function buildAbPanel(initial: AbPanelInitial, cb: AbPanelCallbacks): AbP
     return -1;
   };
 
+  /** 更新被拖端点锚点的位置 + 标签(端点拖拽中调用)。
+   *  交叉(cur 越过 fixedEnd)时两个锚点标签翻转:被拖锚点变另一端,固定锚点变被拖端原标签。
+   *  始终保持"左 A 右 B"。松手 applySelection 按 min/max 重渲染归位。 */
+  const updateDraggingAnchor = (cur: number) => {
+    if (!drag || drag.mode !== 'endpoint') return;
+    const crossed = drag.endpoint === 'a' ? cur > drag.fixedEnd : cur < drag.fixedEnd;
+    // 被拖锚点当前应显示的端标签
+    const dragEnd = crossed ? (drag.endpoint === 'a' ? 'b' : 'a') : drag.endpoint;
+    drag.anchorEl.dataset.end = dragEnd;
+    drag.anchorEl.textContent = dragEnd.toUpperCase();
+    const c = cellEls[cur];
+    drag.anchorEl.style.left = (dragEnd === 'a' ? c.offsetLeft : c.offsetLeft + c.offsetWidth) + 'px';
+    drag.anchorEl.style.top = (c.offsetTop + c.offsetHeight / 2) + 'px';
+    // 固定端锚点:交叉时翻转为被拖端原标签,否则恢复其原标签
+    const fixedEnd = crossed ? drag.endpoint : (drag.endpoint === 'a' ? 'b' : 'a');
+    drag.fixedAnchorEl.dataset.end = fixedEnd;
+    drag.fixedAnchorEl.textContent = fixedEnd.toUpperCase();
+  };
+
   const onPointerDown = (e: PointerEvent) => {
     if (!el.classList.contains('on')) return;
     // 优先:点在 A/B 锚点上 → 拖端点(固定另一端)。
@@ -360,20 +381,21 @@ export function buildAbPanel(initial: AbPanelInitial, cb: AbPanelCallbacks): AbP
       e.stopPropagation();
       const end = anchorEl.dataset.end as 'a' | 'b';
       const fixedEnd = end === 'a' ? selection.endMeasure : selection.startMeasure;
-      drag = { mode: 'endpoint', endpoint: end, fixedEnd, anchorEl };
+      // 记录两个锚点(被拖的 + 固定端的),交叉时翻转标签用。
+      const fixedAnchorEl = grid.querySelector(`.ab-anchor[data-end="${end === 'a' ? 'b' : 'a'}"]`) as HTMLElement;
+      drag = { mode: 'endpoint', endpoint: end, fixedEnd, anchorEl, fixedAnchorEl, lastCell: fixedEnd };
       dragging = true;   // 端点拖拽无"点击"语义,直接进入拖拽
-      pendingA = null;
       grid.classList.add('interacting');
       return;
     }
-    // 否则:点在格子上 → 现有逻辑(拖新范围 / 两次点击定区间)
+    // 否则:点在格子上 → 拖新范围(纯点击=单小节自循环,在 up 时处理)。
     const c = (e.target as HTMLElement).closest('.ab-cell') as HTMLElement | null;
     if (!c) return;
     e.preventDefault();
     e.stopPropagation();
     const m = parseInt(c.dataset.m || '-1', 10);
     if (m < 0) return;
-    drag = { mode: 'range', start: m };
+    drag = { mode: 'range', start: m, lastCell: m };
     dragging = false;
     grid.classList.add('interacting');
   };
@@ -386,15 +408,10 @@ export function buildAbPanel(initial: AbPanelInitial, cb: AbPanelCallbacks): AbP
       // 端点拖拽:固定 fixedEnd,当前指针格作为拖动端,实时预览 + 锚点跟着指针移。
       const cur = cellAtPoint(e.clientX, e.clientY);
       if (cur >= 0) {
+        drag.lastCell = cur;
         clearPreview();
         applyPreview(drag.fixedEnd, cur);
-        // 被拖锚点跟着指针格移动(A 锚点贴格子左缘、B 锚点贴右缘,垂直居中),
-        // 让用户清楚"在拖这个端点"。松手时 applySelection 会重渲染到最终位置。
-        const c = cellEls[cur];
-        const x = drag.endpoint === 'a' ? c.offsetLeft : c.offsetLeft + c.offsetWidth;
-        const y = c.offsetTop + c.offsetHeight / 2;
-        drag.anchorEl.style.left = x + 'px';
-        drag.anchorEl.style.top = y + 'px';
+        updateDraggingAnchor(cur);
       }
       return;
     }
@@ -404,10 +421,10 @@ export function buildAbPanel(initial: AbPanelInitial, cb: AbPanelCallbacks): AbP
       const cx = startEl.left + startEl.width / 2, cy = startEl.top + startEl.height / 2;
       if (Math.hypot(e.clientX - cx, e.clientY - cy) < DRAG_THRESHOLD) return;
       dragging = true;
-      pendingA = null;
     }
     const cur = cellAtPoint(e.clientX, e.clientY);
     if (cur >= 0) {
+      drag.lastCell = cur;
       clearPreview();
       applyPreview(drag.start, cur);
     }
@@ -422,7 +439,7 @@ export function buildAbPanel(initial: AbPanelInitial, cb: AbPanelCallbacks): AbP
     if (d.mode === 'endpoint') {
       // 端点拖拽提交:fixedEnd + 当前格,自动排序。
       const cur = cellAtPoint(e.clientX, e.clientY);
-      const movingEnd = cur >= 0 ? cur : d.fixedEnd;
+      const movingEnd = cur >= 0 ? cur : d.lastCell;
       clearPreview();
       const lo = Math.min(d.fixedEnd, movingEnd), hi = Math.max(d.fixedEnd, movingEnd);
       const sel: AbSelection = { startMeasure: lo, endMeasure: hi };
@@ -431,10 +448,10 @@ export function buildAbPanel(initial: AbPanelInitial, cb: AbPanelCallbacks): AbP
       return;
     }
     if (dragging) {
-      // range 拖拽提交
+      // range 拖拽提交:松手时若不在格子上(间距/网格外),用最后一次有效预览格,不退化为单选起点。
       dragging = false;
       const cur = cellAtPoint(e.clientX, e.clientY);
-      const end = cur >= 0 ? cur : d.start;
+      const end = cur >= 0 ? cur : d.lastCell;
       clearPreview();
       const lo = Math.min(d.start, end), hi = Math.max(d.start, end);
       const sel: AbSelection = { startMeasure: lo, endMeasure: hi };
@@ -442,37 +459,16 @@ export function buildAbPanel(initial: AbPanelInitial, cb: AbPanelCallbacks): AbP
       cb.onSelectionChange(sel);
       return;
     }
-    // 点击(无拖拽位移):两次点击定区间逻辑
-    const startM = d.start;
-    if (pendingA == null) {
-      pendingA = startM;
-      cellEls.forEach((c, i) => c.classList.toggle('pending', i === startM));
-    } else if (pendingA === startM) {
-      pendingA = null;
-      const sel: AbSelection = { startMeasure: startM, endMeasure: startM };
-      applySelection(sel);
-      cb.onSelectionChange(sel);
-    } else {
-      const lo = Math.min(pendingA, startM), hi = Math.max(pendingA, startM);
-      pendingA = null;
-      const sel: AbSelection = { startMeasure: lo, endMeasure: hi };
-      applySelection(sel);
-      cb.onSelectionChange(sel);
-    }
+    // 点击(无拖拽位移):单小节自循环(start==end)。
+    clearPreview();
+    const sel: AbSelection = { startMeasure: d.start, endMeasure: d.start };
+    applySelection(sel);
+    cb.onSelectionChange(sel);
   };
 
   grid.addEventListener('pointerdown', onPointerDown);
   window.addEventListener('pointermove', onPointerMove);
   window.addEventListener('pointerup', onPointerUp);
-
-  // 点面板空白处取消待定 A
-  el.addEventListener('click', (e) => {
-    e.stopPropagation();
-    if (pendingA != null && !(e.target as HTMLElement).closest('.ab-cell')) {
-      pendingA = null;
-      applySelection(selection);
-    }
-  });
 
   return {
     el,
@@ -485,7 +481,6 @@ export function buildAbPanel(initial: AbPanelInitial, cb: AbPanelCallbacks): AbP
     },
     setOn(on: boolean) { applyOn(on); },
     setSelection(sel: AbSelection | null) {
-      pendingA = null;
       applySelection(sel);
     },
     setInterval(beats: number) {

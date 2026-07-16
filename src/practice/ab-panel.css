@@ -107,13 +107,16 @@
   grid-template-columns: repeat(4, 1fr);
   gap: 6px;
   /* 小节数多时限制网格高度,内部滚动(absolute 的 fillHost/anchor 相对 grid 定位,
-   * grid 滚动时它们一起滚),避免面板顶到键盘。每行 44px+6gap≈50px,限制约 6 行可见。 */
+   * grid 滚动时它们一起滚),避免面板顶到键盘。每行 44px+6gap≈50px,限制约 6 行可见。
+   * 左右 padding 给 A/B 锚点留空间(锚点向格子外偏 ~10px,overflow 会裁掉),
+   * 上下 padding 同理(首/末行锚点垂直不溢出,但留对称呼吸感)。 */
   max-height: 300px;
-  overflow-y: auto;
+  overflow: auto;
   overscroll-behavior: contain;
   scrollbar-width: thin;
   scrollbar-color: var(--line, #e6e8ec) transparent;
-  padding-right: 2px;          /* 滚动条留隙,避免压到末列格子 */
+  padding: 2px 12px;
+  box-sizing: border-box;
 }
 .ab-grid::-webkit-scrollbar { width: 6px; }
 .ab-grid::-webkit-scrollbar-thumb { background: var(--line, #e6e8ec); border-radius: 3px; }
@@ -166,16 +169,6 @@
   background: var(--accent-soft, #eef3fb);
   border: 1.5px dashed var(--accent, #4f78c9);
   box-sizing: border-box;
-}
-
-/* 待定 A 闪烁(两次点击定区间,第一次点的格子) */
-.ab-cell.pending {
-  box-shadow: 0 0 0 2px var(--accent, #4f78c9);
-  animation: abPulse 1s ease-in-out infinite;
-}
-@keyframes abPulse {
-  0%, 100% { box-shadow: 0 0 0 2px var(--accent, #4f78c9), 0 0 0 2px rgba(79, 120, 201, 0.32); }
-  50%      { box-shadow: 0 0 0 2px var(--accent, #4f78c9), 0 0 0 7px rgba(79, 120, 201, 0); }
 }
 
 /* A/B 锚点:实心 accent 圆 + 白字,骑在填充条两端。
