@@ -871,6 +871,46 @@ export function buildScoreSheet(
   type Geo = { scale: number; svgLeftInSheet: number; svgTopInSheet: number; svgTop: number };
   let geoCache: Geo | null = null;
   const invalidateGeo = (): void => { geoCache = null; };
+
+  // ── 高亮元素缓存(性能优化)──
+  // updateHighlight 原先每帧 querySelectorAll 全树扫描(清旧 + 查当前行音符),在数千节点的
+  // SVG 上是显著 CPU 开销。改为渲染时一次性建好索引:sysIdx → groupClass → idx → 元素数组。
+  // 同时记录当前已高亮的元素集合,清旧时直接遍历该集合(无需全树扫描)。
+  // 失效时机:render 后(SVG 重建)。
+  let hiIndex: Map<number, { treble: Map<number, SVGElement[]>; bass: Map<number, SVGElement[]> }> | null = null;
+  let hiPlayingEls: SVGElement[] = [];   // 当前带 .playing 的元素(增量清除用)
+  const invalidateHiIndex = (): void => { hiIndex = null; hiPlayingEls = []; };
+  /** render 后调用:扫描 SVG 建 sysIdx → (group, idx) → 元素[] 索引。 */
+  const buildHiIndex = (): void => {
+    hiPlayingEls = [];
+    const svg = sheetEl.querySelector('svg');
+    if (!svg) { hiIndex = null; return; }
+    const idx: typeof hiIndex = new Map();
+    const systems = svg.querySelectorAll('g.ss-system');
+    const buildGroup = (sysEl: Element, groupClass: string): Map<number, SVGElement[]> => {
+      const m = new Map<number, SVGElement[]>();
+      const group = sysEl.querySelector(groupClass);
+      if (!group) return m;
+      // [data-idx] 即所有可高亮音符元素(note-elem/jp-elem),按 idx 分组。
+      group.querySelectorAll<SVGElement>('[data-idx]').forEach(e => {
+        const di = parseInt(e.getAttribute('data-idx') || '-1', 10);
+        if (di < 0) return;
+        let arr = m.get(di);
+        if (!arr) { arr = []; m.set(di, arr); }
+        arr.push(e);
+      });
+      return m;
+    };
+    systems.forEach(sysEl => {
+      const di = parseInt(sysEl.getAttribute('data-sys') || '-1', 10);
+      if (di < 0) return;
+      idx.set(di, {
+        treble: buildGroup(sysEl, '.ss-treble'),
+        bass: buildGroup(sysEl, '.ss-bass'),
+      });
+    });
+    hiIndex = idx;
+  };
   /** 读取(必要时计算)svg/sheet 的几何。布局稳定时整曲播放期间只算一次。 */
   const getGeo = (): Geo | null => {
     if (geoCache) return geoCache;
@@ -974,6 +1014,7 @@ export function buildScoreSheet(
     const width = Math.min(1200, Math.max(640, el.clientWidth || 940));
     renderCache = renderScore(score, width, mode, density);
     invalidateGeo();   // 重渲染后 SVG 重建,几何缓存失效
+    invalidateHiIndex();   // 高亮索引也失效(render 末尾会重建)
     sheetEl.innerHTML = renderCache.svg;
     const svgEl = sheetEl.querySelector('svg');
     if (svgEl) {
@@ -1009,6 +1050,8 @@ export function buildScoreSheet(
     lastHiBass = new Set();
     lastSysIdx = -1;
     lastPhSys = -1;   // 重渲染后播放头行归属失效,下次设 left 默认瞬移
+    // 建高亮索引(SVG 已在 DOM,扫描一次建 Map,后续 updateHighlight 不再每帧 querySelectorAll)。
+    buildHiIndex();
     // 重渲染重建了 ss-ab-dim rect(无 .active)+ 清了标记层 → 重应用当前选区。
     applyAbVisual();
   };
@@ -1093,25 +1136,30 @@ export function buildScoreSheet(
   };
 
   /** 高亮当前行内符头(和弦扩展:同 chordId 的音都高亮)。清除旧行高亮。
-   *  sysIdx=-1 表示停止态(清所有高亮)。 */
+   *  sysIdx=-1 表示停止态(清所有高亮)。
+   *  性能:用 hiIndex(sysIdx→group→idx→元素[])直接 O(1) 定位,不再每帧 querySelectorAll 全树扫描;
+   *  清旧用 hiPlayingEls 增量集合,不再全树扫描。渲染后由 buildHiIndex 建好索引。 */
   const updateHighlight = (sysIdx: number, hiTreble: Set<number>, hiBass: Set<number>) => {
-    const svg = sheetEl.querySelector('svg');
-    if (!svg) return;
-    // 清旧高亮(全量清,简单可靠)。
-    svg.querySelectorAll('.note-elem.playing, .jp-elem.playing').forEach(e => e.classList.remove('playing'));
-    if (sysIdx < 0) return;
-    // 当前行 system 的两个 group:treble/bass(类名 ss-treble/ss-bass)。
-    const sysEl = svg.querySelector(`g.ss-system[data-sys="${sysIdx}"]`);
-    if (!sysEl) return;
-    const apply = (groupClass: string, idxSet: Set<number>) => {
+    // 清旧高亮:增量清除(只遍历上次设过的元素,不全树扫)。
+    if (hiPlayingEls.length > 0) {
+      for (const e of hiPlayingEls) e.classList.remove('playing');
+      hiPlayingEls = [];
+    }
+    if (sysIdx < 0 || !hiIndex) return;
+    const sysGroups = hiIndex.get(sysIdx);
+    if (!sysGroups) return;
+    const apply = (groupMap: Map<number, SVGElement[]>, idxSet: Set<number>) => {
       if (idxSet.size === 0) return;
-      sysEl.querySelectorAll<SVGElement>(`${groupClass} [data-idx]`).forEach(e => {
-        const di = parseInt(e.getAttribute('data-idx') || '-1', 10);
-        if (idxSet.has(di)) e.classList.add('playing');
+      idxSet.forEach(di => {
+        const arr = groupMap.get(di);
+        if (arr) {
+          for (const e of arr) e.classList.add('playing');
+          hiPlayingEls.push(...arr);
+        }
       });
     };
-    apply('.ss-treble', hiTreble);
-    apply('.ss-bass', hiBass);
+    apply(sysGroups.treble, hiTreble);
+    apply(sysGroups.bass, hiBass);
   };
 
   /** 行滚动锁定(提词器式):当前行【五线谱顶线】对齐到清晰带顶部(距 scrollEl 视口顶 CURRENT_TOP_PAD)。
