@@ -16,6 +16,8 @@
   display: flex;
   justify-content: center;
   background: transparent;
+  /* 隔离绘制:几百个 transform 方块,contain 让外部布局变化不波及整片方块子树 */
+  contain: layout style paint;
   /* 上边缘 fade:方块接近上边缘时自然淡出(文档 §4.5)。
    * mask 渐变:顶部透明渐变到不透明(40px 内完成),区域底不裁。 */
   -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 40px);
@@ -50,7 +52,8 @@
   /* transform(位置)每帧由 JS 设,不要给 transform 加 transition(否则位置滞后跟手);
    * 只给 opacity 加过渡 —— 方块出现/消失时平滑淡入淡出,不生硬。 */
   transition: opacity 0.18s ease-out;
-  will-change: transform, opacity;
+  /* 不给每个方块静态 will-change:几百个合成层会吃爆弱 GPU 显存 + 合成时间
+   * (trace 实测合成层占 57MB)。transform 动画浏览器会自动提升合成层,无需显式声明。 */
 }
 
 /* 右手蓝 */

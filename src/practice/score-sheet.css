@@ -17,6 +17,8 @@
   height: 100%;
   overflow: hidden;
   background: linear-gradient(180deg, #fbfcfe 0%, #f8fafc 65%, #f6f8fb 100%);
+  /* 隔离子树绘制/布局:谱面 SVG 几千节点,contain 让滚动/外部变化不必重排/重绘整棵子树 */
+  contain: layout style paint;
 }
 
 /* 滚动容器:提词器式。隐藏滚动条(谱面是主角,不显滚动条干扰)。
