@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, initial-scale=1.0" />
+    <title>Bench · 性能基准</title>
+    <style>
+      html, body {
+        margin: 0; padding: 0;
+        height: 100%; width: 100%;
+        background: #0f172a;
+        color: #cbd5e1;
+        font-family: system-ui, -apple-system, sans-serif;
+        overflow: hidden;
+      }
+      /* 测量容器:固定 1920x1080 视口内,贴满 */
+      #stage {
+        position: fixed;
+        top: 0; left: 0;
+        width: 1920px; height: 1080px;
+        overflow: hidden;
+      }
+      /* 状态条(右上角,显示当前场景 + 进度) */
+      #status {
+        position: fixed;
+        top: 12px; right: 12px;
+        z-index: 999;
+        padding: 8px 14px;
+        background: rgba(15, 23, 42, 0.85);
+        border: 1px solid #334155;
+        border-radius: 6px;
+        font-size: 13px;
+        font-family: ui-monospace, monospace;
+        min-width: 280px;
+      }
+      #status .label { color: #64748b; }
+      #status .val { color: #f1f5f9; }
+      /* 基准元素(动画 div)的通用样式 —— 各场景 JS 内覆写 */
+      .bench-el {
+        position: absolute;
+        width: 40px; height: 40px;
+        background: #4f78c9;
+        border-radius: 4px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="stage"></div>
+    <div id="status"><span class="label">idle</span></div>
+
+    <script>
+      // ════════════════════════════════════════════════════════════
+      // __bench harness:电视性能基准测试壳
+      // 目标:纯参数化、无业务逻辑、可复现。每个场景自包含:
+      //   setup(params) → 预热 warmupMs → 采样 sampleMs → 清理 teardown
+      //   返回 { fps[], longtasks[], extra }
+      // 编排由宿主机 scripts/bench/matrix.mjs 通过 CDP 驱动。
+      // ════════════════════════════════════════════════════════════
+      (function () {
+        const stage = document.getElementById('stage');
+        const statusEl = document.getElementById('status');
+        const setStatus = (html) => { statusEl.innerHTML = html; };
+
+        // —— 通用采集器:预热 → 采样 → 返回 fps/longtask ——
+        // onFrame(t):每帧回调,由场景实现动画驱动
+        function runCollect({ warmupMs = 3000, sampleMs = 15000, onFrame = null, onFrameStart = null } = {}) {
+          return new Promise((resolve) => {
+            // 装长任务观察器
+            const longtasks = [];
+            let po = null;
+            try {
+              po = new PerformanceObserver((list) => {
+                list.getEntries().forEach((e) => longtasks.push(Math.round(e.duration)));
+              });
+              po.observe({ entryTypes: ['longtask'] });
+            } catch (e) { /* longtask 不支持就空跑 */ }
+
+            // 帧率计数
+            const fps = [];
+            let frames = 0;
+            let phase = 'warmup';   // warmup → sample → done
+            let phaseStart = performance.now();
+            let sampleLongtasks = [];
+
+            function tick(t) {
+              if (onFrame) onFrame(t);
+              frames++;
+              const elapsed = t - phaseStart;
+              if (phase === 'warmup' && elapsed >= warmupMs) {
+                phase = 'sample';
+                phaseStart = t;
+                frames = 0;
+                longtasks.length = 0;   // 清掉预热期长任务
+              } else if (phase === 'sample' && elapsed >= sampleMs) {
+                phase = 'done';
+                // 收集这一秒的 fps
+                const lastFps = Math.round(frames * 1000 / (t - phaseStart));
+                if (lastFps > 0) fps.push(lastFps);
+                if (po) po.disconnect();
+                resolve({ fps, longtasks: longtasks.slice() });
+                return;
+              }
+              // 每秒打点
+              if (phase === 'sample' && frames > 0 && elapsed > (fps.length + 1) * 1000) {
+                const sec = Math.floor(elapsed / 1000);
+                while (fps.length < sec) {
+                  const secStart = phaseStart + fps.length * 1000;
+                  const secEnd = phaseStart + (fps.length + 1) * 1000;
+                  // 估算这一秒的帧数(线性,够用)
+                  fps.push(Math.round(frames * 1000 / elapsed));
+                }
+              }
+              requestAnimationFrame(tick);
+            }
+            requestAnimationFrame(tick);
+          });
+        }
+
+        // —— 元素工厂 ——
+        function makeEl(cls) {
+          const el = document.createElement('div');
+          el.className = 'bench-el' + (cls ? ' ' + cls : '');
+          return el;
+        }
+        function clearStage() { stage.innerHTML = ''; }
+
+        // ════════════════════════════════════════════════════════════
+        // 场景定义
+        // 每个场景:setup(params)→{teardown, onFrame},run() 内部用 runCollect
+        // ════════════════════════════════════════════════════════════
+        const scenes = {};
+
+        // —— 场景 A:合成层对照 ——
+        // N 个元素做 transform 平移,mode 决定定位策略:
+        //   transform-only : transform: translate(x,y)
+        //   will-change    : 同上 + will-change: transform
+        //   contain        : 同上 + contain: layout style paint
+        //   top-left       : top/left 定位(触发 layout,作基线)
+        scenes['composite'] = {
+          setup({ count = 100, mode = 'transform-only' }) {
+            clearStage();
+            const els = [];
+            const w = stage.clientWidth, h = stage.clientHeight;
+            for (let i = 0; i < count; i++) {
+              const el = makeEl();
+              // 初始位置
+              const x = Math.random() * (w - 40);
+              const y = Math.random() * (h - 40);
+              if (mode === 'top-left') {
+                el.style.left = x + 'px';
+                el.style.top = y + 'px';
+              } else {
+                el.style.transform = `translate(${x}px, ${y}px)`;
+                if (mode === 'will-change') el.style.willChange = 'transform';
+                if (mode === 'contain') el.style.contain = 'layout style paint';
+              }
+              stage.appendChild(el);
+              els.push({ el, x, y, vx: (Math.random() - 0.5) * 2, vy: (Math.random() - 0.5) * 2 });
+            }
+            let startT = performance.now();
+            return {
+              els, mode, w, h, startT,
+              onFrame(t) {
+                const dt = (t - startT) / 16.67;
+                startT = t;
+                for (const e of els) {
+                  e.x += e.vx * dt;
+                  e.y += e.vy * dt;
+                  if (e.x < 0 || e.x > w - 40) e.vx *= -1;
+                  if (e.y < 0 || e.y > h - 40) e.vy *= -1;
+                  if (mode === 'top-left') {
+                    e.el.style.left = e.x + 'px';
+                    e.el.style.top = e.y + 'px';
+                  } else {
+                    e.el.style.transform = `translate(${e.x}px, ${e.y}px)`;
+                  }
+                }
+              },
+              teardown() { clearStage(); },
+            };
+          },
+        };
+
+        // —— 场景 B:GPU 合成吞吐(transform-only,N 梯度)——
+        // 复用 composite 场景,固定 mode=transform-only,变 count
+        scenes['gpu-throughput'] = scenes['composite'];   // 同实现,语义不同
+
+        // —— 场景 C:DOM/SVG 规模(静态渲染 + 单次 layout/paint 计时)——
+        scenes['dom-scale'] = {
+          setup({ count = 2000, kind = 'div' }) {
+            clearStage();
+            const t0 = performance.now();
+            // 强制 layout:读 offsetHeight 触发
+            if (kind === 'div') {
+              const frag = document.createDocumentFragment();
+              for (let i = 0; i < count; i++) {
+                const el = document.createElement('div');
+                el.className = 'bench-el';
+                el.style.left = (Math.random() * 1800) + 'px';
+                el.style.top = (Math.random() * 1000) + 'px';
+                el.style.width = (5 + Math.random() * 40) + 'px';
+                el.style.height = (5 + Math.random() * 40) + 'px';
+                el.style.background = `hsl(${Math.random() * 360}, 60%, 55%)`;
+                frag.appendChild(el);
+              }
+              stage.appendChild(frag);
+            } else {
+              // SVG path
+              const NS = 'http://www.w3.org/2000/svg';
+              const svg = document.createElementNS(NS, 'svg');
+              svg.setAttribute('width', '1920');
+              svg.setAttribute('height', '1080');
+              for (let i = 0; i < count; i++) {
+                const p = document.createElementNS(NS, 'rect');
+                p.setAttribute('x', Math.random() * 1800);
+                p.setAttribute('y', Math.random() * 1000);
+                p.setAttribute('width', 5 + Math.random() * 40);
+                p.setAttribute('height', 5 + Math.random() * 40);
+                p.setAttribute('fill', `hsl(${Math.random() * 360}, 60%, 55%)`);
+                svg.appendChild(p);
+              }
+              stage.appendChild(svg);
+            }
+            const t1 = performance.now();
+            // 强制 layout + paint
+            const _ = stage.offsetHeight;   // flush layout
+            const t2 = performance.now();
+            // 用 rAF 测 paint 完成
+            return {
+              renderMs: t1 - t0,
+              layoutMs: t2 - t1,
+              onFrame() { /* 静态,不更新 */ },
+              teardown() { clearStage(); },
+              // paint 时间在 run 里测
+            };
+          },
+        };
+
+        // —— 场景 D:JS 单帧预算(rAF 里跑纯算循环)——
+        scenes['js-budget'] = {
+          setup({ work = 1000 }) {
+            clearStage();
+            // 占位元素(避免空 stage 优化)
+            const el = makeEl();
+            el.style.transform = 'translate(960px, 540px)';
+            stage.appendChild(el);
+            let prev = performance.now();
+            return {
+              onFrame(t) {
+                // 纯计算:做 work 次浮点运算(防被 DCE)
+                let x = 0;
+                for (let i = 0; i < work; i++) {
+                  x = Math.sin(i * 0.001) + Math.cos(i * 0.0007) + x;
+                }
+                // 移动占位元素(让页面"有事干",否则可能被识别为静态优化)
+                el.style.transform = `translate(${960 + Math.sin(t / 500) * 50}px, ${540 + Math.cos(t / 500) * 50}px)`;
+                // 防 DCE
+                if (x !== x) console.log('never');
+              },
+              teardown() { clearStage(); },
+            };
+          },
+        };
+
+        // ════════════════════════════════════════════════════════════
+        // 公开 API
+        // ════════════════════════════════════════════════════════════
+        window.__bench = {
+          scenes: Object.keys(scenes),
+          ping() { return 'pong'; },
+          // 跑单个场景:setup → 预热 → 采样 → teardown → 返回 metrics
+          async run(sceneName, params = {}, opts = {}) {
+            const scene = scenes[sceneName];
+            if (!scene) throw new Error('unknown scene: ' + sceneName);
+            const warmupMs = opts.warmupMs ?? 3000;
+            const sampleMs = opts.sampleMs ?? 15000;
+            const paramStr = sceneName + ' ' + JSON.stringify(params);
+            setStatus(`<span class="label">running:</span> <span class="val">${paramStr}</span><br><span class="label">warmup ${warmupMs}ms → sample ${sampleMs}ms</span>`);
+            const ctx = scene.setup(params);
+            try {
+              const result = await runCollect({
+                warmupMs, sampleMs,
+                onFrame: ctx.onFrame,
+              });
+              // 附加场景特有数据
+              const extra = {};
+              if (ctx.renderMs !== undefined) extra.renderMs = ctx.renderMs;
+              if (ctx.layoutMs !== undefined) extra.layoutMs = ctx.layoutMs;
+              setStatus(`<span class="label">done:</span> <span class="val">${paramStr}</span><br><span class="label">fps median=${median(result.fps)} longtasks=${result.longtasks.length}</span>`);
+              return { scene: sceneName, params, ...result, extra };
+            } finally {
+              if (ctx.teardown) ctx.teardown();
+            }
+          },
+        };
+
+        function median(arr) {
+          if (!arr.length) return 0;
+          const s = arr.slice().sort((a, b) => a - b);
+          return s[Math.floor(s.length / 2)];
+        }
+
+        setStatus('<span class="label">ready</span> · scenes: ' + window.__bench.scenes.join(', '));
+      })();
+    </script>
+  </body>
+</html>
