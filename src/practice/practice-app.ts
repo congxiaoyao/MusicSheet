@@ -659,21 +659,29 @@ export class PracticeApp {
     this.updateBounds();
   }
 
-  /** 谱面滚动时重算方块区(当前行屏幕底随滚动连续变化,实时跟随)。 */
+  /** 谱面滚动时重算方块区(当前行屏幕底随滚动连续变化,实时跟随)。
+   *  性能:scroll 事件可能 60Hz 触发,原先每次直接重算(含多次 gBCR + waterfall.onTick),
+   *  在弱设备上与 player rAF 叠加导致 layout thrashing。现在用 rAF 合并为每帧最多一次,
+   *  并在滚动时失效 score-sheet 的几何缓存(因 svgTop 是视口坐标,随滚动变化)。 */
+  private scrollRafPending = false;
   private updateTopYFromScroll(): void {
-    if (this.destroyed) return;
-    this.updateBounds();
+    if (this.destroyed || this.scrollRafPending) return;
+    this.scrollRafPending = true;
+    requestAnimationFrame(() => {
+      this.scrollRafPending = false;
+      if (this.destroyed) return;
+      this.scoreSheet.invalidateGeometry();   // 滚动改变 svg 屏幕位置,失效缓存
+      this.updateBounds();
+    });
   }
 
   /** 实时算「当前行底」在 overlay 内的 y(屏幕坐标,含滚动偏移)。
    *  用 score-sheet.currentLineBottomScreenY()(纯几何 sys.yTop+sys.height,不含 text 虚高),
-   *  替代遍历子元素 getBBox(<text> 字体度量框虚高 → 行底算到键盘顶下,方块区无空间)。 */
-  private currentLineBottomInOverlay(): number {
-    const overlay = this.fallWrap?.parentElement;
-    if (!overlay) return 0;
+   *  替代遍历子元素 getBBox(<text> 字体度量框虚高 → 行底算到键盘顶下,方块区无空间)。
+   *  overlayTop 为调用方已读取的 overlay gBCR.top(避免此处再读一次,合并 gBCR 调用)。 */
+  private currentLineBottomInOverlay(overlayTop: number): number {
     const screenY = this.scoreSheet.currentLineBottomScreenY();
     if (screenY === null) return 0;
-    const overlayTop = overlay.getBoundingClientRect().top;
     return Math.max(0, screenY - overlayTop);
   }
 
@@ -682,8 +690,12 @@ export class PracticeApp {
     if (this.destroyed) return;
     const kbEl = this.keyboard.el;
     if (!kbEl || !this.fallWrap) return;
+    const overlay = this.fallWrap.parentElement!;
+    // 性能:原先这里 + currentLineBottomInOverlay 各读 gBCR,合计 4 次/帧,在数千节点
+    // SVG 上触发强制同步布局。现在合并为 2 次(kb + overlay),且 score-sheet 内部已缓存
+    // svg/sheet 几何(滚动时由 boundScroll 失效)。键盘高度缓存到实例,避免每帧读。
     const kbRect = kbEl.getBoundingClientRect();
-    const overlayRect = this.fallWrap.parentElement!.getBoundingClientRect();
+    const overlayRect = overlay.getBoundingClientRect();
     const kbTopInOverlay = Math.max(0, kbRect.top - overlayRect.top);
     // 用实时屏幕行底(随 smooth scroll 连续变化),让方块区跟着谱面平滑滚动,而非瞬切。
     // 但换行起点那一帧 currentLineBottomScreenY 会突跳(新行还在视口下方,y 突增一个行高),
@@ -691,7 +703,7 @@ export class PracticeApp {
     // 也钳到上一帧实时值,抵消突跳;之后让实时值自然跑(随 scroll 连续减小,平滑过渡到新行底)。
     // 注意:lastFrameLineBottom 记的是【实时值】(用于检测突跳),钳制只影响本帧用的 lineBottom,
     // 不污染记录 —— 否则会被钳制值污染导致永远钳制(方块区钉死不动)。
-    const rawLineBottom = this.currentLineBottomInOverlay();
+    const rawLineBottom = this.currentLineBottomInOverlay(overlayRect.top);
     const jumpThreshold = (kbRect.height || 140) * 1.5;   // 突跳阈值 ≈ 1.5 倍键盘高(约一个行高)
     let lineBottom = rawLineBottom;
     if (this.lastFrameLineBottom != null && rawLineBottom > this.lastFrameLineBottom + jumpThreshold) {

@@ -72,6 +72,8 @@ export interface ScoreSheetHandle {
    *  用纯几何(sys.yTop+sys.height)×scale + SVG 屏幕偏移,不用 getBBox(text 虚高)。
    *  返回 null 表示无当前行/未渲染。 */
   currentLineBottomScreenY(): number | null;
+  /** 失效内部几何缓存(scale/svg 偏移)。滚动/resize/重渲染后调用,避免播放头/行底位置算错。 */
+  invalidateGeometry(): void;
   /** 设置 AB 选区(sel=null 隐藏遮罩与标记)。
    *  选区外小节加 .active(CSS 仅 .current 行显示压暗);A/B 标记画在首末小节边界。 */
   setAbRange(sel: { startMeasure: number; endMeasure: number } | null): void;
@@ -857,9 +859,75 @@ export function buildScoreSheet(
   let lastHiTreble = new Set<number>();
   let lastHiBass = new Set<number>();
   let lastSysIdx = -1;
-  let lastPhSys = -1;   // 播放头上次所在 system(同行 onset 间用 transition,换行瞬移)
+  // playhead 尺寸缓存(同行内不变,避免每帧写 width/height 触发 layout)
+  let playheadW = -1, playheadH = -1;
   // AB 选区缓存(setAbRange 设;render 后需重应用,因 innerHTML 重建丢失 .active + 标记)。
   let abSelection: { startMeasure: number; endMeasure: number } | null = null;
+
+  // ── 几何缓存(性能优化)──
+  // updatePlayhead / currentLineBottomScreenY 原先每帧调 getBoundingClientRect(svgEl/sheetEl),
+  // 在数千节点的 SVG 上触发强制同步布局,是 layout thrashing 的主因。
+  // 这些几何值只在谱面尺寸变化时才改 → 缓存,scale 不变时直接复用。
+  // 失效时机:render 后 / resize / 滚动不影响(我们要的是 svg 在 sheet 内的相对位置 + scale)。
+  type Geo = { scale: number; svgLeftInSheet: number; svgTopInSheet: number; svgTop: number };
+  let geoCache: Geo | null = null;
+  const invalidateGeo = (): void => { geoCache = null; };
+
+  // ── 高亮元素缓存(性能优化)──
+  // updateHighlight 原先每帧 querySelectorAll 全树扫描(清旧 + 查当前行音符),在数千节点的
+  // SVG 上是显著 CPU 开销。改为渲染时一次性建好索引:sysIdx → groupClass → idx → 元素数组。
+  // 同时记录当前已高亮的元素集合,清旧时直接遍历该集合(无需全树扫描)。
+  // 失效时机:render 后(SVG 重建)。
+  let hiIndex: Map<number, { treble: Map<number, SVGElement[]>; bass: Map<number, SVGElement[]> }> | null = null;
+  let hiPlayingEls: SVGElement[] = [];   // 当前带 .playing 的元素(增量清除用)
+  const invalidateHiIndex = (): void => { hiIndex = null; hiPlayingEls = []; };
+  /** render 后调用:扫描 SVG 建 sysIdx → (group, idx) → 元素[] 索引。 */
+  const buildHiIndex = (): void => {
+    hiPlayingEls = [];
+    const svg = sheetEl.querySelector('svg');
+    if (!svg) { hiIndex = null; return; }
+    const idx: typeof hiIndex = new Map();
+    const systems = svg.querySelectorAll('g.ss-system');
+    const buildGroup = (sysEl: Element, groupClass: string): Map<number, SVGElement[]> => {
+      const m = new Map<number, SVGElement[]>();
+      const group = sysEl.querySelector(groupClass);
+      if (!group) return m;
+      // [data-idx] 即所有可高亮音符元素(note-elem/jp-elem),按 idx 分组。
+      group.querySelectorAll<SVGElement>('[data-idx]').forEach(e => {
+        const di = parseInt(e.getAttribute('data-idx') || '-1', 10);
+        if (di < 0) return;
+        let arr = m.get(di);
+        if (!arr) { arr = []; m.set(di, arr); }
+        arr.push(e);
+      });
+      return m;
+    };
+    systems.forEach(sysEl => {
+      const di = parseInt(sysEl.getAttribute('data-sys') || '-1', 10);
+      if (di < 0) return;
+      idx.set(di, {
+        treble: buildGroup(sysEl, '.ss-treble'),
+        bass: buildGroup(sysEl, '.ss-bass'),
+      });
+    });
+    hiIndex = idx;
+  };
+  /** 读取(必要时计算)svg/sheet 的几何。布局稳定时整曲播放期间只算一次。 */
+  const getGeo = (): Geo | null => {
+    if (geoCache) return geoCache;
+    const svgEl = sheetEl.querySelector('svg');
+    if (!svgEl || !renderCache) return null;
+    const svgRect = svgEl.getBoundingClientRect();
+    const sheetRect = sheetEl.getBoundingClientRect();
+    const scale = renderCache.width > 0 ? svgRect.width / renderCache.width : 1;
+    geoCache = {
+      scale,
+      svgLeftInSheet: svgRect.left - sheetRect.left,
+      svgTopInSheet: svgRect.top - sheetRect.top,
+      svgTop: svgRect.top,
+    };
+    return geoCache;
+  };
 
   /** 造一个 AB 边界标记:实心 accent 圆 + 白边 + 白字,贴在 (x, y)(行五线顶 staffTopY)。
    *  样式与 ab-panel 面板锚点统一(accent 实心 + 白边)。阴影由 CSS filter(drop-shadow)加,
@@ -946,6 +1014,8 @@ export function buildScoreSheet(
   const render = () => {
     const width = Math.min(1200, Math.max(640, el.clientWidth || 940));
     renderCache = renderScore(score, width, mode, density);
+    invalidateGeo();   // 重渲染后 SVG 重建,几何缓存失效
+    invalidateHiIndex();   // 高亮索引也失效(render 末尾会重建)
     sheetEl.innerHTML = renderCache.svg;
     const svgEl = sheetEl.querySelector('svg');
     if (svgEl) {
@@ -980,7 +1050,9 @@ export function buildScoreSheet(
     lastHiTreble = new Set();
     lastHiBass = new Set();
     lastSysIdx = -1;
-    lastPhSys = -1;   // 重渲染后播放头行归属失效,下次设 left 默认瞬移
+    playheadW = -1; playheadH = -1;   // 重渲染后尺寸缓存失效
+    // 建高亮索引(SVG 已在 DOM,扫描一次建 Map,后续 updateHighlight 不再每帧 querySelectorAll)。
+    buildHiIndex();
     // 重渲染重建了 ss-ab-dim rect(无 .active)+ 清了标记层 → 重应用当前选区。
     applyAbVisual();
   };
@@ -1065,25 +1137,30 @@ export function buildScoreSheet(
   };
 
   /** 高亮当前行内符头(和弦扩展:同 chordId 的音都高亮)。清除旧行高亮。
-   *  sysIdx=-1 表示停止态(清所有高亮)。 */
+   *  sysIdx=-1 表示停止态(清所有高亮)。
+   *  性能:用 hiIndex(sysIdx→group→idx→元素[])直接 O(1) 定位,不再每帧 querySelectorAll 全树扫描;
+   *  清旧用 hiPlayingEls 增量集合,不再全树扫描。渲染后由 buildHiIndex 建好索引。 */
   const updateHighlight = (sysIdx: number, hiTreble: Set<number>, hiBass: Set<number>) => {
-    const svg = sheetEl.querySelector('svg');
-    if (!svg) return;
-    // 清旧高亮(全量清,简单可靠)。
-    svg.querySelectorAll('.note-elem.playing, .jp-elem.playing').forEach(e => e.classList.remove('playing'));
-    if (sysIdx < 0) return;
-    // 当前行 system 的两个 group:treble/bass(类名 ss-treble/ss-bass)。
-    const sysEl = svg.querySelector(`g.ss-system[data-sys="${sysIdx}"]`);
-    if (!sysEl) return;
-    const apply = (groupClass: string, idxSet: Set<number>) => {
+    // 清旧高亮:增量清除(只遍历上次设过的元素,不全树扫)。
+    if (hiPlayingEls.length > 0) {
+      for (const e of hiPlayingEls) e.classList.remove('playing');
+      hiPlayingEls = [];
+    }
+    if (sysIdx < 0 || !hiIndex) return;
+    const sysGroups = hiIndex.get(sysIdx);
+    if (!sysGroups) return;
+    const apply = (groupMap: Map<number, SVGElement[]>, idxSet: Set<number>) => {
       if (idxSet.size === 0) return;
-      sysEl.querySelectorAll<SVGElement>(`${groupClass} [data-idx]`).forEach(e => {
-        const di = parseInt(e.getAttribute('data-idx') || '-1', 10);
-        if (idxSet.has(di)) e.classList.add('playing');
+      idxSet.forEach(di => {
+        const arr = groupMap.get(di);
+        if (arr) {
+          for (const e of arr) e.classList.add('playing');
+          hiPlayingEls.push(...arr);
+        }
       });
     };
-    apply('.ss-treble', hiTreble);
-    apply('.ss-bass', hiBass);
+    apply(sysGroups.treble, hiTreble);
+    apply(sysGroups.bass, hiBass);
   };
 
   /** 行滚动锁定(提词器式):当前行【五线谱顶线】对齐到清晰带顶部(距 scrollEl 视口顶 CURRENT_TOP_PAD)。
@@ -1152,28 +1229,15 @@ export function buildScoreSheet(
    *  横向平滑:用 rAF 在"当前位置→目标位置"间插值(目标>当前才插值,往前平滑滑动);
    *  目标≤当前(换行跳到新行首)瞬移不插值,避免回退假象。纵向用 CSS transition。
    *  全部用纯几何 + svgRect 缩放换算。 */
-  /** 设播放头 left。合并 onset 模型下 left 只在 onset 切换时变(离散跳跃),需 CSS transition
-   *  平滑过渡。同行内 onset 切换总是往前的(noteX 递增),transition 不回退;
-   *  换行(sysIdx 变)跳到新行首,top/height/left 全变,此时禁用所有 transition 瞬移,
-   *  避免横向回退假象 + 纵向平移滑动(用户反馈"换行纵向平移动画奇怪")。
-   *  transition 时长 ~150ms:覆盖典型 onset 间隔(16分@120bpm=125ms),又不拖沓。 */
-  const setPlayheadLeft = (target: number, sysIdx: number) => {
-    const sameLine = sysIdx === lastPhSys;
-    playheadEl.style.transition = sameLine ? 'left 0.15s linear' : 'none';
-    playheadEl.style.left = target.toFixed(1) + 'px';
-    lastPhSys = sysIdx;
-  };
   const updatePlayhead = (sysIdx: number, beatInLine: number) => {
     if (!renderCache) return;
     const sys = renderCache.systems[sysIdx];
     if (!sys) { playheadEl.style.display = 'none'; return; }
-    const svgEl = sheetEl.querySelector('svg');
-    if (!svgEl) return;
-    const svgRect = svgEl.getBoundingClientRect();
-    const sheetRect = sheetEl.getBoundingClientRect();
-    const scale = renderCache.width > 0 ? svgRect.width / renderCache.width : 1;
-    const svgLeftInSheet = svgRect.left - sheetRect.left;
-    const svgTopInSheet = svgRect.top - sheetRect.top;
+    const geo = getGeo();
+    if (!geo) return;
+    const scale = geo.scale;
+    const svgLeftInSheet = geo.svgLeftInSheet;
+    const svgTopInSheet = geo.svgTopInSheet;
     const tLay = sys.trebleLayout;
     const bLay = sys.bassLayout;
     // 合并 onset:遍历两组所有音符的 startBeat,找"最近一个 ≤ beatInLine"的 onset。
@@ -1202,11 +1266,13 @@ export function buildScoreSheet(
     const topPx = svgTopInSheet + sys.staffTopY * scale - PLAYHEAD_END_PAD;
     const heightPx = (sys.staffBotY - sys.staffTopY) * scale + PLAYHEAD_END_PAD * 2;
     playheadEl.style.display = '';
-    playheadEl.style.width = wPx.toFixed(1) + 'px';
-    playheadEl.style.top = topPx.toFixed(1) + 'px';
-    playheadEl.style.height = heightPx.toFixed(1) + 'px';
-    // 横向:同行 onset 间用 CSS transition 平滑,换行瞬移。
-    setPlayheadLeft(leftPx, sysIdx);
+    // 性能:width/height 同行内不变(只取决于 scale),缓存避免每帧写触发 layout。
+    // 位置用 transform translate(不触发 layout,GPU 合成单元素很便宜)。
+    if (playheadW !== wPx) { playheadEl.style.width = wPx.toFixed(1) + 'px'; playheadW = wPx; }
+    if (playheadH !== heightPx) { playheadEl.style.height = heightPx.toFixed(1) + 'px'; playheadH = heightPx; }
+    // transform 同时承载 left/top(translate)。同行 onset 间无 transition(transform 不易做 keyframes 平滑,
+    // 但 onset 间距小,瞬移视觉可接受;若需平滑后续再加)。换行瞬移天然无跳变问题。
+    playheadEl.style.transform = 'translate(' + leftPx.toFixed(1) + 'px,' + topPx.toFixed(1) + 'px)';
   };
 
   /** 通知 onLineLayout:当前行底部 y(相对 el,固定坐标系——不随滚动变化)。
@@ -1312,13 +1378,15 @@ export function buildScoreSheet(
       if (!renderCache) return null;
       if (lastSysIdx < 0 || lastSysIdx >= renderCache.systems.length) return null;
       const sys = renderCache.systems[lastSysIdx];
-      const svgEl = sheetEl.querySelector('svg');
-      if (!svgEl) return null;
-      const svgRect = svgEl.getBoundingClientRect();
-      const scale = renderCache.width > 0 ? svgRect.width / renderCache.width : 1;
+      const geo = getGeo();
+      if (!geo) return null;
       // 当前行底部 SVG 内 y = sys.yTop + sys.height → 屏幕 y。
-      return svgRect.top + (sys.yTop + sys.height) * scale;
+      // svgTop 来自缓存,但滚动时调用方(updateBounds→scroll 监听)会先 invalidateGeo(),
+      // 保证滚动期间 svgTop 实时更新;无滚动时复用缓存避免每帧 gBCR。
+      return geo.svgTop + (sys.yTop + sys.height) * geo.scale;
     },
+    /** 失效几何缓存(滚动/resize/重渲染后调用,让下次 getGeo 重算)。 */
+    invalidateGeometry() { invalidateGeo(); },
     setAbRange(sel) {
       abSelection = sel;
       applyAbVisual();

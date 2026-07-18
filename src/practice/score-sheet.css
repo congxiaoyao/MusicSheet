@@ -109,6 +109,7 @@
 /* ── 播放头(竖条盖当前音符,参考编辑器 pb-playhead)───────── */
 .ss-playhead {
   position: absolute;
+  top: 0; left: 0;          /* transform translate 的基准(原 top/left 由 JS 设,现改 transform) */
   background: rgba(79, 120, 201, .13);
   border: 1.5px solid var(--practice-brand, #4f78c9);
   border-radius: 7px;
@@ -117,8 +118,9 @@
   pointer-events: none;
   z-index: 3;
   box-sizing: border-box;
-  /* transition 由 JS 动态设(setPlayheadLeft):同行 onset 间 left 0.15s 平滑;
-   * 换行时 transition:none 全瞬移(避免横向回退 + 纵向平移滑动)。 */
+  /* 位置由 JS 设 transform: translate(x,y)(GPU 合成,不触发 layout)。
+   * will-change 让浏览器预创建单个合成层(playhead 是唯一动画元素,1 层开销极小)。 */
+  will-change: transform;
 }
 
 /* ── AB 循环边界标记(A/B 圆点)──────────────────────────────

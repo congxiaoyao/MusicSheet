@@ -81,6 +81,8 @@ const BLOCK_H_MIN = 20;
 /** 可见窗上界:未来多少拍内可见。原型 5,缩到 3.5(方块长,预告窗缩短避免顶出)。 */
 const VIS_DIST_MAX = 3.5;
 
+
+
 // ── parseFallNotes:从乐谱解析方块音符(文档 §4.2) ────────
 
 /** 把完整 Score 解析成 FallNote[]:treble→R、bass→L,用 rangeToPiece 算绝对 beat。
@@ -131,33 +133,65 @@ export function buildWaterfall(initial: WaterfallInitial, cb: WaterfallCallbacks
   const hitEl = document.createElement('div');
   hitEl.className = 'wf-hit';
   el.appendChild(hitEl);
-  // 内层容器:装方块,宽度 = 键盘总宽(白键数×whiteW),被 el 居中。
+  // 内层容器:装 canvas,宽度 = 键盘总宽(白键数×whiteW),被 el 居中。
   // 与键盘的 kb-keys-inner 同款机制 —— 两 inner 同宽同居中,左缘天然对齐,无需传 offset。
-  // 方块 left = midiToX 相对 inner 左缘。
   const innerEl = document.createElement('div');
   innerEl.className = 'wf-fall-inner';
   el.appendChild(innerEl);
+  // Canvas:所有方块绘制在一个 canvas 上(1 个合成层,避免 N 个 div 触发 layout/GPU 合成)。
+  // 真机数据:DOM div 方块(即使 top/left)每帧触发全页 layout + 各自合成,是练琴页卡顿主因之一。
+  const canvas = document.createElement('canvas');
+  canvas.style.width = '100%';
+  canvas.style.height = '100%';
+  canvas.style.display = 'block';
+  innerEl.appendChild(canvas);
+  const ctx = canvas.getContext('2d')!;
 
-  // 方块 DOM:每音一个 div,预创建(放进 inner)。
-  let blockEls: HTMLDivElement[] = [];
+  // 预算每个音符的标签 + 颜色(不每帧重算)。
+  interface BlockInfo { x: number; w: number; label: string; hand: 'R' | 'L'; }
+  let blocks: BlockInfo[] = [];
+  // canvas 像素尺寸(物理像素,scale = DPR)。布局后/resize 时同步。
+  // 性能:不每帧读 getBoundingClientRect(触发 layout),用 dirty 标志 —— 仅在
+  // setBounds(键盘高度变)/setKeyLayout(宽度变)/resize 时标 dirty,onTick 才重读。
+  let canvasW = 0, canvasH = 0, dpr = 1;
+  let canvasSizeDirty = true;
+  function syncCanvasSize(): void {
+    if (!canvasSizeDirty) return;
+    canvasSizeDirty = false;
+    const r = innerEl.getBoundingClientRect();
+    dpr = window.devicePixelRatio || 1;
+    const cssW = Math.max(1, Math.round(r.width));
+    const cssH = Math.max(1, Math.round(r.height));
+    canvasW = Math.round(cssW * dpr);
+    canvasH = Math.round(cssH * dpr);
+    if (canvas.width !== canvasW || canvas.height !== canvasH) {
+      canvas.width = canvasW;
+      canvas.height = canvasH;
+    }
+  }
+
+  // 颜色(对应 CSS 的渐变主色,简化为纯色以保证性能;active 时加白边)
+  const COLOR_R = '#4f78c9', COLOR_L = '#d37a58';
+
+  // 方块数据:每音一个,预创建。
   function buildBlocks(): void {
-    // 清旧。
-    for (const b of blockEls) b.remove();
-    blockEls = [];
+    blocks = [];
     for (const n of notes) {
-      const b = document.createElement('div');
-      b.className = 'wf-note ' + n.hand;
-      // 标签用映射后的 midi(cfixed 移调时显示 C 调音名)。
       const mapped = highlightMidi({ midi: n.midi, duration: 'quarter', dotted: false, accidental: null } as Note, key, fingering);
-      b.textContent = midiName(mapped ?? n.midi);
-      b.style.opacity = '0';
-      innerEl.appendChild(b);
-      blockEls.push(b);
+      const dispMidi = mapped ?? n.midi;
+      blocks.push({
+        x: midiToX(dispMidi, range, whiteW),
+        w: noteWidth(dispMidi, range, whiteW),
+        label: midiName(mapped ?? n.midi),
+        hand: n.hand,
+      });
     }
   }
   buildBlocks();
   // 初始化 inner 宽度 = 键盘总宽。
   innerEl.style.width = (whiteKeys(range).length * whiteW) + 'px';
+  // 窗口 resize(如电视分辨率变化)时标 dirty,让下次 onTick 重读 canvas 尺寸。
+  window.addEventListener('resize', () => { canvasSizeDirty = true; });
 
   /** midi → 音名(C4、G♯4 等)。 */
   function midiName(midi: number): string {
@@ -173,58 +207,93 @@ export function buildWaterfall(initial: WaterfallInitial, cb: WaterfallCallbacks
   return {
     el,
     onTick(beat: number) {
-      const hitY = hitLineY();   // 判定线 y = bottomY(键盘上沿),方块底边贴此线 = 该按时刻
-      for (let i = 0; i < notes.length; i++) {
+      const hitY = hitLineY();
+      syncCanvasSize();
+      const cx = ctx;
+      cx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      const cssW = canvasW / dpr, cssH = canvasH / dpr;
+      cx.clearRect(0, 0, cssW, cssH);
+
+      // 第一遍:算出可见方块(只遍历一次,记录绘制参数),按 active 分开(白边先画在底)。
+      // 用预分配数组避免每帧 GC(容量够大,用 count 控制实际长度)。
+      const N = notes.length;
+      // 收集:普通方块(分 R/L 两组)+ active 方块(需白底)
+      // 直接画,不缓存——但按"先 active 白底 → R 方块 → L 方块 → 标签"顺序减少状态切换。
+      // 先画 active 白底
+      cx.fillStyle = '#fff';
+      for (let i = 0; i < N; i++) {
         const n = notes[i];
-        const bEl = blockEls[i];
-        if (!bEl) continue;
-        // 左右手过滤。
-        if (handFilter !== 'both' && n.hand !== handFilter) {
-          bEl.style.opacity = '0';
-          continue;
-        }
-        const dist = n.beat - beat;   // 未来为正,过去为负
-        const bh = Math.max(BLOCK_H_MIN, n.duration * PX_PER_BEAT * BLOCK_H_FACTOR);
-        // 方块顶 y:底边贴判定线(hitY),未来音在判定线上方(dist>0 → yTop 更小)。
-        const yTop = hitY - bh - dist * PX_PER_BEAT;
-        // 可见窗:未来 VIS_DIST_MAX 拍内可见;过去音保持可见直到它真正结束(dist > -duration)。
-        // 旧实现写死 dist > -0.5,导致长音(2/4 拍)还没走完时值就消失 —— 音还在响方块却没了。
-        const visBelow = dist > -Math.max(n.duration, 0.5);   // 至少露 0.5 拍(短音也要看见)
-        const vis = dist < VIS_DIST_MAX && visBelow;
-        if (!vis) {
-          bEl.style.opacity = '0';
-          bEl.classList.remove('active');
-          continue;
-        }
-        // 透明度:未来接近判定线渐显(dist 5→0,opacity 0.35→1);
-        // 过去音从命中(dist=0,opacity 1)淡出到音结束(dist=-duration,opacity 0)。
-        let opacity: number;
-        if (dist >= 0) {
-          opacity = Math.min(1, 1 - dist * 0.13);
-        } else {
-          // 过去段:按"音已走过的比例"淡出。
-          const pastRatio = n.duration > 0 ? -dist / n.duration : 1;
-          opacity = Math.max(0, 1 - pastRatio);
-        }
-        bEl.style.opacity = String(opacity);
-        // 指法映射:cfixed(移调)时把真实 midi 经 highlightMidi 映射到 C 调白键位置。
-        // 与键盘高亮同套映射(各自 import highlightMidi,不互相通信)。
-        const mapped = highlightMidi({ midi: n.midi, duration: 'quarter', dotted: false, accidental: null } as Note, key, fingering);
-        const dispMidi = mapped ?? n.midi;   // 映射失败(休止等)用原值(不会发生,休止已跳过)
-        // 宽度 = 对应键宽(px),left = 键中心(px,居中)。与键盘同套纯函数坐标系。
-        bEl.style.width = noteWidth(dispMidi, range, whiteW) + 'px';
-        // left = 键中心,相对 inner 左缘(inner 与键盘 inner 同款居中,左缘天然对齐)。
-        bEl.style.left = midiToX(dispMidi, range, whiteW) + 'px';
-        bEl.style.height = bh + 'px';
-        bEl.style.top = yTop + 'px';
-        // 命中(active):与键盘高亮完全同源 —— 音正在响期间(dist<=0 且未超过时值)标 active,
-        // 即 [n.beat, n.beat+duration) 区间,与键盘点亮的 [startBeat, startBeat+dur) 逐帧一致。
-        // 旧实现用 |dist|<HIT_WINDOW(对称 ±0.15 拍),在到达前 0.15 拍(约 90ms/5-6 帧)就先亮,
-        // 而键盘要等 dist<=0 才亮 → 视觉上"方块亮了键还没亮/方块还没落到键顶就亮"。
-        // 改为同源区间:① 到达瞬间与键盘同帧触发;② 暂停态 seek 到音中段也正确标 active(键盘亮=方块亮)。
+        if (handFilter !== 'both' && n.hand !== handFilter) continue;
+        const dist = n.beat - beat;
+        if (dist > -n.duration || dist <= -Math.max(n.duration, 0.5) || dist >= VIS_DIST_MAX) continue;
         const active = dist <= 0 && dist > -n.duration;
-        bEl.classList.toggle('active', active);
+        if (!active) continue;
+        const b = blocks[i];
+        const bh = Math.max(BLOCK_H_MIN, n.duration * PX_PER_BEAT * BLOCK_H_FACTOR);
+        const yTop = hitY - bh - dist * PX_PER_BEAT;
+        let op = Math.max(0, 1 - (n.duration > 0 ? -dist / n.duration : 1));
+        if (op <= 0) continue;
+        cx.globalAlpha = op;
+        cx.fillRect(b.x - b.w / 2 - 2, yTop - 2, b.w + 4, bh + 4);
       }
+      // 画 R 方块
+      cx.fillStyle = COLOR_R;
+      for (let i = 0; i < N; i++) {
+        const n = notes[i];
+        if (n.hand !== 'R') continue;
+        if (handFilter !== 'both' && n.hand !== handFilter) continue;
+        const dist = n.beat - beat;
+        const visBelow = dist > -Math.max(n.duration, 0.5);
+        if (!visBelow || dist >= VIS_DIST_MAX) continue;
+        const bh = Math.max(BLOCK_H_MIN, n.duration * PX_PER_BEAT * BLOCK_H_FACTOR);
+        const yTop = hitY - bh - dist * PX_PER_BEAT;
+        let op: number;
+        if (dist >= 0) op = Math.min(1, 1 - dist * 0.13);
+        else op = Math.max(0, 1 - (n.duration > 0 ? -dist / n.duration : 1));
+        if (op <= 0) continue;
+        cx.globalAlpha = op;
+        cx.fillRect(blocks[i].x - blocks[i].w / 2, yTop, blocks[i].w, bh);
+      }
+      // 画 L 方块
+      cx.fillStyle = COLOR_L;
+      for (let i = 0; i < N; i++) {
+        const n = notes[i];
+        if (n.hand !== 'L') continue;
+        if (handFilter !== 'both' && n.hand !== handFilter) continue;
+        const dist = n.beat - beat;
+        const visBelow = dist > -Math.max(n.duration, 0.5);
+        if (!visBelow || dist >= VIS_DIST_MAX) continue;
+        const bh = Math.max(BLOCK_H_MIN, n.duration * PX_PER_BEAT * BLOCK_H_FACTOR);
+        const yTop = hitY - bh - dist * PX_PER_BEAT;
+        let op: number;
+        if (dist >= 0) op = Math.min(1, 1 - dist * 0.13);
+        else op = Math.max(0, 1 - (n.duration > 0 ? -dist / n.duration : 1));
+        if (op <= 0) continue;
+        cx.globalAlpha = op;
+        cx.fillRect(blocks[i].x - blocks[i].w / 2, yTop, blocks[i].w, bh);
+      }
+      // 画标签(统一 fillStyle=#fff,只在方块够高时画,避免小方块叠字)
+      cx.fillStyle = '#fff';
+      cx.textAlign = 'center';
+      cx.textBaseline = 'alphabetic';
+      cx.font = '700 9px system-ui, sans-serif';
+      for (let i = 0; i < N; i++) {
+        const n = notes[i];
+        if (handFilter !== 'both' && n.hand !== handFilter) continue;
+        const dist = n.beat - beat;
+        const visBelow = dist > -Math.max(n.duration, 0.5);
+        if (!visBelow || dist >= VIS_DIST_MAX) continue;
+        const bh = Math.max(BLOCK_H_MIN, n.duration * PX_PER_BEAT * BLOCK_H_FACTOR);
+        if (bh < 22) continue;   // 太矮不画字
+        const yTop = hitY - bh - dist * PX_PER_BEAT;
+        let op: number;
+        if (dist >= 0) op = Math.min(1, 1 - dist * 0.13);
+        else op = Math.max(0, 1 - (n.duration > 0 ? -dist / n.duration : 1));
+        if (op <= 0) continue;
+        cx.globalAlpha = op;
+        cx.fillText(blocks[i].label, blocks[i].x, yTop + bh - 4);
+      }
+      cx.globalAlpha = 1;
     },
     setNotes(newNotes: FallNote[]) {
       notes = newNotes;
@@ -235,7 +304,9 @@ export function buildWaterfall(initial: WaterfallInitial, cb: WaterfallCallbacks
       whiteW = info.whiteW;
       // inner 宽度 = 键盘总宽(白键数×whiteW),与键盘 inner 同宽,两者各自被父容器居中 → 左缘对齐。
       innerEl.style.width = (whiteKeys(range).length * whiteW) + 'px';
-      // 横轴在下次 onTick 重算,无需重建 DOM。
+      // 横轴缓存(blocks 里的 x/w)依赖 whiteW/range,需重建。
+      buildBlocks();
+      canvasSizeDirty = true;   // 宽度变 → canvas 尺寸变
     },
     setFingering(f: Fingering) {
       fingering = f;
@@ -247,6 +318,7 @@ export function buildWaterfall(initial: WaterfallInitial, cb: WaterfallCallbacks
     },
     setBounds(info: { topY: number; bottomY: number }) {
       topY = info.topY;
+      canvasSizeDirty = true;   // 高度变(键盘高度调)→ canvas 尺寸变
       bottomY = info.bottomY;
       // 判定线贴 bottomY(键盘上沿)。bottomY 相对容器顶,判定线用绝对定位。
       hitEl.style.bottom = 'auto';
